@@ -8,55 +8,36 @@ from typing import Tuple
 import numpy as np
 
 from discodj import DiscoDJ
+from read_tipsy_file import read_tipsy
 
 
 @dataclass
-class InitialConditions:
-    pos: np.ndarray
-    vel: np.ndarray
-    mass: np.ndarray | None
-    a_ini: float
-    boxsize: float
+class GridSettings:
     res: int
-    source: Path
-
-def latest_state(array: np.ndarray) -> np.ndarray:
-    """Return the last time slice if the array has a leading time axis."""
-    arr = np.asarray(array)
-    if arr.ndim == 3 and arr.shape[-1] == 3:
-        return arr[-1]
-    return arr
 
 
-def infer_resolution(n_particles: int) -> int:
-    """Infer the cubic resolution from the flattened particle count."""
-    res = round(n_particles ** (1.0 / 3.0))
-    if res ** 3 != n_particles:
-        raise ValueError(
-            f"Particle count {n_particles:,} is not a perfect cube."
-            " Provide data that can be reshaped to (res, res, res)."
-        )
-    if res % 4 != 0:
-        raise ValueError(f"DiscoDJ currently requires res to be a multiple of 4 (got {res}).")
-    return res
+Lbox: float = 900
+a_ini: float = 0
+gs = GridSettings(res=512)
 
-
-def load_npz_ic(npz_path: Path, dtype: np.dtype = np.float32) -> InitialConditions:
+def load_ic(filename_init: Path, dtype: np.dtype = np.float32):
     """Load the converted NPZ bundle and return flattened arrays."""
-    npz_path = npz_path.expanduser().resolve()
-    if not npz_path.exists():
-        raise FileNotFoundError(f"IC archive not found: {npz_path}")
 
-    data = np.load(npz_path, allow_pickle=False)
-    pos = np.asarray(data["pos"], dtype=dtype)
-    vel = np.asarray(data["vel"], dtype=dtype)
-    mass = np.asarray(data["mass"], dtype=dtype) if "mass" in data.files else None
-    a_ini = float(data.get("a_ini", 0.01))
-    boxsize = float(data.get("boxsize", 900.0))
-    n_particles = pos.shape[0]
-    res = infer_resolution(n_particles)
-    return InitialConditions(pos=pos, vel=vel, mass=mass, a_ini=a_ini, boxsize=boxsize, res=res, source=npz_path)
+    print(f'Reading PKDGRAV ICs from {filename_init}')
+    p_init, p_header_init = read_tipsy(filename_init, Lbox)
 
+        # Combine position and velocity arrays
+    external_ics = np.c_[
+        p_init['x'],  p_init['y'],  p_init['z'],
+        p_init['vx'], p_init['vy'], p_init['vz']
+    ]
+
+    # Convert PKD velocities to DISCO-DJ units
+    v_factor = a_ini**2 / np.sqrt(8*np.pi/3) * Lbox
+    external_ics[:, 3:] *= v_factor
+    
+    pos_sorted, vel_sorted = sort_for_lagrangian_x(external_ics[:, :3], external_ics[:, 3:], nx=gs.res)
+    return pos_sorted, vel_sorted
 
 def sort_for_lagrangian_x(arr_pos, arr_vel, nx=512):
     """
@@ -82,29 +63,44 @@ def sort_for_lagrangian_x(arr_pos, arr_vel, nx=512):
     return arr_pos[idx], arr_vel[idx]
 
 
+def latest_state(arr: np.ndarray) -> np.ndarray:
+    arr = np.asarray(arr)
+    if arr.ndim in (2, 4):
+        return arr
+    if arr.ndim in (3, 5):
+        return arr[-1]
+    raise ValueError(f"Unsupported state shape {arr.shape}")
+
+
 def run_simulation(
     ic_path: Path,
+    boxsize: float,
+    a_ini_value: float,
     a_end: float,
     n_steps: int,
     res_pm: int,
+    res: int | None,
     stepper: str,
     method: str,
     collect_all: bool,
     dtype: str,
 ) -> Tuple[DiscoDJ, np.ndarray, np.ndarray, np.ndarray]:
+    global Lbox, a_ini, gs
+
+    Lbox = float(boxsize)
+    a_ini = float(a_ini_value)
+    gs = GridSettings(res=int(res) if res is not None else int(res_pm))
+
     dtype_np = np.float32 if dtype == "float32" else np.float64
-    ic = load_npz_ic(ic_path, dtype=dtype_np)
+    pos, vel = load_ic(ic_path, dtype=dtype_np)
 
-    print(
-        f"Loaded ICs from {ic.source} -> res={ic.res}^3, a_ini={ic.a_ini:.5f}, boxsize={ic.boxsize} Mpc/h"
-    )
-
-    dj = DiscoDJ(dim=3, res=ic.res, boxsize=ic.boxsize, precision="single" if dtype == "float32" else "double")
+    sim_res = int(res) if res is not None else int(round(pos.shape[0] ** (1.0 / 3.0)))
+    dj = DiscoDJ(dim=3, res=sim_res, boxsize=boxsize, precision="single" if dtype == "float32" else "double")
     dj = dj.with_timetables()
-    dj = dj.with_external_ics(pos=ic.pos, vel=ic.vel)
+    dj = dj.with_external_ics(pos=pos, vel=vel)
 
     X, P, a_hist = dj.run_nbody(
-        a_ini=ic.a_ini,
+        a_ini=a_ini_value,
         a_end=a_end,
         n_steps=n_steps,
         res_pm=res_pm,
@@ -203,11 +199,19 @@ def parse_args() -> argparse.Namespace:
         "--ic-file",
         type=Path,
         required=True,
-        help="Path to the converted CosmoML.00000.npz produced by tools/convert_pkdgrav_ic.py",
+        help="Path to the converted CosmoML.00000.npz",
     )
     parser.add_argument("--a-end", type=float, default=1.0, help="Final scale factor (default: 1.0)")
+    parser.add_argument("--a-ini", type=float, required=True, help="Initial scale factor for the IC snapshot.")
+    parser.add_argument("--boxsize", type=float, required=True, help="Simulation box size in Mpc/h.")
     parser.add_argument("--n-steps", type=int, default=10, help="Number of integration steps (default: 10)")
     parser.add_argument("--res-pm", type=int, default=512, help="PM grid resolution (default: 512)")
+    parser.add_argument(
+        "--res",
+        type=int,
+        default=None,
+        help="Particle mesh resolution per axis for DiscoDJ (default: inferred from IC count).",
+    )
     parser.add_argument(
         "--stepper",
         choices=("bullfrog", "fastpm", "symplectic"),
@@ -261,6 +265,12 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Optional path to store the final particle positions/velocities as NPZ.",
     )
+    parser.add_argument(
+        "--output-dir",
+        type=Path,
+        default=None,
+        help="Directory to save outputs (plots, final snapshots). Default is a 'outputs' folder next to this script.",
+    )
     return parser.parse_args()
 
 
@@ -268,9 +278,12 @@ def main() -> None:
     args = parse_args()
     dj, X, P, a_hist = run_simulation(
         ic_path=args.ic_file,
+        boxsize=args.boxsize,
+        a_ini_value=args.a_ini,
         a_end=args.a_end,
         n_steps=args.n_steps,
         res_pm=args.res_pm,
+        res=args.res,
         stepper=args.stepper,
         method=args.method,
         collect_all=args.collect_all,
@@ -294,7 +307,8 @@ def main() -> None:
             slice_axis=args.slice_axis,
             slice_center=args.slice_center,
             slice_thickness=args.slice_thickness,
-            grid=args.slice_grid
+            grid=args.slice_grid,
+            output_dir=args.output_dir
         )
 
 
