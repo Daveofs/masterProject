@@ -6,8 +6,8 @@
 #SBATCH --ntasks=2
 #SBATCH --cpus-per-task=10
 #SBATCH --mem-per-cpu=20G
-#SBATCH --output=/cluster/scratch/damrein/outputs/disco_%j.out
-#SBATCH --error=/cluster/scratch/damrein/outputs/disco_%j.err
+#SBATCH --output=/cluster/scratch/damrein/outputs/logs/disco_%j.out
+#SBATCH --error=/cluster/scratch/damrein/outputs/logs/disco_%j.err
 
 # GPU submission enabled in SBATCH header above.
 
@@ -18,6 +18,7 @@ SRATCH_DIR=/cluster/scratch/damrein
 CONDA_ROOT=/cluster/scratch/damrein/miniconda3
 CONDA_ENV=vir_env
 IC_ARCHIVE=/cluster/scratch/damrein/pkdgrav/pkdgrav3_dev-master/build/CosmoML.00000
+PLOT_DIR=${SRATCH_DIR}/outputs/plots/snapshots
 
 # Activate conda in non-interactive SLURM shells
 source "${CONDA_ROOT}/etc/profile.d/conda.sh"
@@ -51,7 +52,7 @@ DTYPE=float32
 cd "${PROJECT_DIR}"
 
 # Ensure outputs directories exist before SLURM redirects stdout/stderr
-mkdir -p "${SRATCH_DIR}/outputs" "${SRATCH_DIR}/outputs/plots"
+mkdir -p "${SRATCH_DIR}/outputs" "${SRATCH_DIR}/outputs/plots" "${PLOT_DIR}"
 
 # Path for the saved final snapshot (file, not directory)
 SAVE_FINAL_FILE=${SRATCH_DIR}/outputs/final_snapshot_${SLURM_JOB_ID:-manual}.npz
@@ -80,5 +81,6 @@ echo "[$(date --iso-8601=seconds)] Starting DiscoDJ on $(hostname)"
 	--method "${METHOD}" \
 	--dtype "${DTYPE}" \
 	--plot \
-	--save-final "${SAVE_FINAL_FILE}"
+	--save-final "${SAVE_FINAL_FILE}" \
+	--output-dir "${PLOT_DIR}"
 echo "[$(date --iso-8601=seconds)] Done."

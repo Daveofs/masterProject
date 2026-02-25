@@ -2,6 +2,130 @@ from pathlib import Path
 import numpy as np
 
 
+def plot_shells(
+    npz_path: str | Path,
+    z_bin: int = 5,
+    nside: int = 512,
+    output_dir: Path | None = None,
+    plot_logarithmic: bool = False
+) -> Path:
+    """Load a compressed shell file and plot one z-bin as a HEALPix map."""
+    try:
+        import healpy as hp
+        import matplotlib.pyplot as plt
+        from matplotlib.colors import SymLogNorm
+    except ImportError as exc:  # pragma: no cover - optional dependency
+        raise SystemExit(
+            "healpy (and matplotlib) is required for shell plotting. Install via 'conda install healpy matplotlib'."
+        ) from exc
+
+    npz_path = Path(npz_path)
+    data = np.load(npz_path, allow_pickle=False)
+
+    if "b" in data:
+        b = np.asarray(data["b"])
+    elif "shells" in data:
+        b = np.asarray(data["shells"])
+    else:
+        raise KeyError(f"Expected key 'b' (or 'shells') in {npz_path}, found keys: {list(data.keys())}")
+
+    if b.ndim != 2:
+        raise ValueError(f"Expected 'b' to be 2D [Npix, Nz], got shape {b.shape}")
+
+    if "pix" in data:
+        pix = np.asarray(data["pix"], dtype=np.int64)
+        if b.shape[0] == pix.shape[0]:
+            if z_bin < 0 or z_bin >= b.shape[1]:
+                raise IndexError(f"z_bin={z_bin} out of range for shape {b.shape}")
+            m = np.zeros(hp.nside2npix(nside), dtype=float)
+            m[pix] = b[:, z_bin]
+        elif b.shape[1] == pix.shape[0]:
+            if z_bin < 0 or z_bin >= b.shape[0]:
+                raise IndexError(f"z_bin={z_bin} out of range for shape {b.shape}")
+            m = np.zeros(hp.nside2npix(nside), dtype=float)
+            m[pix] = b[z_bin, :]
+        else:
+            raise ValueError(
+                f"Could not align 'pix' (len={pix.shape[0]}) with shell array shape {b.shape}."
+            )
+    else:
+        npix0_valid = hp.isnpixok(int(b.shape[0]))
+        npix1_valid = hp.isnpixok(int(b.shape[1]))
+        if not (npix0_valid or npix1_valid):
+            raise ValueError(
+                f"No 'pix' key and neither dimension of shell array {b.shape} is a valid HEALPix npix."
+            )
+
+        if npix1_valid:
+            inferred_nside = hp.npix2nside(int(b.shape[1]))
+            if z_bin < 0 or z_bin >= b.shape[0]:
+                raise IndexError(f"z_bin={z_bin} out of range for shape {b.shape}")
+            nside = inferred_nside
+            m = np.asarray(b[z_bin, :], dtype=float)
+        else:
+            inferred_nside = hp.npix2nside(int(b.shape[0]))
+            if z_bin < 0 or z_bin >= b.shape[1]:
+                raise IndexError(f"z_bin={z_bin} out of range for shape {b.shape}")
+            nside = inferred_nside
+            m = np.asarray(b[:, z_bin], dtype=float)
+
+
+    if output_dir is None:
+        output_dir = Path(__file__).with_name("outputs").joinpath("plots")
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    if plot_logarithmic:
+        out_path = output_dir / f"shell_mollview_symlog_zbin{z_bin}_nside{nside}.png"
+        projected = hp.mollview(
+            m,
+            nest=True,
+            cbar=False,
+            notext=True,
+            title="",
+            return_projected_map=True,
+        )
+        plt.close()
+
+        valid = np.isfinite(projected) & (projected > hp.UNSEEN / 10.0)
+        vals = projected[valid]
+        if vals.size == 0:
+            raise ValueError("Projected shell map has no valid pixels for SymLogNorm plot.")
+
+        linthresh = max(float(np.nanpercentile(np.abs(vals), 5)), 1e-8)
+        display = np.full_like(projected, np.nan, dtype=float)
+        display[valid] = projected[valid]
+
+        cmap = plt.get_cmap("magma").copy()
+        cmap.set_bad(color="white", alpha=1.0)
+
+        fig, ax = plt.subplots(figsize=(10, 5))
+        im = ax.imshow(
+            display,
+            origin="lower",
+            cmap=cmap,
+            norm=SymLogNorm(
+                linthresh=linthresh,
+                linscale=1.0,
+                vmin=np.nanmin(vals),
+                vmax=np.nanmax(vals),
+            ),
+        )
+        ax.set_axis_off()
+        ax.set_title(f"z-bin {z_bin}, nside {nside}, (SymLogNorm)")
+        fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+        fig.tight_layout()
+        fig.savefig(out_path, dpi=150, bbox_inches="tight")
+        plt.close(fig)
+    else:
+        out_path = output_dir / f"shell_mollview_zbin{z_bin}_nside{nside}.png"
+        hp.mollview(m, nest=True, title=f"z-bin {z_bin}, nside {nside}")
+        plt.savefig(out_path, dpi=150, bbox_inches="tight")
+        plt.close()
+
+    print(f"Saved shell plot to {out_path}")
+    return out_path
+
+
 def plot_density_slice(
     positions: np.ndarray,
     boxsize: float,
@@ -20,86 +144,30 @@ def plot_density_slice(
             "Matplotlib is required for plotting. Install it via 'conda install matplotlib' or rerun without --plot."
         ) from exc
 
-    # Accept several common shapes from DiscoDJ:
-    # - (N, 3)
-    # - (T, N, 3)
-    # - (nx, ny, nz, 3)
-    # - (T, nx, ny, nz, 3)
-    arr = np.asarray(positions)
-    selected_snapshot = None
-    if arr.ndim == 2 and arr.shape[1] == 3:
-        pos = arr
-    elif arr.ndim == 3 and arr.shape[-1] == 3:
-        # (T, N, 3) -> prefer latest snapshot with finite entries
-        finite_snapshots = np.isfinite(arr).all(axis=(1, 2))
-        if finite_snapshots.any():
-            selected_snapshot = int(np.flatnonzero(finite_snapshots)[-1])
-            pos = arr[selected_snapshot]
-            if selected_snapshot != arr.shape[0] - 1:
-                print(
-                    f"Warning: final snapshot is non-finite; using snapshot index {selected_snapshot} instead."
-                )
-        else:
-            pos = arr[-1]
-    elif arr.ndim == 4 and arr.shape[-1] == 3:
-        # (nx, ny, nz, 3) -> flatten spatial grid
-        pos = arr.reshape(-1, 3)
-    elif arr.ndim == 5 and arr.shape[-1] == 3:
-        # (T, nx, ny, nz, 3) -> prefer latest snapshot with finite entries and flatten
-        finite_snapshots = np.isfinite(arr).all(axis=(1, 2, 3, 4))
-        if finite_snapshots.any():
-            selected_snapshot = int(np.flatnonzero(finite_snapshots)[-1])
-            pos = arr[selected_snapshot].reshape(-1, 3)
-            if selected_snapshot != arr.shape[0] - 1:
-                print(
-                    f"Warning: final snapshot is non-finite; using snapshot index {selected_snapshot} instead."
-                )
-        else:
-            pos = arr[-1].reshape(-1, 3)
-    else:
-        raise ValueError(f"Expected positions with final dimension 3, got {arr.shape}")
-
-    finite_mask = np.isfinite(pos).all(axis=1)
-    pos = pos[finite_mask]
-
+    pos = np.asarray(positions)
+    pos = pos[-1] # use final snapshot
+  
     center = slice_center if slice_center is not None else boxsize / 2.0
     half = slice_thickness / 2.0
-    if pos.size == 0:
-        print(
-            f"Warning: all particle positions are non-finite (shape {arr.shape}). Saving an empty density map."
-        )
-        density = np.zeros((grid, grid), dtype=np.float64)
-        used_empty_fallback = True
-    else:
-        mask = (pos[:, slice_axis] >= center - half) & (pos[:, slice_axis] <= center + half)
-        slab = pos[mask]
-        if slab.size == 0:
-            print(
-                "Warning: slice selection yielded zero particles; using all finite particles for 2D projection."
-            )
-            slab = pos
-        axes = [0, 1, 2]
-        axes.remove(slice_axis)
-        hist, _, _ = np.histogram2d(
-            slab[:, axes[0]],
-            slab[:, axes[1]],
-            bins=grid,
-            range=[[0.0, boxsize], [0.0, boxsize]],
-        )
-        mean_hist = np.mean(hist)
-        if mean_hist > 0.0:
-            density = hist / mean_hist - 1.0
-        else:
-            density = np.zeros_like(hist)
-        used_empty_fallback = False
+    mask = (pos[:, slice_axis] >= center - half) & (pos[:, slice_axis] <= center + half)
+    slab = pos[mask]
+    if slab.size == 0:
+        raise ValueError("Slice selection yielded zero particles. Adjust slice thickness/center.")
+
+    axes = [0, 1, 2]
+    axes.remove(slice_axis)
+    hist, xedges, yedges = np.histogram2d(
+        slab[:, axes[0]],
+        slab[:, axes[1]],
+        bins=grid,
+        range=[[0.0, boxsize], [0.0, boxsize]],
+    )
+    density = hist / np.mean(hist) - 1.0
 
     fig, ax = plt.subplots(figsize=(6, 6))
     extent = (0, boxsize, 0, boxsize)
-    if used_empty_fallback or np.allclose(density, density.flat[0]):
-        im = ax.imshow(density.T, origin="lower", cmap="magma", extent=extent)
-    else:
-        norm = SymLogNorm(linthresh=1e-3, linscale=1.0, vmin=density.min(), vmax=density.max())
-        im = ax.imshow(density.T, origin="lower", cmap="magma", extent=extent, norm=norm)
+    norm = SymLogNorm(linthresh=1e-3, linscale=1.0, vmin=density.min(), vmax=density.max())
+    im = ax.imshow(density.T, origin="lower", cmap="magma", extent=extent, norm=norm)
     cbar = fig.colorbar(im, ax=ax, label="δ (symlog)")
     ax.set_xlabel("x [Mpc/h]")
     ax.set_ylabel("y [Mpc/h]")
