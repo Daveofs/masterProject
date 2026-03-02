@@ -47,8 +47,8 @@ if ! "${PYTHON_BIN}" -c "import numpy, matplotlib" >/dev/null 2>&1; then
   exit 3
 fi
 
-SNAPSHOT=${SCRATCH}/outputs/final_snapshot_58356355.npz
-OUTDIR=${SCRATCH}/outputs/plots
+SNAPSHOT=${SCRATCH}/outputs/snapshots/final_snapshot_58356355.npz
+OUTDIR=${SCRATCH}/outputs/plots/snapshots
 
 mkdir -p "${OUTDIR}"
 cd "${PROJECT_DIR}"
