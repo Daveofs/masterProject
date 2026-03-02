@@ -47,31 +47,36 @@ if ! "${PYTHON_BIN}" -c "import numpy, matplotlib, healpy" >/dev/null 2>&1; then
   exit 3
 fi
 
-SHELL_NPZ=${SCRATCH}/cosmogridv1/cosmo_000001/compressed_shells.npz
+SHELL=${SCRATCH}/outputs/ICs/000001_copy6/CosmoML-shell_z-high=0.172495_z-low=0.1637719.fits
 
 # Configuration for the visualization (set to your desired z-bin and nside)
 ZBIN=5
 NSIDE=2048
+NAME_SUFFIX="z-bin${ZBIN}_nside${NSIDE}_1"
 
 cd "${PROJECT_DIR}"
 
-if [[ ! -f "${SHELL_NPZ}" ]]; then
-  echo "Input file not found: ${SHELL_NPZ}" >&2
+if [[ ! -f "${SHELL}" ]]; then
+  echo "Input file not found: ${SHELL}" >&2
   exit 2
 fi
 
-echo "Loading shell file: ${SHELL_NPZ} (z-bin ${ZBIN})"
+echo "Loading shell file: ${SHELL} (z-bin ${ZBIN})"
+
+export NAME_SUFFIX
 
 "${PYTHON_BIN}" - <<PY
+import os
 from pathlib import Path
 from visualize import plot_shells
 
 plot_shells(
-    npz_path=Path(r"${SHELL_NPZ}"),
+    npz_path=Path(r"${SHELL}"),
     z_bin=${ZBIN},
     nside=${NSIDE},
     output_dir=Path(r"${OUTPUT_DIR}"),
-    plot_logarithmic=True
+    plot_logarithmic=False,
+    name=os.environ["NAME_SUFFIX"],
 )
 PY
 

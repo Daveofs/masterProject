@@ -7,9 +7,10 @@ def plot_shells(
     z_bin: int = 5,
     nside: int = 512,
     output_dir: Path | None = None,
-    plot_logarithmic: bool = False
+    plot_logarithmic: bool = False,
+    name: str | None = None,
 ) -> Path:
-    """Load a compressed shell file and plot one z-bin as a HEALPix map."""
+    """Load a shell file (.npz or .fits) and plot it as a HEALPix map."""
     try:
         import healpy as hp
         import matplotlib.pyplot as plt
@@ -20,65 +21,78 @@ def plot_shells(
         ) from exc
 
     npz_path = Path(npz_path)
-    data = np.load(npz_path, allow_pickle=False)
-
-    if "b" in data:
-        b = np.asarray(data["b"])
-    elif "shells" in data:
-        b = np.asarray(data["shells"])
+    if npz_path.suffix.lower() == ".fits":
+        m = np.asarray(hp.read_map(npz_path, nest=False, dtype=np.float32, verbose=False), dtype=float)
+        if not hp.isnpixok(int(m.size)):
+            raise ValueError(f"FITS map has invalid HEALPix size: {m.size}")
+        nside = hp.npix2nside(int(m.size))
     else:
-        raise KeyError(f"Expected key 'b' (or 'shells') in {npz_path}, found keys: {list(data.keys())}")
+        data = np.load(npz_path, allow_pickle=False)
 
-    if b.ndim != 2:
-        raise ValueError(f"Expected 'b' to be 2D [Npix, Nz], got shape {b.shape}")
-
-    if "pix" in data:
-        pix = np.asarray(data["pix"], dtype=np.int64)
-        if b.shape[0] == pix.shape[0]:
-            if z_bin < 0 or z_bin >= b.shape[1]:
-                raise IndexError(f"z_bin={z_bin} out of range for shape {b.shape}")
-            m = np.zeros(hp.nside2npix(nside), dtype=float)
-            m[pix] = b[:, z_bin]
-        elif b.shape[1] == pix.shape[0]:
-            if z_bin < 0 or z_bin >= b.shape[0]:
-                raise IndexError(f"z_bin={z_bin} out of range for shape {b.shape}")
-            m = np.zeros(hp.nside2npix(nside), dtype=float)
-            m[pix] = b[z_bin, :]
+        if "b" in data:
+            b = np.asarray(data["b"])
+        elif "shells" in data:
+            b = np.asarray(data["shells"])
         else:
-            raise ValueError(
-                f"Could not align 'pix' (len={pix.shape[0]}) with shell array shape {b.shape}."
-            )
-    else:
-        npix0_valid = hp.isnpixok(int(b.shape[0]))
-        npix1_valid = hp.isnpixok(int(b.shape[1]))
-        if not (npix0_valid or npix1_valid):
-            raise ValueError(
-                f"No 'pix' key and neither dimension of shell array {b.shape} is a valid HEALPix npix."
-            )
+            raise KeyError(f"Expected key 'b' (or 'shells') in {npz_path}, found keys: {list(data.keys())}")
 
-        if npix1_valid:
-            inferred_nside = hp.npix2nside(int(b.shape[1]))
-            if z_bin < 0 or z_bin >= b.shape[0]:
-                raise IndexError(f"z_bin={z_bin} out of range for shape {b.shape}")
-            nside = inferred_nside
-            m = np.asarray(b[z_bin, :], dtype=float)
+        if b.ndim != 2:
+            raise ValueError(f"Expected 'b' to be 2D [Npix, Nz], got shape {b.shape}")
+
+        if "pix" in data:
+            pix = np.asarray(data["pix"], dtype=np.int64)
+            if b.shape[0] == pix.shape[0]:
+                if z_bin < 0 or z_bin >= b.shape[1]:
+                    raise IndexError(f"z_bin={z_bin} out of range for shape {b.shape}")
+                m = np.zeros(hp.nside2npix(nside), dtype=float)
+                m[pix] = b[:, z_bin]
+            elif b.shape[1] == pix.shape[0]:
+                if z_bin < 0 or z_bin >= b.shape[0]:
+                    raise IndexError(f"z_bin={z_bin} out of range for shape {b.shape}")
+                m = np.zeros(hp.nside2npix(nside), dtype=float)
+                m[pix] = b[z_bin, :]
+            else:
+                raise ValueError(
+                    f"Could not align 'pix' (len={pix.shape[0]}) with shell array shape {b.shape}."
+                )
         else:
-            inferred_nside = hp.npix2nside(int(b.shape[0]))
-            if z_bin < 0 or z_bin >= b.shape[1]:
-                raise IndexError(f"z_bin={z_bin} out of range for shape {b.shape}")
-            nside = inferred_nside
-            m = np.asarray(b[:, z_bin], dtype=float)
+            npix0_valid = hp.isnpixok(int(b.shape[0]))
+            npix1_valid = hp.isnpixok(int(b.shape[1]))
+            if not (npix0_valid or npix1_valid):
+                raise ValueError(
+                    f"No 'pix' key and neither dimension of shell array {b.shape} is a valid HEALPix npix."
+                )
+
+            if npix1_valid:
+                inferred_nside = hp.npix2nside(int(b.shape[1]))
+                if z_bin < 0 or z_bin >= b.shape[0]:
+                    raise IndexError(f"z_bin={z_bin} out of range for shape {b.shape}")
+                nside = inferred_nside
+                m = np.asarray(b[z_bin, :], dtype=float)
+            else:
+                inferred_nside = hp.npix2nside(int(b.shape[0]))
+                if z_bin < 0 or z_bin >= b.shape[1]:
+                    raise IndexError(f"z_bin={z_bin} out of range for shape {b.shape}")
+                nside = inferred_nside
+                m = np.asarray(b[:, z_bin], dtype=float)
 
 
     if output_dir is None:
         output_dir = Path(__file__).with_name("outputs").joinpath("plots")
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    if name is not None and len(name.strip()) == 0:
+        raise ValueError("name must be a non-empty string when provided")
+
     if plot_logarithmic:
-        out_path = output_dir / f"shell_mollview_symlog_zbin{z_bin}_nside{nside}.png"
+        default_name = f"shell_mollview_symlog_zbin{z_bin}_nside{nside}.png"
+        file_name = name if name is not None else default_name
+        if not file_name.lower().endswith(".png"):
+            file_name = f"{file_name}.png"
+        out_path = output_dir / file_name
         projected = hp.mollview(
             m,
-            nest=True,
+            nest=False,
             cbar=False,
             notext=True,
             title="",
@@ -117,8 +131,12 @@ def plot_shells(
         fig.savefig(out_path, dpi=150, bbox_inches="tight")
         plt.close(fig)
     else:
-        out_path = output_dir / f"shell_mollview_zbin{z_bin}_nside{nside}.png"
-        hp.mollview(m, nest=True, title=f"z-bin {z_bin}, nside {nside}")
+        default_name = f"shell_mollview_zbin{z_bin}_nside{nside}.png"
+        file_name = name if name is not None else default_name
+        if not file_name.lower().endswith(".png"):
+            file_name = f"{file_name}.png"
+        out_path = output_dir / file_name
+        hp.mollview(m, nest=False, title=f"z-bin {z_bin}, nside {nside}")
         plt.savefig(out_path, dpi=150, bbox_inches="tight")
         plt.close()
 
