@@ -40,7 +40,7 @@ class ShellPairsDataset(Dataset):
         self,
         data_dir: Path,
         low_name: str = "shells_nside=512.npz",
-        high_name: str = "compressed_shells.npz",
+        high_name: str = "shells_nside=512_noisy_shuffle.npz",
         nside_small: int = 32,
         max_shells: int = 0,
         n_patches: int = 1,
@@ -96,8 +96,6 @@ class ShellPairsDataset(Dataset):
                 pbar_shells.update(1)
 
         pbar_shells.close()
-
-        print(f"Collected {len(low_maps)} shell pairs from {len(subdirs)} subdirectories under {data_dir}")
 
         assert len(low_maps) > 0, f"No valid shell pairs found under {data_dir}"
 
@@ -258,16 +256,16 @@ if __name__ == '__main__':
 
     parser = argparse.ArgumentParser()
     parser.add_argument('--data-dir', type=str, default='/Users/david/testData')
-    parser.add_argument('--low-npz', type=str, default='shells_nside=512.npz')
+    parser.add_argument('--low-npz', type=str, default='shells_nside=512_noisy_shuffle.npz')
     parser.add_argument('--high-npz', type=str, default='compressed_shells.npz')
     parser.add_argument('--nside-small', type=int, default=128)
-    parser.add_argument('--max-shells', type=int, default=6)
-    parser.add_argument('--batch-size', type=int, default=2)
-    parser.add_argument('--epochs', type=int, default=2)
+    parser.add_argument('--max-shells', type=int, default=10)
+    parser.add_argument('--batch-size', type=int, default=1)
+    parser.add_argument('--epochs', type=int, default=10)
     parser.add_argument('--lr', type=float, default=1e-3)
     parser.add_argument('--sigma', type=float, default=0.01)
     parser.add_argument('--hidden', type=int, default=512)
-    parser.add_argument('--n-patches', dest='n_patches', type=int, default=2, help='Number of patches to sample per map (same size)')
+    parser.add_argument('--n-patches', dest='n_patches', type=int, default=1, help='Number of patches to sample per map (same size)')
     parser.add_argument('--out-dir', type=str, default='/Users/david/Library/CloudStorage/OneDrive-ETHZurich/ETH-Material/Master Project/github/models')
     parser.add_argument('--log-interval', type=int, default=10)
     args = parser.parse_args()
