@@ -20,12 +20,16 @@ def plot_shells(
             "healpy (and matplotlib) is required for shell plotting. Install via 'conda install healpy matplotlib'."
         ) from exc
 
+    requested_nside = int(nside)
+    if not hp.isnsideok(requested_nside):
+        raise ValueError(f"Requested nside is invalid: {requested_nside}")
+
     npz_path = Path(npz_path)
     if npz_path.suffix.lower() == ".fits":
         m = np.asarray(hp.read_map(npz_path, nest=False, dtype=np.float32, verbose=False), dtype=float)
         if not hp.isnpixok(int(m.size)):
             raise ValueError(f"FITS map has invalid HEALPix size: {m.size}")
-        nside = hp.npix2nside(int(m.size))
+        current_nside = hp.npix2nside(int(m.size))
     else:
         data = np.load(npz_path, allow_pickle=False)
 
@@ -44,13 +48,15 @@ def plot_shells(
             if b.shape[0] == pix.shape[0]:
                 if z_bin < 0 or z_bin >= b.shape[1]:
                     raise IndexError(f"z_bin={z_bin} out of range for shape {b.shape}")
-                m = np.zeros(hp.nside2npix(nside), dtype=float)
+                m = np.zeros(hp.nside2npix(requested_nside), dtype=float)
                 m[pix] = b[:, z_bin]
+                current_nside = requested_nside
             elif b.shape[1] == pix.shape[0]:
                 if z_bin < 0 or z_bin >= b.shape[0]:
                     raise IndexError(f"z_bin={z_bin} out of range for shape {b.shape}")
-                m = np.zeros(hp.nside2npix(nside), dtype=float)
+                m = np.zeros(hp.nside2npix(requested_nside), dtype=float)
                 m[pix] = b[z_bin, :]
+                current_nside = requested_nside
             else:
                 raise ValueError(
                     f"Could not align 'pix' (len={pix.shape[0]}) with shell array shape {b.shape}."
@@ -67,14 +73,24 @@ def plot_shells(
                 inferred_nside = hp.npix2nside(int(b.shape[1]))
                 if z_bin < 0 or z_bin >= b.shape[0]:
                     raise IndexError(f"z_bin={z_bin} out of range for shape {b.shape}")
-                nside = inferred_nside
+                current_nside = inferred_nside
                 m = np.asarray(b[z_bin, :], dtype=float)
             else:
                 inferred_nside = hp.npix2nside(int(b.shape[0]))
                 if z_bin < 0 or z_bin >= b.shape[1]:
                     raise IndexError(f"z_bin={z_bin} out of range for shape {b.shape}")
-                nside = inferred_nside
+                current_nside = inferred_nside
                 m = np.asarray(b[:, z_bin], dtype=float)
+
+    if current_nside != requested_nside:
+        m = hp.ud_grade(
+            m,
+            nside_out=requested_nside,
+            order_in="RING",
+            order_out="RING",
+            power=-2,
+        )
+    nside = requested_nside
 
 
     if output_dir is None:
@@ -97,6 +113,7 @@ def plot_shells(
             notext=True,
             title="",
             return_projected_map=True,
+            xsize=3000
         )
         plt.close()
 
@@ -128,7 +145,7 @@ def plot_shells(
         ax.set_title(f"z-bin {z_bin}, nside {nside}, (SymLogNorm)")
         fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
         fig.tight_layout()
-        fig.savefig(out_path, dpi=150, bbox_inches="tight")
+        fig.savefig(out_path, dpi=600, bbox_inches="tight")
         plt.close(fig)
     else:
         default_name = f"shell_mollview_zbin{z_bin}_nside{nside}.png"
@@ -136,8 +153,8 @@ def plot_shells(
         if not file_name.lower().endswith(".png"):
             file_name = f"{file_name}.png"
         out_path = output_dir / file_name
-        hp.mollview(m, nest=False, title=f"z-bin {z_bin}, nside {nside}")
-        plt.savefig(out_path, dpi=150, bbox_inches="tight")
+        hp.mollview(m, nest=False, title=f"z-bin {z_bin}, nside {nside}", xsize=3000)
+        plt.savefig(out_path, dpi=600, bbox_inches="tight")
         plt.close()
 
     print(f"Saved shell plot to {out_path}")
@@ -198,7 +215,7 @@ def plot_density_slice(
         output_dir = Path(__file__).with_name("outputs").joinpath("plots")
     output_dir.mkdir(parents=True, exist_ok=True)
     out_path = output_dir / f"density_slice_axis{slice_axis}_center{center:.1f}.png"
-    fig.savefig(out_path, dpi=150)
+    fig.savefig(out_path, dpi=600)
     plt.close(fig)
     print(f"Saved density slice to {out_path}")
     return out_path
