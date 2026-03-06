@@ -52,10 +52,10 @@ def load_params_vector(params_path: Path):
 def parse_args():
     p = argparse.ArgumentParser()
     p.add_argument("--model", type=str, default="/Users/david/Library/CloudStorage/OneDrive-ETHZurich/ETH-Material/Master Project/github/models/flow_mlp.pth")
-    p.add_argument("--input", type=str, default="/Users/david/testData/cosmo_000001/shells_nside=512_noisy_shuffle.npz")
-    p.add_argument("--params", type=str, default="/Users/david/testData/cosmo_000001/params.yml", help="Optional params.yml path for conditioning vector")
+    p.add_argument("--input", type=str, default="/Users/david/testData/cosmo_000010/shells_nside=512_noisy_shuffle.npz")
+    p.add_argument("--params", type=str, default="/Users/david/testData/cosmo_000010/params.yml", help="Optional params.yml path for conditioning vector")
     p.add_argument("--nside-small", type=int, default=128)
-    p.add_argument("--n-patches", type=int, default=1)
+    p.add_argument("--n-patches", type=int, default=4)
     p.add_argument("--power", type=float, default=0.0, help="healpy.ud_grade power used for downsampling (like train)")
     p.add_argument("--shell-index", type=int, default=-1, help="Index of shell to process; -1=process all shells")
     p.add_argument("--t", type=float, default=0.0, help="t value to pass to model (0..1).")
