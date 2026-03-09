@@ -12,7 +12,7 @@
 
 set -euo pipefail
 
-PROJECT_DIR=/cluster/scratch/damrein/project
+PROJECT_DIR=/cluster/scratch/damrein/masterProject
 SCRATCH=/cluster/scratch/damrein
 CONDA_ENV=vir_env
 OUTPUT_DIR=${SCRATCH}/outputs/plots/shells
@@ -48,11 +48,13 @@ if ! "${PYTHON_BIN}" -c "import numpy, matplotlib, healpy" >/dev/null 2>&1; then
 fi
 
 SHELL=${SCRATCH}/outputs/ICs/000001_copy6/CosmoML-shell_z-high=0.172495_z-low=0.1637719.fits
+#SHELL=${SCRATCH}/cosmogridv1/cosmo_000001/compressed_shells.npz
 
 # Configuration for the visualization (set to your desired z-bin and nside)
-ZBIN=5
+ZBIN=12
 NSIDE=2048
-NAME_SUFFIX="z-bin${ZBIN}_nside${NSIDE}_1"
+#NAME_SUFFIX="cosmogrid_z-bin${ZBIN}_nside${NSIDE}"
+NAME_SUFFIX="pkdgrav_redshift_0.17_nside${NSIDE}"
 
 cd "${PROJECT_DIR}"
 
@@ -75,7 +77,7 @@ plot_shells(
     z_bin=${ZBIN},
     nside=${NSIDE},
     output_dir=Path(r"${OUTPUT_DIR}"),
-    plot_logarithmic=False,
+    plot_logarithmic=True,
     name=os.environ["NAME_SUFFIX"],
 )
 PY
