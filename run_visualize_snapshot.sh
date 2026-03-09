@@ -5,14 +5,14 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=32
 #SBATCH --mem-per-cpu=1G
-#SBATCH --output=/cluster/scratch/damrein/outputs/visualize_%j.out
-#SBATCH --error=/cluster/scratch/damrein/outputs/visualize_%j.err
+#SBATCH --output=/cluster/scratch/damrein/outputs/logs/visualize_snapshot%j.out
+#SBATCH --error=/cluster/scratch/damrein/outputs/logs/visualize_snapshot%j.err
 
 # Creates a density slice PNG in outputs/plots
 
 set -euo pipefail
 
-PROJECT_DIR=/cluster/scratch/damrein/project
+PROJECT_DIR=/cluster/scratch/damrein/masterProject
 SCRATCH=/cluster/scratch/damrein
 CONDA_ENV=vir_env
 
@@ -72,13 +72,14 @@ boxsize = float(data.get('boxsize', 900.0))
 
 # call the plotting helper; tweak args below as desired
 plot_density_slice(
-    positions=pos,
-    boxsize=boxsize,
-    slice_axis=2,
-    slice_center=None,
-    slice_thickness=5.0,
-    grid=832,
-    output_dir=Path(r"${OUTDIR}")
+  positions=pos,
+  boxsize=boxsize,
+  slice_axis=2,
+  slice_center=None,
+  slice_thickness=5.0,
+  grid=832,
+  input_file=snap,
+  output_dir=Path(r"${OUTDIR}")
 )
 PY
 

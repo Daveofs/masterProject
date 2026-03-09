@@ -168,6 +168,7 @@ def plot_density_slice(
     slice_center: float | None = None,
     slice_thickness: float = 5.0,
     grid: int = 256,
+    input_file: str | Path | None = None,
     output_dir: Path | None = None,
 ) -> Path:
     """Bin a thin slab of particles onto a 2D grid and plot the density contrast."""
@@ -180,7 +181,32 @@ def plot_density_slice(
         ) from exc
 
     pos = np.asarray(positions)
-    pos = pos[-1] # use final snapshot
+
+    if not (0 <= int(slice_axis) <= 2):
+        raise ValueError(f"slice_axis must be 0, 1, or 2; got {slice_axis}")
+
+    # Normalize to [N, 3] to support common layouts like [N,3], [T,N,3], [N,3,T], [3,N].
+    if pos.ndim < 2:
+        raise ValueError(f"Expected positions with at least 2 dimensions, got shape {pos.shape}")
+
+    if pos.shape[-1] == 3:
+        pass
+    elif pos.ndim >= 2 and pos.shape[1] == 3:
+        pos = np.moveaxis(pos, 1, -1)
+    elif pos.shape[0] == 3:
+        pos = np.moveaxis(pos, 0, -1)
+    else:
+        raise ValueError(
+            f"Could not identify coordinate axis of length 3 in positions with shape {pos.shape}"
+        )
+
+    if pos.ndim == 3:
+        pos = pos[-1]  # use final snapshot/time slice
+    elif pos.ndim > 3:
+        pos = pos.reshape(-1, 3)
+
+    if pos.ndim != 2 or pos.shape[1] != 3:
+        raise ValueError(f"Expected normalized positions shape [N,3], got {pos.shape}")
   
     center = slice_center if slice_center is not None else boxsize / 2.0
     half = slice_thickness / 2.0
@@ -214,7 +240,23 @@ def plot_density_slice(
     if output_dir is None:
         output_dir = Path(__file__).with_name("outputs").joinpath("plots")
     output_dir.mkdir(parents=True, exist_ok=True)
-    out_path = output_dir / f"density_slice_axis{slice_axis}_center{center:.1f}.png"
+
+    # derive output filename from input file if provided
+    if input_file is not None:
+        try:
+            inp = Path(input_file)
+            base = inp.stem
+        except Exception:
+            base = None
+    else:
+        base = None
+
+    if base:
+        file_name = f"{base}_density_slice_axis{slice_axis}_center{center:.1f}.png"
+    else:
+        file_name = f"density_slice_axis{slice_axis}_center{center:.1f}.png"
+
+    out_path = output_dir / file_name
     fig.savefig(out_path, dpi=300)
     plt.close(fig)
     print(f"Saved density slice to {out_path}")
