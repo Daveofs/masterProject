@@ -145,7 +145,7 @@ def plot_shells(
         ax.set_title(f"z-bin {z_bin}, nside {nside}, (SymLogNorm)")
         fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
         fig.tight_layout()
-        fig.savefig(out_path, dpi=600, bbox_inches="tight")
+        fig.savefig(out_path, dpi=300, bbox_inches="tight")
         plt.close(fig)
     else:
         default_name = f"shell_mollview_zbin{z_bin}_nside{nside}.png"
@@ -154,7 +154,7 @@ def plot_shells(
             file_name = f"{file_name}.png"
         out_path = output_dir / file_name
         hp.mollview(m, nest=False, title=f"z-bin {z_bin}, nside {nside}", xsize=3000)
-        plt.savefig(out_path, dpi=600, bbox_inches="tight")
+        plt.savefig(out_path, dpi=300, bbox_inches="tight")
         plt.close()
 
     print(f"Saved shell plot to {out_path}")
@@ -215,7 +215,7 @@ def plot_density_slice(
         output_dir = Path(__file__).with_name("outputs").joinpath("plots")
     output_dir.mkdir(parents=True, exist_ok=True)
     out_path = output_dir / f"density_slice_axis{slice_axis}_center{center:.1f}.png"
-    fig.savefig(out_path, dpi=600)
+    fig.savefig(out_path, dpi=300)
     plt.close(fig)
     print(f"Saved density slice to {out_path}")
     return out_path

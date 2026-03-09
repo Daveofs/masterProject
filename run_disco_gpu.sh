@@ -1,15 +1,17 @@
 #!/bin/bash
-#SBATCH --job-name=disco_cosmoIC
+#SBATCH --job-name=disco_gpu_cosmoIC
 #SBATCH --partition=gpu.4h
 #SBATCH --gpus=1
 #SBATCH --time=01:00:00
 #SBATCH --ntasks=2
 #SBATCH --cpus-per-task=10
 #SBATCH --mem-per-cpu=20G
-#SBATCH --output=/cluster/scratch/damrein/outputs/logs/disco_%j.out
-#SBATCH --error=/cluster/scratch/damrein/outputs/logs/disco_%j.err
+#SBATCH --output=/cluster/scratch/damrein/outputs/logs/disco_gpu_%j.out
+#SBATCH --error=/cluster/scratch/damrein/outputs/logs/disco_gpu_%j.err
 
-# GPU submission enabled in SBATCH header above.
+# GPU submission enabled in SBATCH header above 
+
+# Currently running out of memory for GPU
 
 set -euo pipefail
 
