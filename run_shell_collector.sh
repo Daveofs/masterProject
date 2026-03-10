@@ -12,11 +12,11 @@
 
 set -euo pipefail
 
-PROJECT_DIR=/cluster/scratch/damrein/project
+PROJECT_DIR=/cluster/scratch/damrein/masterProject
 SCRATCH=/cluster/scratch/damrein
 CONDA_ENV=vir_env
 PARAM_FILE=${SCRATCH}/cosmogridv1/cosmo_000001/param_files/cosmology.par
-RUN_DIR=${SCRATCH}/outputs/ICs/000001_copy6
+RUN_DIR=${SCRATCH}/outputs/ICs/000001_copy7
 
 if [[ -f /cluster/home/damrein/miniconda3/etc/profile.d/conda.sh ]]; then
   CONDA_ROOT=/cluster/home/damrein/miniconda3

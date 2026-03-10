@@ -3,14 +3,25 @@ import numpy as np
 
 
 def plot_shells(
-    npz_path: str | Path,
+    npz_path: str | Path | list[str | Path],
     z_bin: int = 5,
     nside: int = 512,
     output_dir: Path | None = None,
     plot_logarithmic: bool = False,
     name: str | None = None,
+    normalize: bool = True,
 ) -> Path:
-    """Load a shell file (.npz or .fits) and plot it as a HEALPix map."""
+    """Load a shell file (.npz or .fits) and plot it as a HEALPix map.
+
+    npz_path: a single .npz/.fits path, or a list of .fits paths whose
+        pixel counts are summed before plotting.  Use a list to combine
+        several thin pkdgrav shells so their total redshift span matches
+        a wider CosmoGrid compressed shell.
+    normalize: if True (default), convert raw particle counts to overdensity
+        delta = count/<count> - 1 before plotting.  This makes maps from
+        different sources (different shell thicknesses, different particle
+        counts) directly comparable on the same colour scale.
+    """
     try:
         import healpy as hp
         import matplotlib.pyplot as plt
@@ -24,63 +35,90 @@ def plot_shells(
     if not hp.isnsideok(requested_nside):
         raise ValueError(f"Requested nside is invalid: {requested_nside}")
 
-    npz_path = Path(npz_path)
-    if npz_path.suffix.lower() == ".fits":
-        m = np.asarray(hp.read_map(npz_path, nest=False, dtype=np.float32, verbose=False), dtype=float)
-        if not hp.isnpixok(int(m.size)):
-            raise ValueError(f"FITS map has invalid HEALPix size: {m.size}")
+    # ------------------------------------------------------------------ #
+    # Accept a list of FITS paths → load and sum them pixel-by-pixel.     #
+    # ------------------------------------------------------------------ #
+    if isinstance(npz_path, list):
+        paths = [Path(p) for p in npz_path]
+        if not all(p.suffix.lower() == ".fits" for p in paths):
+            raise ValueError("When passing a list, all entries must be .fits files.")
+        maps = []
+        for p in paths:
+            mi = hp.read_map(p, nest=False, dtype=np.float32)
+            if not hp.isnpixok(int(mi.size)):
+                raise ValueError(f"FITS map has invalid HEALPix size: {mi.size}")
+            maps.append(mi)
+        sizes = {mi.size for mi in maps}
+        if len(sizes) != 1:
+            raise ValueError(f"FITS maps have inconsistent sizes: {sizes}")
+        m = np.sum(maps, axis=0, dtype=np.float32)
         current_nside = hp.npix2nside(int(m.size))
     else:
-        data = np.load(npz_path, allow_pickle=False)
-
-        if "b" in data:
-            b = np.asarray(data["b"])
-        elif "shells" in data:
-            b = np.asarray(data["shells"])
+        npz_path = Path(npz_path)
+        if npz_path.suffix.lower() == ".fits":
+            m = hp.read_map(npz_path, nest=False, dtype=np.float32)
+            if not hp.isnpixok(int(m.size)):
+                raise ValueError(f"FITS map has invalid HEALPix size: {m.size}")
+            current_nside = hp.npix2nside(int(m.size))
         else:
-            raise KeyError(f"Expected key 'b' (or 'shells') in {npz_path}, found keys: {list(data.keys())}")
+            data = np.load(npz_path, allow_pickle=False)
 
-        if b.ndim != 2:
-            raise ValueError(f"Expected 'b' to be 2D [Npix, Nz], got shape {b.shape}")
-
-        if "pix" in data:
-            pix = np.asarray(data["pix"], dtype=np.int64)
-            if b.shape[0] == pix.shape[0]:
-                if z_bin < 0 or z_bin >= b.shape[1]:
-                    raise IndexError(f"z_bin={z_bin} out of range for shape {b.shape}")
-                m = np.zeros(hp.nside2npix(requested_nside), dtype=float)
-                m[pix] = b[:, z_bin]
-                current_nside = requested_nside
-            elif b.shape[1] == pix.shape[0]:
-                if z_bin < 0 or z_bin >= b.shape[0]:
-                    raise IndexError(f"z_bin={z_bin} out of range for shape {b.shape}")
-                m = np.zeros(hp.nside2npix(requested_nside), dtype=float)
-                m[pix] = b[z_bin, :]
-                current_nside = requested_nside
+            if "b" in data:
+                b = np.asarray(data["b"])
+            elif "shells" in data:
+                b = np.asarray(data["shells"])
             else:
-                raise ValueError(
-                    f"Could not align 'pix' (len={pix.shape[0]}) with shell array shape {b.shape}."
-                )
-        else:
-            npix0_valid = hp.isnpixok(int(b.shape[0]))
-            npix1_valid = hp.isnpixok(int(b.shape[1]))
-            if not (npix0_valid or npix1_valid):
-                raise ValueError(
-                    f"No 'pix' key and neither dimension of shell array {b.shape} is a valid HEALPix npix."
-                )
+                raise KeyError(f"Expected key 'b' (or 'shells') in {npz_path}, found keys: {list(data.keys())}")
 
-            if npix1_valid:
-                inferred_nside = hp.npix2nside(int(b.shape[1]))
-                if z_bin < 0 or z_bin >= b.shape[0]:
-                    raise IndexError(f"z_bin={z_bin} out of range for shape {b.shape}")
-                current_nside = inferred_nside
-                m = np.asarray(b[z_bin, :], dtype=float)
+            if b.ndim != 2:
+                raise ValueError(f"Expected 'b' to be 2D [Npix, Nz], got shape {b.shape}")
+
+            if "pix" in data:
+                pix = np.asarray(data["pix"], dtype=np.int64)
+                # Infer the native nside from the max pixel index so that ud_grade can
+                # correctly convert to requested_nside rather than scattering sparse
+                # pixels into a wrongly-sized map.
+                native_npix = int(pix.max()) + 1
+                # round up to the next valid HEALPix npix
+                native_nside = 1
+                while hp.nside2npix(native_nside) < native_npix:
+                    native_nside *= 2
+                if b.shape[0] == pix.shape[0]:
+                    if z_bin < 0 or z_bin >= b.shape[1]:
+                        raise IndexError(f"z_bin={z_bin} out of range for shape {b.shape}")
+                    m = np.zeros(hp.nside2npix(native_nside), dtype=np.float32)
+                    m[pix] = b[:, z_bin]
+                    current_nside = native_nside
+                elif b.shape[1] == pix.shape[0]:
+                    if z_bin < 0 or z_bin >= b.shape[0]:
+                        raise IndexError(f"z_bin={z_bin} out of range for shape {b.shape}")
+                    m = np.zeros(hp.nside2npix(native_nside), dtype=np.float32)
+                    m[pix] = b[z_bin, :]
+                    current_nside = native_nside
+                else:
+                    raise ValueError(
+                        f"Could not align 'pix' (len={pix.shape[0]}) with shell array shape {b.shape}."
+                    )
             else:
-                inferred_nside = hp.npix2nside(int(b.shape[0]))
-                if z_bin < 0 or z_bin >= b.shape[1]:
-                    raise IndexError(f"z_bin={z_bin} out of range for shape {b.shape}")
-                current_nside = inferred_nside
-                m = np.asarray(b[:, z_bin], dtype=float)
+                npix0_valid = hp.isnpixok(int(b.shape[0]))
+                npix1_valid = hp.isnpixok(int(b.shape[1]))
+                if not (npix0_valid or npix1_valid):
+                    raise ValueError(
+                        f"No 'pix' key and neither dimension of shell array {b.shape} is a valid HEALPix npix."
+                    )
+
+                if npix1_valid:
+                    inferred_nside = hp.npix2nside(int(b.shape[1]))
+                    if z_bin < 0 or z_bin >= b.shape[0]:
+                        raise IndexError(f"z_bin={z_bin} out of range for shape {b.shape}")
+                    current_nside = inferred_nside
+                    m = np.asarray(b[z_bin, :], dtype=np.float32)
+                else:
+                    inferred_nside = hp.npix2nside(int(b.shape[0]))
+                    if z_bin < 0 or z_bin >= b.shape[1]:
+                        raise IndexError(f"z_bin={z_bin} out of range for shape {b.shape}")
+                    current_nside = inferred_nside
+                    m = np.asarray(b[:, z_bin], dtype=np.float32)
 
     if current_nside != requested_nside:
         m = hp.ud_grade(
@@ -88,9 +126,15 @@ def plot_shells(
             nside_out=requested_nside,
             order_in="RING",
             order_out="RING",
-            power=-2,
         )
     nside = requested_nside
+
+    if normalize:
+        # Use formula for matter overdensity (see also wiki)
+        mean = np.mean(m)
+        if mean <= 0:
+            raise ValueError("Shell map has non-positive mean; cannot normalize to overdensity.")
+        m = m / mean - 1.0
 
 
     if output_dir is None:
