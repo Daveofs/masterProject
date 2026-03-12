@@ -47,7 +47,8 @@ if ! "${PYTHON_BIN}" -c "import numpy, matplotlib" >/dev/null 2>&1; then
   exit 3
 fi
 
-SNAPSHOT=${SCRATCH}/outputs/snapshots/final_snapshot_58356355.npz
+SNAPSHOT=${SCRATCH}/outputs/snapshots/final_snapshot_cpu_60125122.npz
+#SNAPSHOT=${SCRATCH}/outputs/ICs/000001_copy7/CosmoML.00080
 OUTDIR=${SCRATCH}/outputs/plots/snapshots
 
 mkdir -p "${OUTDIR}"
@@ -63,23 +64,32 @@ echo "Loading snapshot: ${SNAPSHOT} -> writing plots to ${OUTDIR}"
 "${PYTHON_BIN}" - <<PY
 import numpy as np
 from pathlib import Path
+from read_tipsy_file import read_tipsy
 from visualize import plot_density_slice
 
+BOXSIZE = 900.0
 snap = Path(r"${SNAPSHOT}")
-data = np.load(snap, allow_pickle=False)
-pos = data['pos']
-boxsize = float(data.get('boxsize', 900.0))
+outdir = Path(r"${OUTDIR}")
 
-# call the plotting helper; tweak args below as desired
+if snap.suffix.lower() == ".npz":
+    # DiscoDJ output: NPZ with a 'pos' key, positions in Mpc/h units
+    data = np.load(snap, allow_pickle=False)
+    pos = np.asarray(data['pos'])
+    BOXSIZE = float(data['boxsize']) if 'boxsize' in data else BOXSIZE
+else:
+    # pkdgrav Tipsy binary (no extension or .00NNN)
+    p, _ = read_tipsy(snap, BOXSIZE)
+    pos = np.column_stack([p['x'], p['y'], p['z']])
+
 plot_density_slice(
-  positions=pos,
-  boxsize=boxsize,
-  slice_axis=2,
-  slice_center=None,
-  slice_thickness=5.0,
-  grid=832,
-  input_file=snap,
-  output_dir=Path(r"${OUTDIR}")
+    positions=pos,
+    boxsize=BOXSIZE,
+    slice_axis=2,
+    slice_center=None,
+    slice_thickness=5.0,
+    grid=832,
+    input_file=snap,
+    output_dir=outdir,
 )
 PY
 

@@ -14,7 +14,7 @@ PROJECT_DIR=/cluster/scratch/damrein/masterProject
 SCRATCH_DIR=/cluster/scratch/damrein
 CONDA_ROOT=/cluster/scratch/damrein/miniconda3
 CONDA_ENV=vir_env
-IC_ARCHIVE=/cluster/scratch/damrein/pkdgrav/pkdgrav3_dev-master/build/CosmoML.00000
+IC_ARCHIVE=/cluster/scratch/damrein/outputs/ICs/000001_copy7/CosmoML.00000
 PLOT_DIR=${SCRATCH_DIR}/outputs/plots/snapshots
 
 # Activate conda in non-interactive SLURM shells
@@ -45,11 +45,11 @@ export OMP_PROC_BIND=close
 export OMP_PLACES=cores
 
 # DiscoDJ run configuration (set to your IC metadata)
-A_INI=0.02
+A_INI=0.01      # pkdgrav IC is at z=99 -> a=0.01
 BOXSIZE=900.0
 RES=832
-A_END=1.0
-N_STEPS=10
+A_END=0.6229    # pkdgrav step 80: z=0.6059 -> a=1/(1+0.6059)
+N_STEPS=10     # Could be higher for being more accurate 
 RES_PM=832
 STEPPER=bullfrog
 METHOD=pm

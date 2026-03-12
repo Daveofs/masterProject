@@ -246,6 +246,7 @@ def plot_density_slice(
 
     if pos.ndim == 3:
         pos = pos[-1]  # use final snapshot/time slice
+        print("Using final snapshot")
     elif pos.ndim > 3:
         pos = pos.reshape(-1, 3)
 
@@ -267,6 +268,8 @@ def plot_density_slice(
         bins=grid,
         range=[[0.0, boxsize], [0.0, boxsize]],
     )
+    
+    # Convert to density contrast δ = ρ/⟨ρ⟩ - 1
     density = hist / np.mean(hist) - 1.0
 
     fig, ax = plt.subplots(figsize=(6, 6))
