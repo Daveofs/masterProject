@@ -79,11 +79,28 @@ pos *= NGRID
 pos = np.clip(pos, 0.0, NGRID - 1e-6)
 
 print("CIC mass assignment ...")
+# CIC (Order=2): matches pkdgrav's iAssignment=2 / aweights.hpp Order=2.
+# The weight formula is: rr = r - 0.5, i = floor(rr), h = rr - i
+# cell i: (1-h), cell i+1: h  (per axis, trilinearly for 3-D)
+pos_sh = pos - 0.5          # rr = r - 0.5  (pos is already in [0, NGRID))
+ix0 = np.floor(pos_sh[:, 0]).astype(int)
+iy0 = np.floor(pos_sh[:, 1]).astype(int)
+iz0 = np.floor(pos_sh[:, 2]).astype(int)
+hx = pos_sh[:, 0] - ix0.astype(float)   # weight toward ix0+1
+hy = pos_sh[:, 1] - iy0.astype(float)
+hz = pos_sh[:, 2] - iz0.astype(float)
+ix0 %= NGRID;  ix1 = (ix0 + 1) % NGRID
+iy0 %= NGRID;  iy1 = (iy0 + 1) % NGRID
+iz0 %= NGRID;  iz1 = (iz0 + 1) % NGRID
 delta = np.zeros((NGRID, NGRID, NGRID), dtype='f8')
-ix = pos[:, 0].astype(int) % NGRID
-iy = pos[:, 1].astype(int) % NGRID
-iz = pos[:, 2].astype(int) % NGRID
-np.add.at(delta, (ix, iy, iz), 1.0)
+np.add.at(delta, (ix0, iy0, iz0), (1-hx)*(1-hy)*(1-hz))
+np.add.at(delta, (ix1, iy0, iz0),    hx *(1-hy)*(1-hz))
+np.add.at(delta, (ix0, iy1, iz0), (1-hx)*   hy *(1-hz))
+np.add.at(delta, (ix0, iy0, iz1), (1-hx)*(1-hy)*   hz )
+np.add.at(delta, (ix1, iy1, iz0),    hx *   hy *(1-hz))
+np.add.at(delta, (ix1, iy0, iz1),    hx *(1-hy)*   hz )
+np.add.at(delta, (ix0, iy1, iz1), (1-hx)*   hy *   hz )
+np.add.at(delta, (ix1, iy1, iz1),    hx *   hy *   hz )
 mean = delta.mean()
 delta = delta / mean - 1.0
 
@@ -95,17 +112,22 @@ dk = np.fft.rfftn(delta)
 W = window_correction(NGRID, ASSIGN_ORDER)
 iNyquist = NGRID // 2
 
-# Build integer-index arrays matching PKDGRAV indexing conventions
+# Build integer-index arrays matching PKDGRAV indexing conventions.
+# numpy rfftn halves the LAST axis (kz), so:
+#   axis 0 (kx): 0..NGRID-1  — indices > iNyquist are negative frequencies → fold
+#   axis 1 (ky): 0..NGRID-1  — same → fold
+#   axis 2 (kz): 0..iNyquist — already non-negative, no fold needed
 i = np.arange(NGRID, dtype=int)
 j = np.arange(NGRID, dtype=int)
 k = np.arange(iNyquist + 1, dtype=int)
 I, J, K = np.meshgrid(i, j, k, indexing='ij')
 
-# fold indices > iNyquist as in PKDGRAV
+# Fold both I and J (pkdgrav folds j and k because FFTW halves axis-0 instead)
+I_fold = np.where(I > iNyquist, NGRID - I, I)
 J_fold = np.where(J > iNyquist, NGRID - J, J)
 K_fold = K  # K already in [0, iNyquist]
 
-Wcorr = W[I] * W[J_fold] * W[K_fold]
+Wcorr = W[I_fold] * W[J_fold] * W[K_fold]
 
 # Following PKDGRAV: v1 = dk * (1/nGrid^3) * Wcorr, then fPower += |v1|^2
 scale_fft = 1.0 / (NGRID ** 3)
@@ -113,7 +135,9 @@ v1 = dk * scale_fft * Wcorr
 pk3d = np.abs(v1) ** 2
 
 print("Binning P(k) ...")
-# Bin according to PKDGRAV's logarithmic scheme (no LINEAR_PK)
+# Bin according to PKDGRAV's logarithmic scheme (no LINEAR_PK).
+# pkdgrav computes: ks_int = int(ak), then bin = floor(log(ks_int) * scale)
+# — it bins using the *integer* k-magnitude, not the float one.
 nBins = N_BINS
 iNy = iNyquist
 scale = nBins / math.log(iNy + 1.0)
@@ -122,16 +146,16 @@ fK = np.zeros(nBins, dtype=float)
 fPower = np.zeros(nBins, dtype=float)
 nPower = np.zeros(nBins, dtype=int)
 
-# iterate over grid (vectorized)
-ak = np.sqrt(I.astype(float)**2 + J_fold.astype(float)**2 + K_fold.astype(float)**2)
-valid = (ak >= 1.0) & (ak <= iNy)
-ak_valid = ak[valid]
-pk_valid = pk3d[valid]
-I_valid = I[valid]
-J_valid = J[valid]
-K_valid = K[valid]
+# Vectorised loop: use folded integer magnitudes for filtering and bin assignment
+ak = np.sqrt(I_fold.astype(float)**2 + J_fold.astype(float)**2 + K_fold.astype(float)**2)
+int_ak = ak.astype(int)          # truncate like C's int() — matches pkdgrav's `ks = int(ak)`
+valid = (int_ak >= 1) & (int_ak <= iNy)
+ak_valid    = ak[valid]
+pk_valid    = pk3d[valid]
+int_ak_valid = int_ak[valid]
 
-ks = np.floor(np.log(ak_valid) * scale).astype(int)
+# bin index uses log of the *integer* magnitude (pkdgrav: floor(log(ks)*scale))
+ks = np.floor(np.log(int_ak_valid.astype(float)) * scale).astype(int)
 mask = (ks >= 0) & (ks < nBins)
 for kk, pval, akv in zip(ks[mask], pk_valid[mask], ak_valid[mask]):
     fK[kk] += math.log(akv)
