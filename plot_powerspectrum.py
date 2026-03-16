@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """Plot power spectrum .pk files.
 
-Reads files where column 0 is k and column 1 is P(k). Saves plots to
-../outputs/plots/powerspectrum relative to this script's directory.
+Reads files where column 0 is k and column 1 is P(k).
+Multiple inputs are overlaid on the same plot with a legend.
 
 Usage:
   python plot_powerspectrum.py file.pk
+  python plot_powerspectrum.py file1.pk file2.pk file3.pk
   python plot_powerspectrum.py dir_with_pk_files/
-
+  python plot_powerspectrum.py file.pk dir/ -o my_output/ --name comparison
 """
 from __future__ import annotations
 
@@ -22,7 +23,6 @@ def find_pk_files(path: Path):
         return sorted(path.glob("*.pk"))
     if path.is_file() and path.suffix == ".pk":
         return [path]
-    # try glob if user passed patterns
     return sorted(Path('.').glob(str(path)))
 
 
@@ -32,73 +32,80 @@ def load_k_p(path: Path):
     except Exception:
         data = np.genfromtxt(path, comments="#")
     if data.ndim == 1 and data.size >= 2:
-        k = data[0]
-        p = data[1]
+        k, p = data[0], data[1]
     else:
         if data.shape[1] < 2:
             raise ValueError(f"File {path} has fewer than 2 columns")
-        k = data[:, 0]
-        p = data[:, 1]
-    # filter NaNs and non-positive k or p for log plotting
+        k, p = data[:, 0], data[:, 1]
     mask = np.isfinite(k) & np.isfinite(p) & (k > 0) & (p > 0)
     return k[mask], p[mask]
 
 
-def ensure_outdir(script_dir: Path) -> Path:
-    out = (script_dir.parent / "../damrein/outputs/plots/powerspectrum").resolve()
-    out.mkdir(parents=True, exist_ok=True)
-    return out
-
-
-def plot_and_save(k, p, outpath: Path, title: str | None = None):
+def main(argv=None):
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    fig, ax = plt.subplots(figsize=(6, 4))
-    ax.loglog(k, p, linewidth=1)
-    ax.set_xlabel("k")
-    ax.set_ylabel("P(k)")
-    if title:
-        ax.set_title(title)
-    ax.grid(True, which="both", ls="--", alpha=0.4)
-    fig.tight_layout()
-    fig.savefig(outpath, dpi=200)
-    plt.close(fig)
+    parser = argparse.ArgumentParser(description="Plot .pk power spectrum files (multi-input overlay)")
+    parser.add_argument("inputs", nargs='*',
+                        default=["/cluster/scratch/damrein/outputs/ICs/000001_copy7/CosmoML.00080.pk", "/cluster/scratch/damrein/outputs/powerspectrum/final_snapshot_tipsy.pk"],
+                        help=".pk files or directories (can mix multiple)")
+    parser.add_argument("-o", "--outdir", default="/cluster/scratch/damrein/outputs/plots/powerspectrum",
+                        help="output directory")
+    parser.add_argument("--name", default=None,
+                        help="output filename stem (default: auto from input names)")
+    args = parser.parse_args(argv)
 
-
-def main(argv=None):
-    p = argparse.ArgumentParser(description="Plot .pk power spectrum files")
-    p.add_argument("input", nargs='?', default="/cluster/scratch/damrein/outputs/ICs/000001_copy6/CosmoML.00027.pk", help=".pk file or directory containing .pk files (optional)")
-    p.add_argument("-o", "--outdir", default="/cluster/scratch/damrein/outputs/plots/powerspectrum", help="output directory (overrides default)")
-    args = p.parse_args(argv)
-
-    script_dir = Path(__file__).resolve().parent
-    default_out = ensure_outdir(script_dir)
-    outdir = Path(args.outdir).resolve() if args.outdir else default_out
+    outdir = Path(args.outdir)
     outdir.mkdir(parents=True, exist_ok=True)
 
-    src = Path(args.input)
-    files = find_pk_files(src)
-    if not files:
-        print(f"No .pk files found for: {src}")
+    # collect all files from all inputs
+    all_files = []
+    for inp in args.inputs:
+        found = find_pk_files(Path(inp))
+        if not found:
+            print(f"Warning: no .pk files found for '{inp}'", file=sys.stderr)
+        all_files.extend(found)
+
+    if not all_files:
+        print("No .pk files found.", file=sys.stderr)
         return 2
 
-    for f in files:
+    fig, ax = plt.subplots(figsize=(8, 5))
+
+    plotted = 0
+    for f in all_files:
         try:
             k, pwr = load_k_p(f)
         except Exception as e:
-            print(f"Skipping {f}: failed to load ({e})", file=sys.stderr)
+            print(f"Skipping {f}: {e}", file=sys.stderr)
             continue
-        outname = f.stem + ".png"
-        outpath = outdir / outname
-        title = f.name
-        try:
-            plot_and_save(k, pwr, outpath, title=title)
-            print(f"Wrote {outpath}")
-        except Exception as e:
-            print(f"Failed to plot {f}: {e}", file=sys.stderr)
+        ax.loglog(k, pwr, linewidth=1, label=f.name)
+        plotted += 1
 
+    if plotted == 0:
+        print("No files could be plotted.", file=sys.stderr)
+        return 1
+
+    ax.set_xlabel("k")
+    ax.set_ylabel("P(k)")
+    ax.grid(True, which="both", ls="--", alpha=0.4)
+    if plotted > 1:
+        ax.legend(fontsize="small", loc="best")
+
+    # determine output filename
+    if args.name:
+        stem = args.name
+    elif len(all_files) == 1:
+        stem = all_files[0].stem
+    else:
+        stem = "powerspectrum_comparison"
+
+    outpath = outdir / (stem + ".png")
+    fig.tight_layout()
+    fig.savefig(outpath, dpi=200)
+    plt.close(fig)
+    print(f"Wrote {outpath}")
     return 0
 
 

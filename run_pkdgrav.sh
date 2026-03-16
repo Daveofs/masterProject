@@ -9,7 +9,7 @@
 #SBATCH --error=/cluster/scratch/damrein/outputs/logs/pkdgrav_%j.err
 
 SCRATCH_DIR=/cluster/scratch/damrein
-OUTPUT_DIR=${SCRATCH_DIR}/outputs/ICs/000001_copy7
+OUTPUT_DIR=${SCRATCH_DIR}/outputs/ICs/000001_copy8
 PKDGRAV_BIN=${SCRATCH_DIR}/pkdgrav/pkdgrav3_dev-master/build/pkdgrav3
 PARAM_FILE=${SCRATCH_DIR}/cosmogridv1/cosmo_000001/param_files/cosmology.par
 
