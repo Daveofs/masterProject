@@ -2,14 +2,14 @@
 #SBATCH --job-name=pkdgrav
 #SBATCH --partition=normal.24h
 #SBATCH --time=24:00:00
-#SBATCH --ntasks=20
-#SBATCH --cpus-per-task=20
+#SBATCH --ntasks=30
+#SBATCH --cpus-per-task=30
 #SBATCH --mem-per-cpu=4G
 #SBATCH --output=/cluster/scratch/damrein/outputs/logs/pkdgrav_%j.out
 #SBATCH --error=/cluster/scratch/damrein/outputs/logs/pkdgrav_%j.err
 
 SCRATCH_DIR=/cluster/scratch/damrein
-OUTPUT_DIR=${SCRATCH_DIR}/outputs/ICs/000001_copy8
+OUTPUT_DIR=${SCRATCH_DIR}/outputs/ICs/000001_copy12
 PKDGRAV_BIN=${SCRATCH_DIR}/pkdgrav/pkdgrav3_dev-master/build/pkdgrav3
 PARAM_FILE=${SCRATCH_DIR}/cosmogridv1/cosmo_000001/param_files/cosmology.par
 

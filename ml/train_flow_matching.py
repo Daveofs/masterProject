@@ -192,8 +192,8 @@ def train(args):
         # use tqdm to show progress per-epoch
         for i, (x0_np, x1_np, cosmo_np) in enumerate(tqdm(dl, desc=f"Epoch {ep+1}/{epochs}", unit='step')):
             # x0,x1: [B, D], cosmo: [B, C]
-            x0 = x0_np.to(device)
-            x1 = x1_np.to(device)
+            x0 = x0_np.to(device) # low-res
+            x1 = x1_np.to(device) # high-res
             cosmo = cosmo_np.to(device)
 
             # If patches were returned, shapes are [B, P, D]
@@ -208,12 +208,13 @@ def train(args):
             B = x0.shape[0]
             t = torch.rand(B, device=device)
             mu_t = t.view(-1, 1) * x1 + (1 - t).view(-1, 1) * x0
-            eps = torch.randn_like(x0) * sigma
-            xt = mu_t + eps
-            ut = x1 - x0
+            eps = torch.randn_like(x0) * sigma # some noise which regula regularizes training slightly so the model doesn't overfit to the exact straight line
+            xt = mu_t + eps # input point
+            ut = x1 - x0 # conditional vector field
 
             # prepare conditioning (per-sample cosmo vector)
             pred = model(xt, t, cond=cosmo)
+            # By minimizing loss, the velocity is predicted and optimized from x0 to x1
             loss = mse(pred, ut)
 
             opt.zero_grad()
