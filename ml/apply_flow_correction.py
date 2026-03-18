@@ -20,27 +20,7 @@ import yaml
 import numpy as np
 import healpy as hp
 import torch
-from torch import nn
-
-
-class SmallMLP(nn.Module):
-    def __init__(self, dim_in: int, cond_dim: int = 0, hidden=512):
-        super().__init__()
-        self.net = nn.Sequential(
-            nn.Linear(dim_in + 1 + cond_dim, hidden),
-            nn.ReLU(),
-            nn.Linear(hidden, hidden),
-            nn.ReLU(),
-            nn.Linear(hidden, dim_in),
-        )
-
-    def forward(self, x, t, cond=None):
-        T = t.view(-1, 1)
-        if cond is None:
-            inp = torch.cat([x, T], dim=-1)
-        else:
-            inp = torch.cat([x, T, cond], dim=-1)
-        return self.net(inp)
+from mlp import SmallMLP
 
 
 def load_params_vector(params_path: Path):
@@ -173,6 +153,7 @@ def main():
             pred = model(x0_t, t_t, cond=cond_t)
         pred_np = pred.cpu().numpy()
 
+        # corrected version
         corrected_patches = (x0 + pred_np).astype(np.float32)
         corrected_down = corrected_patches.reshape(npix_small)
         corrected_up = hp.ud_grade(

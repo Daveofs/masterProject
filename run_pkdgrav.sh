@@ -2,16 +2,34 @@
 #SBATCH --job-name=pkdgrav
 #SBATCH --partition=normal.24h
 #SBATCH --time=24:00:00
-#SBATCH --ntasks=30
-#SBATCH --cpus-per-task=30
+#SBATCH --nodes=30
+#SBATCH --ntasks-per-node=1
+#SBATCH --cpus-per-task=40
 #SBATCH --mem-per-cpu=4G
-#SBATCH --output=/cluster/scratch/damrein/outputs/logs/pkdgrav_%j.out
-#SBATCH --error=/cluster/scratch/damrein/outputs/logs/pkdgrav_%j.err
+#SBATCH --array=2-3
+#SBATCH --output=/cluster/scratch/damrein/outputs/logs/pkdgrav_%A_%a.out
+#SBATCH --error=/cluster/scratch/damrein/outputs/logs/pkdgrav_%A_%a.err
 
 SCRATCH_DIR=/cluster/scratch/damrein
-OUTPUT_DIR=${SCRATCH_DIR}/outputs/ICs/000001_copy12
 PKDGRAV_BIN=${SCRATCH_DIR}/pkdgrav/pkdgrav3_dev-master/build/pkdgrav3
-PARAM_FILE=${SCRATCH_DIR}/cosmogridv1/cosmo_000001/param_files/cosmology.par
+
+# Load the same module stack used to build pkdgrav3 so the binary is run
+# against the correct OpenMPI 4.1.6 runtime (not conda's OpenMPI 5.x).
+# Deactivate conda first so its LD_LIBRARY_PATH/PATH don't override the modules.
+CONDA_ROOT=${SCRATCH_DIR}/miniconda3
+if [[ -f "${CONDA_ROOT}/etc/profile.d/conda.sh" ]]; then
+    source "${CONDA_ROOT}/etc/profile.d/conda.sh"
+    conda deactivate 2>/dev/null || true
+fi
+unset CPATH CPLUS_INCLUDE_PATH C_INCLUDE_PATH LIBRARY_PATH
+module load stack/2024-06 gcc/12.2.0 openmpi/4.1.6
+module load fftw/3.3.10
+module load hdf5/1.14.3
+
+# Map array task ID to zero-padded 6-digit cosmology index (1 -> 000001, 2 -> 000002, ...)
+COSMO_ID=$(printf '%06d' "${SLURM_ARRAY_TASK_ID}")
+OUTPUT_DIR=${SCRATCH_DIR}/outputs/ICs/cosmo_${COSMO_ID}
+PARAM_FILE=${SCRATCH_DIR}/cosmogridv1/cosmo_${COSMO_ID}/param_files/cosmology.par
 
 mkdir -p "${OUTPUT_DIR}"
 cd "${OUTPUT_DIR}" # PKDGRAV writes output to the current directory, so cd there first
@@ -20,16 +38,14 @@ export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK:-1}"
 export OMP_PROC_BIND=close
 export OMP_PLACES=cores
 
-NTASKS="${SLURM_NTASKS:-1}"
-# If you want one MPI rank per node (ppr:1:node), set MPI_RANKS to the number of allocated nodes.
-# Fall back to NTASKS for interactive/testing when SLURM_JOB_NUM_NODES is not set.
-MPI_RANKS="${SLURM_JOB_NUM_NODES:-${NTASKS}}"
+# With --ntasks-per-node=1, SLURM_NTASKS == SLURM_JOB_NUM_NODES, so one MPI rank per node.
+MPI_RANKS="${SLURM_NTASKS:-1}"
 
 start_time=$(date +%s)
-echo "[$(date +'%Y-%m-%dT%H:%M:%S%z')] Starting mpirun (mpirank=${MPI_RANKS}, ntasks=${NTASKS}, cpus/task=${SLURM_CPUS_PER_TASK})"
-# Map policy: one MPI rank per node, advertise per-rank CPU allocation (PE) so hybrid MPI+OpenMP works.
-# This requests ppr:1:node and assigns PE equal to SLURM_CPUS_PER_TASK (fallback 1).
-mpirun -np "${MPI_RANKS}" --map-by "ppr:1:node:PE=${SLURM_CPUS_PER_TASK:-1}" --bind-to core --report-bindings "${PKDGRAV_BIN}" "${PARAM_FILE}"
+echo "[$(date +'%Y-%m-%dT%H:%M:%S%z')] Starting mpirun (mpirank=${MPI_RANKS}, cpus/task=${SLURM_CPUS_PER_TASK})"
+# Map policy: one MPI rank per node; PE= tells OpenMPI how many CPU threads each rank will use
+# so hwloc can set up correct NUMA-aware binding without crashing on certain node topologies.
+mpirun -np "${MPI_RANKS}" --map-by "ppr:1:node:PE=${SLURM_CPUS_PER_TASK:-1}" --bind-to core "${PKDGRAV_BIN}" "${PARAM_FILE}"
 rc=$?
 end_time=$(date +%s)
 elapsed=$((end_time - start_time))

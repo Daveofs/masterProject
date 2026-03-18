@@ -22,6 +22,7 @@ from torch import nn
 from torch.utils.data import Dataset, DataLoader
 import matplotlib.pyplot as plt
 from tqdm.auto import tqdm
+from mlp import SmallMLP
 
 
 class ShellPairsDataset(Dataset):
@@ -139,27 +140,6 @@ class ShellPairsDataset(Dataset):
             patches_high = self.high_down[idx].reshape(self.n_patches, self.patch_npix)
             return patches_low, patches_high, self.cosmo_mat[idx]
         return self.low_down[idx], self.high_down[idx], self.cosmo_mat[idx]
-
-
-class SmallMLP(nn.Module):
-    def __init__(self, dim_in: int, cond_dim: int = 0, hidden=512):
-        super().__init__()
-        self.net = nn.Sequential(
-            nn.Linear(dim_in + 1 + cond_dim, hidden),
-            nn.ReLU(),
-            nn.Linear(hidden, hidden),
-            nn.ReLU(),
-            nn.Linear(hidden, dim_in),
-        )
-
-    def forward(self, x, t, cond=None):
-        # x: [B, D], t: [B]  cond: [B, C]
-        T = t.view(-1, 1)
-        if cond is None:
-            inp = torch.cat([x, T], dim=-1)
-        else:
-            inp = torch.cat([x, T, cond], dim=-1)
-        return self.net(inp)
 
 
 def train(args):
