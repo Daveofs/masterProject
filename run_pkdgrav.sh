@@ -28,7 +28,7 @@ module load hdf5/1.14.3
 
 # Map array task ID to zero-padded 6-digit cosmology index (1 -> 000001, 2 -> 000002, ...)
 COSMO_ID=$(printf '%06d' "${SLURM_ARRAY_TASK_ID}")
-OUTPUT_DIR=${SCRATCH_DIR}/outputs/ICs/cosmo_${COSMO_ID}
+OUTPUT_DIR=${SCRATCH_DIR}/outputs/ICs/cosmo*_${COSMO_ID}
 PARAM_FILE=${SCRATCH_DIR}/cosmogridv1/cosmo_${COSMO_ID}/param_files/cosmology.par
 
 mkdir -p "${OUTPUT_DIR}"
