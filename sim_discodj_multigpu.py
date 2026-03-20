@@ -55,12 +55,6 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--time-var", type=str, default="D",
                    help="Time variable: 'a', 'lna', or 'D' (default: D)")
 
-    # --- LPT / ICs ---
-    p.add_argument("--n-order", type=int, default=1,
-                   help="LPT order for internal IC generation (default: 1)")
-    p.add_argument("--seed",    type=int, default=180723,
-                   help="Ngenic white-noise seed for internal ICs (default: 180723)")
-
     # --- force solver ---
     p.add_argument("--method",
                    choices=["pm", "nufftpm"], default="pm",
@@ -73,15 +67,34 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--num-chunks",          type=int, default=8,
                    help="Number of scatter/gather chunks (chunk_size = res^3 / num_chunks)")
 
-    # --- lightcone ---
+    # --- lightcone (DiscoDJ built-in, low-z only) ---
     p.add_argument("--lightcone", action="store_true",
-                   help="Enable lightcone output mode")
+                   help="Enable DiscoDJ built-in lightcone mode (limited to ~Lbox/2 radius)")
 
-    # --- external ICs ---
-    p.add_argument("--use-external-ics", action="store_true",
-                   help="Use PKDGRAV tipsy ICs instead of internal LPT")
-    p.add_argument("--ic-file", type=Path, default=None,
-                   help="Path to PKDGRAV tipsy IC file (required when --use-external-ics)")
+    # --- snapshot-based shell lightcone (arbitrary z_max) ---
+    p.add_argument("--build-shells", action="store_true",
+                   help="Accumulate HEALPix lightcone shells from per-step snapshots "
+                        "(works to high z; uses build_lightcone_shells.py)")
+    p.add_argument("--shells-output-dir", type=Path, default=None,
+                   help="Output directory for shell FITS files (default: output-dir/shells)")
+    p.add_argument("--shells-snap-dir",   type=Path, default=None,
+                   help="If set, also save per-step snapshot NPZ files here")
+    p.add_argument("--shells-nside",      type=int, default=2048,
+                   help="HEALPix Nside for shell maps (default: 2048)")
+    p.add_argument("--shells-z-max",      type=float, default=3.5,
+                   help="Maximum redshift for lightcone shells (default: 3.5)")
+    p.add_argument("--shells-prefix",     type=str, default="CosmoML",
+                   help="Filename prefix for shell FITS files (default: CosmoML)")
+
+    # --- ICs ---
+    p.add_argument("--ic-file", type=Path, required=False,
+                   help="Path to PKDGRAV tipsy IC file (external ICs)")
+    p.add_argument("--use-internal-ics", action="store_true",
+                   help="Generate internal ICs (ngenic-like white noise) instead of using an external IC file")
+    p.add_argument("--ngenic-seed", type=int, default=180723,
+                   help="Seed for internal ngenic white-noise field (default: 180723)")
+    p.add_argument("--n-order", type=int, default=3,
+                   help="LPT order for internal IC generation (default: 3)")
 
     # --- outputs ---
     p.add_argument("--save-final", type=Path, default=None,
@@ -117,9 +130,7 @@ update_global_options(
     a_ini=args.a_ini,
     a_end=args.a_end,
     numsteps=args.n_steps,
-    n_order=args.n_order,
     cosmo=args.cosmo,
-    seed_ngenic=args.seed,
     num_chunks=args.num_chunks,
     lightcone=args.lightcone,
     run_mode=args.mode,
@@ -264,12 +275,30 @@ if _rank0:
 
 t1 = time()
 
-# ── Initial Conditions ──────────────────────────────────────────────────────
-use_external_ics = args.use_external_ics
+# ── Initial Conditions ────────────────────────────────────────────────────
+if args.use_internal_ics:
+    if _rank0:
+        print("Using internal IC generator (LPT)")
 
-if use_external_ics:
-    if args.ic_file is None:
-        raise ValueError("--ic-file is required when --use-external-ics is set")
+    dj = dj.with_linear_ps(transfer_function="Eisenstein-Hu")
+    sync_global_devices("sync_linear_ps")
+
+    from multigpu_utils import get_white_noise_field
+    # Ensure the local cache directory exists (get_white_noise_field saves
+    # per-rank .npy files there using a relative path "data/...")
+    Path("data").mkdir(exist_ok=True)
+    white_noise = get_white_noise_field(dj, mode, Npart, args.ngenic_seed)
+
+    dj = dj.with_ics(
+        white_noise_space="real",
+        white_noise_field=white_noise,
+        try_to_jit=True,
+    )
+
+    with get_mesh():
+        dj = dj.with_lpt(n_order=args.n_order, convert_to_numpy=False, try_to_jit=True)
+
+elif args.ic_file is not None:
     if _rank0:
         print("Using external PKDGRAV ICs")
     pos_sorted, vel_sorted = _load_external_ics(args.ic_file)
@@ -278,56 +307,8 @@ if use_external_ics:
 
 else:
     if _rank0:
-        print("Using internal IC generator (LPT)")
-    dj = dj.with_linear_ps(transfer_function="Eisenstein-Hu")
-    sync_global_devices("sync_after_linear_ps")
-
-    # White noise field
-    try:
-        from discodj_native import rng_ngenic
-        from discodj.core.fft import _irfftn
-        from discodj.core.utils import get_sharding_ax0
-        from jax_array_info import sharding_info
-
-        if jax.process_count() == 1:
-            white_noise = dj.get_ngenic_noise(seed=args.seed)
-            white_noise = jax.device_put(white_noise, get_sharding_ax0())
-        else:
-            from discodj.core.utils import get_sharding_ax0
-            rng = rng_ngenic(args.seed, Npart)
-            wn_local = jax.device_put(
-                rng.get_field_sharded(jax.device_count(), jax.process_index())
-            )
-            irfftn = jax.jit(
-                _irfftn,
-                donate_argnums=0,
-                in_shardings=get_sharding_ax0(),
-                out_shardings=get_sharding_ax0(),
-            )
-            white_noise = jax.make_array_from_single_device_arrays(
-                (Npart, Npart, Npart // 2 + 1),
-                get_sharding_ax0(),
-                [wn_local],
-            )
-            white_noise = irfftn(white_noise * Npart ** (3 / 2))
-
-        if _rank0:
-            sharding_info(white_noise, "white_noise_field")
-
-    except ImportError:
-        # Fallback: use the high-level helper
-        white_noise = dj.get_ngenic_noise(seed=args.seed)
-
-    dj = dj.with_ics(
-        white_noise_space="real",
-        white_noise_field=white_noise,
-        try_to_jit=True,
-    )
-    del white_noise
-
-    # LPT displacement
-    with get_mesh():
-        dj = dj.with_lpt(n_order=args.n_order, convert_to_numpy=False, try_to_jit=True)
+        print("ERROR: No initial conditions provided. Use --ic-file or --use-internal-ics.")
+    import sys as _sys; _sys.exit(2)
 
 t2 = time()
 if _rank0:
@@ -337,6 +318,46 @@ if _rank0:
 if _rank0:
     print("Running N-body simulation …")
 
+# ── Snapshot-based HEALPix shell lightcone (high-z capable) ─────────────────
+if args.build_shells and _rank0:
+    from build_lightcone_shells import run_with_shells
+
+    _shells_out = args.shells_output_dir
+    if _shells_out is None:
+        _shells_out = (_script_dir / "outputs" / "shells")
+    _shells_out.mkdir(parents=True, exist_ok=True)
+
+    # Use the same explicit a-sequence the normal run would use, so shells
+    # match the pkdgrav step spacing (a_ini → a_end in n_steps equal steps)
+    import numpy as _np
+    _a_steps = _np.linspace(a_ini, args.a_end, args.n_steps + 1, dtype=_np.float64)
+
+    print(f"Shell lightcone: nside={args.shells_nside}  z_max={args.shells_z_max}  "
+          f"prefix={args.shells_prefix}  output={_shells_out}")
+
+    _n_shells = run_with_shells(
+        dj=dj,
+        a_steps=_a_steps,
+        res_pm=args.res_pm,
+        output_dir=_shells_out,
+        nside=args.shells_nside,
+        z_max=args.shells_z_max,
+        prefix=args.shells_prefix,
+        snap_dir=args.shells_snap_dir,
+        stepper=args.stepper,
+        method=args.method,
+        antialias=args.antialias,
+        grad_kernel_order=args.grad_kernel_order,
+        laplace_kernel_order=args.laplace_kernel_order,
+        n_resample=args.n_resample,
+        chunk_size=chunk_size,
+        deconvolve=args.deconvolve,
+    )
+    print(f"Shell lightcone done: {_n_shells} shells → {_shells_out}")
+    sync_global_devices("shells_done")
+    import sys as _sys; _sys.exit(0)
+
+# ── Standard N-body run (no shell accumulation) ──────────────────────────────
 run_nbody_result = dj.run_nbody(
     a_ini=a_ini,
     a_end=args.a_end,
@@ -349,7 +370,6 @@ run_nbody_result = dj.run_nbody(
     antialias=args.antialias,
     grad_kernel_order=args.grad_kernel_order,
     laplace_kernel_order=args.laplace_kernel_order,
-    nlpt_order_ics=args.n_order,
     n_resample=args.n_resample,
     chunk_size=chunk_size,
     deconvolve=args.deconvolve,
@@ -390,16 +410,21 @@ delta_mean, delta_slice, delta_thin_slice = out
 if _rank0:
     print("delta_mean shape:", delta_mean.shape)
 
-# ── Save final snapshot (per-rank shards, then rank-0 collects) ─────────────
+# ── Save final snapshot (rank 0 gathers all shards and saves one file) ───────
 if args.save_final is not None:
     args.save_final.parent.mkdir(parents=True, exist_ok=True)
-    # Each rank saves its local shard of psi_sim (displacement field)
-    proc_id = jax.process_index()
-    shard_path = args.save_final.with_suffix(f".rank{proc_id}.npz")
-    local_psi = jax.device_get(psi_sim)
-    np.savez_compressed(shard_path, psi=np.asarray(local_psi), a_hist=np.asarray(a))
+    # In multi-process JAX each rank can only access its own shards.
+    # Collect this rank's local slab, then send to rank 0 via jax.distributed.
+    local_psi = np.concatenate(
+        [np.asarray(s.data) for s in psi_sim.addressable_shards], axis=0
+    )
+    # process_allgather returns (nprocs, *local_shape); concatenate along axis 0
+    # to get (nprocs*slab_x, res_y, res_z, 3) — the full displacement field.
+    gathered = jax.experimental.multihost_utils.process_allgather(local_psi)
+    full_psi = np.concatenate(gathered, axis=0)
     if _rank0:
-        print(f"Saved local shard → {shard_path}")
+        np.savez_compressed(args.save_final, psi=full_psi, a_hist=np.asarray(a))
+        print(f"Saved full snapshot → {args.save_final}  shape={full_psi.shape}")
 
 # ── Optional density-slice plot (rank 0 only — slices are already gathered) ─
 if args.plot and _rank0:

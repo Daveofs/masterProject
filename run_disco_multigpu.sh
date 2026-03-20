@@ -4,17 +4,12 @@
 #
 # Runs one SLURM task per GPU via `srun`; JAX distributed init
 # is triggered automatically by the presence of SLURM_JOB_ID.
-#
-# GPU options (uncomment the pair you want):
-#   4× RTX 3090 (24 GB each) on gpuhe.4h  ← default below
-#   4× RTX 4090 (24 GB each) on gpuhe.4h
 # ============================================================
 #SBATCH --job-name=disco_multigpu
-#SBATCH --partition=gpuhe.4h
+#SBATCH --partition=gpuhe.4h                           
 #SBATCH --nodes=1
-#SBATCH --ntasks=4                            # one task per GPU
-#SBATCH --gpus=nvidia_geforce_rtx_3090:4      # 4× RTX 3090 on one node
-##SBATCH --gpus=nvidia_geforce_rtx_4090:4     # alternative: 4× RTX 4090
+#SBATCH --ntasks=2                            # one task per GPU
+#SBATCH --gpus=nvidia_geforce_rtx_3090:2      
 #SBATCH --cpus-per-task=4
 #SBATCH --mem-per-cpu=16G                     # 4 tasks × 4 CPUs × 16 GB = 256 GB
 #SBATCH --time=04:00:00
@@ -31,6 +26,11 @@ VENV_DIR=/cluster/work/refregier/damrein/vir_env_discodj
 # Input IC file (only used when USE_EXTERNAL_ICS=true)
 IC_FILE=/cluster/scratch/damrein/outputs/ICs/000001_copy6/CosmoML.00000
 
+# Use internal ngenic-like ICs instead of an external tipsy file
+# Set to "true" to generate ICs inside the Python script
+USE_INTERNAL_ICS=true
+NGENIC_SEED=180723
+
 # Output paths
 LOG_DIR=${SCRATCH_DIR}/outputs/logs
 SNAP_DIR=${SCRATCH_DIR}/outputs/snapshots
@@ -38,8 +38,11 @@ PLOT_DIR=${SCRATCH_DIR}/outputs/plots/multigpu
 
 # ── Simulation parameters ─────────────────────────────────────────────────
 MODE=gpu            # gpu | cpu
-RES=512             # particle grid resolution per axis  (N_part = RES^3)
-RES_PM=512          # PM force grid resolution per axis
+# The provided tipsy IC contains 832^3 particles. Set RES to 832 so
+# the loaded positions match DISCO-DJ's expected shape (RES**3).
+RES=256             # particle grid resolution per axis  (N_part = RES^3)
+# Keep PM grid conservative to avoid cuFFT OOM on 24GB GPUs
+RES_PM=256          # PM force grid resolution per axis (use 512 on A100/RTX Pro)
 BOXSIZE=900.0       # box size [Mpc/h]
 COSMO=Planck15      # DISCO-DJ cosmology preset
 A_INI=0.01          # initial scale factor  (z=99 → a=0.01)
@@ -47,16 +50,11 @@ A_END=1.0           # final scale factor
 N_STEPS=20          # number of N-body timesteps
 STEPPER=bullfrog    # bullfrog | fastpm | symplectic
 TIME_VAR=D          # time variable: a | lna | D
-N_ORDER=1           # LPT order for internal ICs (1 or 2)
-SEED=180723         # Ngenic seed (for internal ICs)
 METHOD=pm           # pm | nufftpm
 GRAD_KERNEL_ORDER=4
 LAPLACE_KERNEL_ORDER=0
-NUM_CHUNKS=8        # chunk_size = RES^3 / NUM_CHUNKS
+NUM_CHUNKS=32       # chunk_size = RES^3 / NUM_CHUNKS (increase chunks to lower per-chunk memory)
 LIGHTCONE=false     # set to "true" to enable lightcone mode
-
-# Set to "true" to use external PKDGRAV ICs from IC_FILE, "false" for internal LPT
-USE_EXTERNAL_ICS=false
 
 # ── JAX / XLA memory settings ─────────────────────────────────────────────
 export JAX_PLATFORM_NAME=gpu
@@ -79,8 +77,11 @@ if [[ ! -d "${VENV_DIR}" ]]; then
     echo "Virtual env not found: ${VENV_DIR}" >&2; exit 1
 fi
 
-if [[ "${USE_EXTERNAL_ICS}" == "true" && ! -f "${IC_FILE}" ]]; then
-    echo "IC file not found: ${IC_FILE}. Run run_convert_ic.sh first." >&2; exit 2
+if [[ "${USE_INTERNAL_ICS}" != "true" ]]; then
+    if [[ ! -f "${IC_FILE}" ]]; then
+        echo "IC file not found: ${IC_FILE}. Check IC path or set USE_INTERNAL_ICS=true to generate internal ICs." >&2
+        exit 2
+    fi
 fi
 
 # ── Activate virtual environment ──────────────────────────────────────────
@@ -101,6 +102,8 @@ fi
 
 # ── Create output directories ─────────────────────────────────────────────
 mkdir -p "${LOG_DIR}" "${SNAP_DIR}" "${PLOT_DIR}"
+# Cache directory for get_white_noise_field() (relative to PROJECT_DIR)
+mkdir -p "${PROJECT_DIR}/data"
 
 SAVE_FINAL="${SNAP_DIR}/final_multigpu_${SLURM_JOB_ID}.npz"
 
@@ -117,8 +120,6 @@ PYTHON_ARGS=(
     --n-steps     "${N_STEPS}"
     --stepper     "${STEPPER}"
     --time-var    "${TIME_VAR}"
-    --n-order     "${N_ORDER}"
-    --seed        "${SEED}"
     --method      "${METHOD}"
     --grad-kernel-order    "${GRAD_KERNEL_ORDER}"
     --laplace-kernel-order "${LAPLACE_KERNEL_ORDER}"
@@ -128,8 +129,11 @@ PYTHON_ARGS=(
     --plot
 )
 
-if [[ "${USE_EXTERNAL_ICS}" == "true" ]]; then
-    PYTHON_ARGS+=(--use-external-ics --ic-file "${IC_FILE}")
+if [[ "${USE_INTERNAL_ICS}" == "true" ]]; then
+    PYTHON_ARGS+=(--use-internal-ics)
+    PYTHON_ARGS+=(--ngenic-seed "${NGENIC_SEED}")
+else
+    PYTHON_ARGS+=(--ic-file "${IC_FILE}")
 fi
 
 if [[ "${LIGHTCONE}" == "true" ]]; then

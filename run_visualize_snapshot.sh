@@ -72,22 +72,55 @@ snap = Path(r"${SNAPSHOT}")
 outdir = Path(r"${OUTDIR}")
 
 if snap.suffix.lower() == ".npz":
-    # DiscoDJ output: NPZ with a 'pos' key, positions in Mpc/h units
     data = np.load(snap, allow_pickle=False)
-    pos = np.asarray(data['pos'])
-    BOXSIZE = float(data['boxsize']) if 'boxsize' in data else BOXSIZE
+    if 'pos' in data:
+        # Plain positions array
+        pos = np.asarray(data['pos'])
+        BOXSIZE = float(data['boxsize']) if 'boxsize' in data else BOXSIZE
+        grid_val = 832
+        slice_thickness_val = 5.0
+    elif 'psi' in data:
+        # DISCO-DJ output: psi is displacement field (res_x, res_y, res_z, 3)
+        # Merge rank shards if this is a per-rank file (old format)
+        import glob, re
+        rank_pattern = re.sub(r'\.rank\d+\.npz$', '.rank*.npz', str(snap))
+        rank_files = sorted(glob.glob(rank_pattern))
+        if len(rank_files) > 1:
+            print(f"Merging {len(rank_files)} rank shards: {[Path(f).name for f in rank_files]}")
+            psi_all = np.concatenate([np.load(f, allow_pickle=False)['psi'] for f in rank_files], axis=0)
+        else:
+            psi_all = np.asarray(data['psi'])
+        res_x, res_y, res_z = psi_all.shape[:3]
+        print(f"psi shape: {psi_all.shape}  (res_x={res_x}, res_y={res_y}, res_z={res_z})")
+        # Reconstruct Lagrangian grid q — each axis scaled to BOXSIZE independently
+        ix, iy, iz = np.mgrid[0:res_x, 0:res_y, 0:res_z]
+        q = np.stack([
+            ix.astype(np.float32) * (BOXSIZE / res_x),
+            iy.astype(np.float32) * (BOXSIZE / res_y),
+            iz.astype(np.float32) * (BOXSIZE / res_z),
+        ], axis=-1)
+        # Eulerian positions = q + psi (periodic wrap)
+        pos = ((q + psi_all).reshape(-1, 3)) % BOXSIZE
+        del q, psi_all
+        # Full projection along slice axis: equivalent to delta_mean from sim script
+        grid_val = res_x
+        slice_thickness_val = BOXSIZE
+    else:
+        raise KeyError(f"NPZ file {snap.name} has neither 'pos' nor 'psi' key. Keys: {list(data.keys())}")
 else:
     # pkdgrav Tipsy binary (no extension or .00NNN)
     p, _ = read_tipsy(snap, BOXSIZE)
     pos = np.column_stack([p['x'], p['y'], p['z']])
+    grid_val = 832
+    slice_thickness_val = 5.0
 
 plot_density_slice(
     positions=pos,
     boxsize=BOXSIZE,
     slice_axis=2,
     slice_center=None,
-    slice_thickness=5.0,
-    grid=832,
+    slice_thickness=slice_thickness_val,
+    grid=grid_val,
     input_file=snap,
     output_dir=outdir,
 )

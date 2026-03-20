@@ -218,7 +218,6 @@ def plot_density_slice(
     """Bin a thin slab of particles onto a 2D grid and plot the density contrast."""
     try:
         import matplotlib.pyplot as plt
-        from matplotlib.colors import SymLogNorm
     except ImportError as exc:  # pragma: no cover - optional dependency
         raise SystemExit(
             "Matplotlib is required for plotting. Install it via 'conda install matplotlib' or rerun without --plot."
@@ -268,31 +267,18 @@ def plot_density_slice(
         bins=grid,
         range=[[0.0, boxsize], [0.0, boxsize]],
     )
-    
-    # Convert to density contrast δ = ρ/⟨ρ⟩ - 1
-    density = hist / np.mean(hist) - 1.0
 
-    fig, ax = plt.subplots(figsize=(6, 6))
-    extent = (0, boxsize, 0, boxsize)
-    norm = SymLogNorm(linthresh=1e-3, linscale=1.0, vmin=density.min(), vmax=density.max())
-    im = ax.imshow(density.T, origin="lower", cmap="magma", extent=extent, norm=norm)
-    cbar = fig.colorbar(im, ax=ax, label="δ (symlog)")
-    ax.set_xlabel("x [Mpc/h]")
-    ax.set_ylabel("y [Mpc/h]")
-    ax.set_title(
-        f"Density slice @ axis {slice_axis}, center={center:.1f} Mpc/h, thickness={slice_thickness:.1f}"
-    )
-    plt.tight_layout()
+    # log10(1.01 + δ) — same normalisation used in sim_discodj_multigpu.py plots
+    density = hist / np.mean(hist) - 1.0
+    log_density = np.log10(1.01 + density)
 
     if output_dir is None:
         output_dir = Path(__file__).with_name("outputs").joinpath("plots")
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # derive output filename from input file if provided
     if input_file is not None:
         try:
-            inp = Path(input_file)
-            base = inp.stem
+            base = Path(input_file).stem
         except Exception:
             base = None
     else:
@@ -304,7 +290,6 @@ def plot_density_slice(
         file_name = f"density_slice_axis{slice_axis}_center{center:.1f}.png"
 
     out_path = output_dir / file_name
-    fig.savefig(out_path, dpi=300)
-    plt.close(fig)
+    plt.imsave(out_path, log_density.T, cmap="inferno", origin="lower")
     print(f"Saved density slice to {out_path}")
     return out_path
