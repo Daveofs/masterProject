@@ -47,7 +47,7 @@ if ! "${PYTHON_BIN}" -c "import numpy, matplotlib" >/dev/null 2>&1; then
   exit 3
 fi
 
-SNAPSHOT=${SCRATCH}/outputs/snapshots/final_snapshot_cpu_60125122.npz
+SNAPSHOT=${SCRATCH}/outputs/snapshots/final_multigpu_61026040.npz
 #SNAPSHOT=${SCRATCH}/outputs/ICs/000001_copy7/CosmoML.00080
 OUTDIR=${SCRATCH}/outputs/plots/snapshots
 

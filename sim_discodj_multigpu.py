@@ -284,9 +284,17 @@ if args.use_internal_ics:
     sync_global_devices("sync_linear_ps")
 
     from multigpu_utils import get_white_noise_field
-    # Ensure the local cache directory exists (get_white_noise_field saves
-    # per-rank .npy files there using a relative path "data/...")
-    Path("data").mkdir(exist_ok=True)
+    # get_white_noise_field saves/loads from "data/" relative to cwd.
+    # Redirect that to /cluster/scratch/damrein/white_noise via a symlink.
+    _wn_dir = Path("/cluster/scratch/damrein/white_noise")
+    _wn_dir.mkdir(parents=True, exist_ok=True)
+    _data_link = Path("/cluster/scratch/damrein/data")
+    if not _data_link.exists() and not _data_link.is_symlink():
+        try:
+            _data_link.symlink_to(_wn_dir)
+        except FileExistsError:
+            pass  # another rank got there first
+    os.chdir("/cluster/scratch/damrein")
     white_noise = get_white_noise_field(dj, mode, Npart, args.ngenic_seed)
 
     dj = dj.with_ics(
@@ -381,7 +389,7 @@ if args.lightcone:
     psi_sim, P, a, _S = run_nbody_result
 else:
     psi_sim, P, a = run_nbody_result
-del run_nbody_result, P
+del run_nbody_result
 
 t3 = time()
 if _rank0:
@@ -413,18 +421,23 @@ if _rank0:
 # ── Save final snapshot (rank 0 gathers all shards and saves one file) ───────
 if args.save_final is not None:
     args.save_final.parent.mkdir(parents=True, exist_ok=True)
-    # In multi-process JAX each rank can only access its own shards.
-    # Collect this rank's local slab, then send to rank 0 via jax.distributed.
-    local_psi = np.concatenate(
-        [np.asarray(s.data) for s in psi_sim.addressable_shards], axis=0
+    # Derive Eulerian positions from the displacement field
+    X_sim = dj.get_pos_from_psi(psi_sim)
+    # Gather positions across ranks
+    local_pos = np.concatenate(
+        [np.asarray(s.data) for s in X_sim.addressable_shards], axis=0
     )
-    # process_allgather returns (nprocs, *local_shape); concatenate along axis 0
-    # to get (nprocs*slab_x, res_y, res_z, 3) — the full displacement field.
-    gathered = jax.experimental.multihost_utils.process_allgather(local_psi)
-    full_psi = np.concatenate(gathered, axis=0)
+    gathered_pos = jax.experimental.multihost_utils.process_allgather(local_pos)
+    full_pos = np.concatenate(gathered_pos, axis=0).reshape(-1, 3)
+    # Gather velocities across ranks
+    local_vel = np.concatenate(
+        [np.asarray(s.data) for s in P.addressable_shards], axis=0
+    )
+    gathered_vel = jax.experimental.multihost_utils.process_allgather(local_vel)
+    full_vel = np.concatenate(gathered_vel, axis=0).reshape(-1, 3)
     if _rank0:
-        np.savez_compressed(args.save_final, psi=full_psi, a_hist=np.asarray(a))
-        print(f"Saved full snapshot → {args.save_final}  shape={full_psi.shape}")
+        np.savez_compressed(args.save_final, pos=full_pos, vel=full_vel, a_hist=np.asarray(a))
+        print(f"Saved final snapshot → {args.save_final}  pos={full_pos.shape}")
 
 # ── Optional density-slice plot (rank 0 only — slices are already gathered) ─
 if args.plot and _rank0:
