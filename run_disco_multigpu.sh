@@ -10,8 +10,8 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks=4                            # one task per GPU
 #SBATCH --gpus=nvidia_geforce_rtx_3090:4      
-#SBATCH --cpus-per-task=1
-#SBATCH --mem-per-cpu=100G                     # 4 tasks × 1 CPU × 100 GB = 400 GB
+#SBATCH --cpus-per-task=8
+#SBATCH --mem-per-cpu=10G                     # 4 tasks × 8 CPU × 10 GB = 320 GB
 #SBATCH --time=04:00:00
 #SBATCH --output=/cluster/scratch/damrein/outputs/logs/disco_multigpu_%j.out
 #SBATCH --error=/cluster/scratch/damrein/outputs/logs/disco_multigpu_%j.err
@@ -40,9 +40,9 @@ PLOT_DIR=${SCRATCH_DIR}/outputs/plots/multigpu
 MODE=gpu            # gpu | cpu
 # The provided tipsy IC contains 832^3 particles. Set RES to 832 so
 # the loaded positions match DISCO-DJ's expected shape (RES**3).
-RES=512             # particle grid resolution per axis  (N_part = RES^3)
+RES=832             # particle grid resolution per axis  (N_part = RES^3)
 # Keep PM grid conservative to avoid cuFFT OOM on 24GB GPUs
-RES_PM=512          # PM force grid resolution per axis (use 512 on A100/RTX Pro)
+RES_PM=832          # PM force grid resolution per axis (use 512 on A100/RTX Pro)
 BOXSIZE=900.0       # box size [Mpc/h]
 COSMO=Planck15      # DISCO-DJ cosmology preset
 A_INI=0.01          # initial scale factor  (z=99 → a=0.01)
@@ -55,6 +55,7 @@ GRAD_KERNEL_ORDER=4
 LAPLACE_KERNEL_ORDER=0
 NUM_CHUNKS=32        # chunk_size = RES^3 / NUM_CHUNKS (must be <= RES; increase chunks to lower per-chunk memory)
 LIGHTCONE=false     # set to "true" to enable lightcone mode
+BUILD_SHELLS=false
 
 # ── JAX / XLA memory settings ─────────────────────────────────────────────
 export JAX_PLATFORM_NAME=gpu
@@ -138,6 +139,10 @@ fi
 
 if [[ "${LIGHTCONE}" == "true" ]]; then
     PYTHON_ARGS+=(--lightcone)
+fi
+
+if [[ "${BUILD_SHELLS}" == "true" ]]; then
+    PYTHON_ARGS+=(--build-shells)
 fi
 
 cd "${PROJECT_DIR}"

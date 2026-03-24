@@ -306,6 +306,7 @@ if args.use_internal_ics:
     with get_mesh():
         dj = dj.with_lpt(n_order=args.n_order, convert_to_numpy=False, try_to_jit=True)
 
+
 elif args.ic_file is not None:
     if _rank0:
         print("Using external PKDGRAV ICs")
@@ -429,14 +430,8 @@ if args.save_final is not None:
     )
     gathered_pos = jax.experimental.multihost_utils.process_allgather(local_pos)
     full_pos = np.concatenate(gathered_pos, axis=0).reshape(-1, 3)
-    # Gather velocities across ranks
-    local_vel = np.concatenate(
-        [np.asarray(s.data) for s in P.addressable_shards], axis=0
-    )
-    gathered_vel = jax.experimental.multihost_utils.process_allgather(local_vel)
-    full_vel = np.concatenate(gathered_vel, axis=0).reshape(-1, 3)
     if _rank0:
-        np.savez_compressed(args.save_final, pos=full_pos, vel=full_vel, a_hist=np.asarray(a))
+        np.savez_compressed(args.save_final, pos=full_pos, a_hist=np.asarray(a))
         print(f"Saved final snapshot → {args.save_final}  pos={full_pos.shape}")
 
 # ── Optional density-slice plot (rank 0 only — slices are already gathered) ─
