@@ -425,10 +425,13 @@ if args.save_final is not None:
     # Derive Eulerian positions from the displacement field
     X_sim = dj.get_pos_from_psi(psi_sim)
     # Gather positions across ranks
+    print("Gathering final snapshot across ranks for saving …")
     local_pos = np.concatenate(
         [np.asarray(s.data) for s in X_sim.addressable_shards], axis=0
     )
+    print(f"Local shard shape: {local_pos.shape}  dtype: {local_pos.dtype}")
     gathered_pos = jax.experimental.multihost_utils.process_allgather(local_pos)
+    print(f"Gathered {len(gathered_pos)} shards across ranks")
     full_pos = np.concatenate(gathered_pos, axis=0).reshape(-1, 3)
     if _rank0:
         np.savez_compressed(args.save_final, pos=full_pos, a_hist=np.asarray(a))

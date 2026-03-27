@@ -19,7 +19,7 @@
 set -euo pipefail
 
 # ── Paths ─────────────────────────────────────────────────────────────────
-PROJECT_DIR=/users/damrein/masterProject
+PROJECT_DIR=/users/damrein/masterProject/disco
 SCRATCH_DIR=/capstor/scratch/cscs/damrein
 CONDA_ENV=disco-dj
 CONDA_INIT=$HOME/miniforge3/etc/profile.d/conda.sh
@@ -53,7 +53,6 @@ LAPLACE_KERNEL_ORDER=0
 NUM_CHUNKS=32
 LIGHTCONE=false
 BUILD_SHELLS=false
-
 # ── JAX compilation cache (avoids 20-sec first-run JIT overhead on re-runs) ──
 JAX_CACHE_DIR=${SCRATCH_DIR}/jax_cache
 export JAX_COMPILATION_CACHE_DIR=${JAX_CACHE_DIR}
