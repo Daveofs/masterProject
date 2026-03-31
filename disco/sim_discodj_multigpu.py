@@ -116,7 +116,7 @@ args = parse_args()
 # the editable install maps discodj.core.multigpu_utils → scripts/utils.py,
 # which does bare `import utils_jens` (a peer module in the same directory).
 # ---------------------------------------------------------------------------
-_discodj_scripts = Path("/cluster/work/refregier/damrein/DISCO-DJ/scripts")
+_discodj_scripts = Path("/users/damrein/DISCO-DJ/scripts")
 if str(_discodj_scripts) not in sys.path:
     sys.path.insert(0, str(_discodj_scripts))
 
@@ -287,17 +287,17 @@ if args.use_internal_ics:
 
     from multigpu_utils import get_white_noise_field
     # get_white_noise_field saves/loads from "data/" relative to cwd.
-    # Redirect that to /cluster/scratch/damrein/white_noise via a symlink.
-    _wn_dir = Path("/cluster/scratch/damrein/white_noise")
+    # Redirect that to /capstor/scratch/cscs/damrein/white_noise via a symlink.
+    _wn_dir = Path("/capstor/scratch/cscs/damrein/white_noise")
     _wn_dir.mkdir(parents=True, exist_ok=True)
-    _data_link = Path("/cluster/scratch/damrein/data")
+    _data_link = Path("/capstor/scratch/cscs/damrein/data")
     if not _data_link.exists() and not _data_link.is_symlink():
         try:
             _data_link.symlink_to(_wn_dir)
         except FileExistsError:
             pass  # another rank got there first
-    os.chdir("/cluster/scratch/damrein")
-    white_noise = get_white_noise_field(dj, None, Npart, args.ngenic_seed)
+    os.chdir("/capstor/scratch/cscs/damrein")
+    white_noise = get_white_noise_field(dj, mode, Npart, args.ngenic_seed)
 
     dj = dj.with_ics(
         white_noise_space="real",
