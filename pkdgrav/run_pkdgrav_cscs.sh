@@ -2,12 +2,13 @@
 #SBATCH --job-name=pkdgrav
 #SBATCH --account=sk037
 #SBATCH --partition=normal
-#SBATCH --nodes=1
-#SBATCH --ntasks-per-node=16 
+#SBATCH --nodes=10
+#SBATCH --ntasks-per-node=8 
+#SBATCH --cpus-per-task=16
 #SBATCH --array=1
 #SBATCH --time=12:00:00
-#SBATCH --output=/capstor/scratch/cscs/damrein/outputs/logs/pkdgrav_%A_%a.out
-#SBATCH --error=/capstor/scratch/cscs/damrein/outputs/logs/pkdgrav_%A_%a.err
+#SBATCH --output=/capstor/scratch/cscs/damrein/outputs/logs/pkdgrav/pkdgrav_%A_%a.out
+#SBATCH --error=/capstor/scratch/cscs/damrein/outputs/logs/pkdgrav/pkdgrav_%A_%a.err
 
 # Run index within each cosmology (run_0 … run_6); change as needed.
 RUN_ID=1
