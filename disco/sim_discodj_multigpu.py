@@ -70,6 +70,8 @@ def parse_args() -> argparse.Namespace:
     # --- lightcone (DiscoDJ built-in, low-z only) ---
     p.add_argument("--lightcone", action="store_true",
                    help="Enable DiscoDJ built-in lightcone mode (limited to ~Lbox/2 radius)")
+    p.add_argument("--z-lc-ini", type=float, default=None,
+                   help="Initial redshift for DiscoDJ built-in lightcone; overrides computed a_lc_ini (higher z -> smaller a)")
 
     # --- snapshot-based shell lightcone (arbitrary z_max) ---
     p.add_argument("--build-shells", action="store_true",
@@ -367,6 +369,13 @@ if args.build_shells and _rank0:
     import sys as _sys; _sys.exit(0)
 
 # ── Standard N-body run (no shell accumulation) ──────────────────────────────
+# Optional override: convert requested initial lightcone redshift to scale factor
+a_lc_ini_override = None
+if args.z_lc_ini is not None:
+    a_lc_ini_override = 1.0 / (1.0 + float(args.z_lc_ini))
+    if _rank0:
+        print(f"Forcing lightcone initial redshift z_lc_ini={args.z_lc_ini} -> a_lc_ini={a_lc_ini_override:.6e}")
+
 run_nbody_result = dj.run_nbody(
     a_ini=a_ini,
     a_end=args.a_end,
@@ -382,6 +391,7 @@ run_nbody_result = dj.run_nbody(
     n_resample=args.n_resample,
     chunk_size=chunk_size,
     deconvolve=args.deconvolve,
+    a_lc_ini_override=a_lc_ini_override,
     return_displacement=True,
     convert_to_numpy=False,
 )
@@ -420,22 +430,44 @@ if _rank0:
     print("delta_mean shape:", delta_mean.shape)
 
 # ── Save final snapshot (rank 0 gathers all shards and saves one file) ───────
-if args.save_final is not None:
-    args.save_final.parent.mkdir(parents=True, exist_ok=True)
-    # Derive Eulerian positions from the displacement field
-    X_sim = dj.get_pos_from_psi(psi_sim)
-    # Gather positions across ranks
-    print("Gathering final snapshot across ranks for saving …")
-    local_pos = np.concatenate(
-        [np.asarray(s.data) for s in X_sim.addressable_shards], axis=0
-    )
-    print(f"Local shard shape: {local_pos.shape}  dtype: {local_pos.dtype}")
-    gathered_pos = jax.experimental.multihost_utils.process_allgather(local_pos)
-    print(f"Gathered {len(gathered_pos)} shards across ranks")
-    full_pos = np.concatenate(gathered_pos, axis=0).reshape(-1, 3)
-    if _rank0:
-        np.savez_compressed(args.save_final, pos=full_pos, a_hist=np.asarray(a))
-        print(f"Saved final snapshot → {args.save_final}  pos={full_pos.shape}")
+    if args.save_final is not None:
+        args.save_final.parent.mkdir(parents=True, exist_ok=True)
+        # Derive Eulerian positions from the displacement field
+        X_sim = dj.get_pos_from_psi(psi_sim)
+        # Gather positions across ranks
+        local_pos = np.concatenate(
+            [np.asarray(s.data) for s in X_sim.addressable_shards], axis=0
+        )
+        gathered_pos = jax.experimental.multihost_utils.process_allgather(local_pos)
+        full_pos = np.concatenate(gathered_pos, axis=0).reshape(-1, 3)
+
+        # Prepare data to save; include lightcone S when requested
+        save_dict = {"pos": full_pos, "a_hist": np.asarray(a)}
+        if args.lightcone:
+            # _S is only present when lightcone=True (unpacked above)
+            S_sim = _S
+            try:
+                # If S is sharded (like X_sim), gather shards
+                if hasattr(S_sim, "addressable_shards"):
+                    local_S = np.concatenate([np.asarray(s.data) for s in S_sim.addressable_shards], axis=0)
+                else:
+                    local_S = np.asarray(S_sim)
+            except Exception:
+                local_S = np.asarray(S_sim)
+
+            gathered_S = jax.experimental.multihost_utils.process_allgather(local_S)
+            full_S = np.concatenate(gathered_S, axis=0)
+            # Remove leading singleton dim if present (run_nbody may leave an extra leading axis)
+            if getattr(full_S, 'ndim', 0) > 1 and full_S.shape[0] == 1:
+                full_S = np.squeeze(full_S, axis=0)
+            save_dict["S"] = full_S
+
+        if _rank0:
+            np.savez_compressed(args.save_final, **save_dict)
+            if args.lightcone:
+                print(f"Saved final snapshot + lightcone S → {args.save_final}  pos={full_pos.shape} S={full_S.shape}")
+            else:
+                print(f"Saved final snapshot → {args.save_final}  pos={full_pos.shape}")
 
 # ── Optional density-slice plot (rank 0 only — slices are already gathered) ─
 if args.plot and _rank0:

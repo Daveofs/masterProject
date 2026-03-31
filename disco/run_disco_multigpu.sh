@@ -28,7 +28,7 @@ IC_FILE=/cluster/scratch/damrein/outputs/ICs/000001_copy6/CosmoML.00000
 
 # Use internal ngenic-like ICs instead of an external tipsy file
 # Set to "true" to generate ICs inside the Python script
-USE_INTERNAL_ICS=true
+USE_INTERNAL_ICS=false
 NGENIC_SEED=180723
 
 # Output paths
@@ -40,9 +40,9 @@ PLOT_DIR=${SCRATCH_DIR}/outputs/plots/multigpu
 MODE=gpu            # gpu | cpu
 # The provided tipsy IC contains 832^3 particles. Set RES to 832 so
 # the loaded positions match DISCO-DJ's expected shape (RES**3).
-RES=832             # particle grid resolution per axis  (N_part = RES^3)
+RES=128             # particle grid resolution per axis  (N_part = RES^3)
 # Keep PM grid conservative to avoid cuFFT OOM on 24GB GPUs
-RES_PM=832          # PM force grid resolution per axis (use 512 on A100/RTX Pro)
+RES_PM=128          # PM force grid resolution per axis (use 512 on A100/RTX Pro)
 BOXSIZE=900.0       # box size [Mpc/h]
 COSMO=Planck15      # DISCO-DJ cosmology preset
 A_INI=0.01          # initial scale factor  (z=99 → a=0.01)
@@ -54,7 +54,7 @@ METHOD=pm           # pm | nufftpm
 GRAD_KERNEL_ORDER=4
 LAPLACE_KERNEL_ORDER=0
 NUM_CHUNKS=32        # chunk_size = RES^3 / NUM_CHUNKS (must be <= RES; increase chunks to lower per-chunk memory)
-LIGHTCONE=false     # set to "true" to enable lightcone mode
+LIGHTCONE=true     # set to "true" to enable lightcone mode
 BUILD_SHELLS=false
 
 # ── JAX / XLA memory settings ─────────────────────────────────────────────
@@ -139,6 +139,7 @@ fi
 
 if [[ "${LIGHTCONE}" == "true" ]]; then
     PYTHON_ARGS+=(--lightcone)
+    PYTHON_ARGS+=(--z-lc-ini "${A_INI}")
 fi
 
 if [[ "${BUILD_SHELLS}" == "true" ]]; then
