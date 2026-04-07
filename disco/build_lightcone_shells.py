@@ -147,12 +147,14 @@ class LightconeShellBuilder:
                  boxsize: float,
                  chi_of_a,
                  nside: int = 2048,
+                 z_min: float = 0.0,
                  z_max: float = 3.5,
                  interpolate: bool = True):
         self.L = boxsize
         self.chi_of_a = chi_of_a
         self.nside = nside
         self.npix = hp.nside2npix(nside)
+        self.z_min = z_min
         self.z_max = z_max
         self.chi_max = chi_of_a(1.0 / (1.0 + z_max))
 
@@ -162,7 +164,7 @@ class LightconeShellBuilder:
         # Precompute replica offsets (integer multiples of L, relative to obs)
         self._rep_ints = build_replica_offsets(self.chi_max, boxsize)  # shape (N,3)
         self._rep_offsets = self._rep_ints * boxsize  # Mpc/h
-        print(f"[LightconeShellBuilder] nside={nside}  z_max={z_max:.2f}  "
+        print(f"[LightconeShellBuilder] nside={nside}  z=[{z_min:.2f},{z_max:.2f}]  "
               f"chi_max={self.chi_max:.1f} Mpc/h  "
               f"n_replicas={len(self._rep_offsets)}")
 
@@ -192,6 +194,11 @@ class LightconeShellBuilder:
 
         if r_hi > self.chi_max:
             # Entire shell is beyond the requested z_max; skip
+            return np.zeros(self.npix, dtype=np.float32)
+
+        z_outer = 1.0 / a_prev - 1.0
+        if z_outer < self.z_min:
+            # Entire shell is below the requested z_min; skip
             return np.zeros(self.npix, dtype=np.float32)
 
         shell_map = np.zeros(self.npix, dtype=np.float32)
@@ -289,6 +296,7 @@ def run_with_shells(
     res_pm: int,
     output_dir: Path,
     nside: int = 2048,
+    z_min: float = 0.0,
     z_max: float = 3.5,
     prefix: str = "CosmoML",
     snap_dir: Path | None = None,
@@ -319,6 +327,7 @@ def run_with_shells(
         boxsize=dj.boxsize,
         chi_of_a=chi_of_a,
         nside=nside,
+        z_min=z_min,
         z_max=z_max,
         interpolate=interpolate,
     )
@@ -370,8 +379,15 @@ def run_with_shells(
         z_curr = 1.0 / a_curr - 1.0
 
         chi_hi = chi_of_a(a_prev)
+        z_outer = 1.0 / a_prev - 1.0
         if chi_hi > builder.chi_max:
             # Beyond z_max; skip but still optionally save snapshot
+            if snap_dir:
+                pos_i = np.asarray(X_all[i]).reshape(-1, 3)
+                save_snapshot(snap_dir / f"snap_{i:05d}.npz", pos_i, a_prev)
+            continue
+        if z_outer < builder.z_min:
+            # Below z_min; skip but still optionally save snapshot
             if snap_dir:
                 pos_i = np.asarray(X_all[i]).reshape(-1, 3)
                 save_snapshot(snap_dir / f"snap_{i:05d}.npz", pos_i, a_prev)

@@ -2,17 +2,18 @@
 # ============================================================
 # Multi-GPU DISCO-DJ N-body simulation (vir_env_discodj)
 #
-# Runs one SLURM task per GPU via `srun`; JAX distributed init
-# is triggered automatically by the presence of SLURM_JOB_ID.
+# Runs a single process that sees all 4 GPUs; JAX uses pjit/pmap
+# for intra-node multi-device sharding (faster than multi-process).
 # ============================================================
 #SBATCH --job-name=disco_multigpu
-#SBATCH --partition=gpuhe.4h                           
+#SBATCH --partition=gpu.24h                   
 #SBATCH --nodes=1
-#SBATCH --ntasks=4                            # one task per GPU
-#SBATCH --gpus=nvidia_geforce_rtx_3090:4      
-#SBATCH --cpus-per-task=8
-#SBATCH --mem-per-cpu=10G                     # 4 tasks × 8 CPU × 10 GB = 320 GB
-#SBATCH --time=04:00:00
+#SBATCH --ntasks=1                            # single process, all GPUs visible
+#SBATCH --gpus=quadro_rtx_6000:8
+##SBATCH --gpus=4
+#SBATCH --cpus-per-task=16
+#SBATCH --mem-per-cpu=10G                     # 1 task × 16 CPU × 10 GB = 160 GB
+#SBATCH --time=4:00:00
 #SBATCH --output=/cluster/scratch/damrein/outputs/logs/disco_multigpu_%j.out
 #SBATCH --error=/cluster/scratch/damrein/outputs/logs/disco_multigpu_%j.err
 
@@ -40,9 +41,9 @@ PLOT_DIR=${SCRATCH_DIR}/outputs/plots/multigpu
 MODE=gpu            # gpu | cpu
 # The provided tipsy IC contains 832^3 particles. Set RES to 832 so
 # the loaded positions match DISCO-DJ's expected shape (RES**3).
-RES=128             # particle grid resolution per axis  (N_part = RES^3)
+RES=832             # particle grid resolution per axis  (N_part = RES^3)
 # Keep PM grid conservative to avoid cuFFT OOM on 24GB GPUs
-RES_PM=128          # PM force grid resolution per axis (use 512 on A100/RTX Pro)
+RES_PM=832          # PM force grid resolution per axis (use 512 on A100/RTX Pro)
 BOXSIZE=900.0       # box size [Mpc/h]
 COSMO=Planck15      # DISCO-DJ cosmology preset
 A_INI=0.01          # initial scale factor  (z=99 → a=0.01)
@@ -54,17 +55,24 @@ METHOD=pm           # pm | nufftpm
 GRAD_KERNEL_ORDER=4
 LAPLACE_KERNEL_ORDER=0
 NUM_CHUNKS=32        # chunk_size = RES^3 / NUM_CHUNKS (must be <= RES; increase chunks to lower per-chunk memory)
-LIGHTCONE=true     # set to "true" to enable lightcone mode
-BUILD_SHELLS=false
+LIGHTCONE=false     # set to "true" to enable lightcone mode
+BUILD_SHELLS=true
+SHELLS_Z_MIN=0.0   # minimum redshift for lightcone shells
+SHELLS_Z_MAX=3.5    # maximum redshift for lightcone shells
+
 
 # ── JAX / XLA memory settings ─────────────────────────────────────────────
 export JAX_PLATFORM_NAME=gpu
-# Use the platform (cudaMalloc/cudaFree) allocator so cuFFT and JAX share the
-# same CUDA memory pool — avoids CUFFT_ALLOC_FAILED (error 5) when JAX's
-# caching allocator occupies all VRAM before cuFFT can allocate scratch space.
 export XLA_PYTHON_CLIENT_ALLOCATOR=platform
 export XLA_PYTHON_CLIENT_MEM_FRACTION=0.95
 export JAX_TRACEBACK_FILTERING=off
+
+# ── JAX persistent XLA compilation cache ──────────────────────────────────
+# Compiled kernels are stored on disk so repeated runs skip recompilation.
+# First run is still slow; every run after that is much faster.
+export JAX_COMPILATION_CACHE_DIR=/cluster/scratch/damrein/.jax_cache
+export JAX_PERSISTENT_CACHE_MIN_COMPILE_TIME_SECS=0   # cache everything
+mkdir -p "${JAX_COMPILATION_CACHE_DIR}"
 
 # Speed-up flags for multi-GPU collectives
 export XLA_FLAGS="--xla_gpu_enable_latency_hiding_scheduler=true \
@@ -72,6 +80,7 @@ export XLA_FLAGS="--xla_gpu_enable_latency_hiding_scheduler=true \
 --xla_gpu_enable_pipelined_all_gather=true \
 --xla_gpu_enable_pipelined_reduce_scatter=true \
 --xla_gpu_enable_pipelined_all_reduce=true"
+
 
 # ── Sanity checks ─────────────────────────────────────────────────────────
 if [[ ! -d "${VENV_DIR}" ]]; then
@@ -110,7 +119,7 @@ SAVE_FINAL="${SNAP_DIR}/final_multigpu_${SLURM_JOB_ID}.npz"
 
 # ── Build srun command ─────────────────────────────────────────────────────
 PYTHON_ARGS=(
-    "${PROJECT_DIR}/sim_discodj_multigpu.py"
+    "${PROJECT_DIR}/disco/sim_discodj_multigpu.py"
     --mode        "${MODE}"
     --res         "${RES}"
     --res-pm      "${RES_PM}"
@@ -144,18 +153,12 @@ fi
 
 if [[ "${BUILD_SHELLS}" == "true" ]]; then
     PYTHON_ARGS+=(--build-shells)
+    PYTHON_ARGS+=(--shells-z-min "${SHELLS_Z_MIN}")
+    PYTHON_ARGS+=(--shells-z-max "${SHELLS_Z_MAX}")
 fi
 
 cd "${PROJECT_DIR}"
 echo "[$(date --iso-8601=seconds)] Starting DISCO-DJ multi-GPU run on $(hostname)"
-echo "  GPUs requested: ${SLURM_GPUS}"
-echo "  Tasks (processes): ${SLURM_NTASKS}"
-nvidia-smi --query-gpu=index,name,memory.total --format=csv,noheader 2>/dev/null || true
-
-# srun spawns one MPI-like process per task; each picks up one GPU
-# Capture both stdout AND stderr per-task so XLA FATAL messages are visible
-srun --output "${LOG_DIR}/disco_multigpu_${SLURM_JOB_ID}_%t.out" \
-     --error  "${LOG_DIR}/disco_multigpu_${SLURM_JOB_ID}_%t.err" \
-    "${PYTHON_BIN}" -u "${PYTHON_ARGS[@]}"
-
-echo "[$(date --iso-8601=seconds)] Done. Snapshot at: ${SAVE_FINAL}"
+echo -e "[$(date --iso-8601=seconds)] GPUs in use: \n$(nvidia-smi --query-gpu=index,name,uuid --format=csv,noheader 2>/dev/null || echo 'nvidia-smi not available')"
+srun "${PYTHON_BIN}" -u "${PYTHON_ARGS[@]}"
+echo "[$(date --iso-8601=seconds)] Done.

@@ -83,6 +83,8 @@ def parse_args() -> argparse.Namespace:
                    help="If set, also save per-step snapshot NPZ files here")
     p.add_argument("--shells-nside",      type=int, default=2048,
                    help="HEALPix Nside for shell maps (default: 2048)")
+    p.add_argument("--shells-z-min",      type=float, default=0.0,
+                   help="Minimum redshift for lightcone shells (default: 0.0)")
     p.add_argument("--shells-z-max",      type=float, default=3.5,
                    help="Maximum redshift for lightcone shells (default: 3.5)")
     p.add_argument("--shells-prefix",     type=str, default="CosmoML",
@@ -116,14 +118,18 @@ args = parse_args()
 # the editable install maps discodj.core.multigpu_utils → scripts/utils.py,
 # which does bare `import utils_jens` (a peer module in the same directory).
 # ---------------------------------------------------------------------------
-_discodj_scripts = Path("/users/damrein/DISCO-DJ/scripts")
+print("Adding DISCO-DJ/scripts/ to sys.path for imports")
+_discodj_scripts = Path("/cluster/work/refregier/damrein/DISCO-DJ/scripts")
 if str(_discodj_scripts) not in sys.path:
     sys.path.insert(0, str(_discodj_scripts))
 
+print("Finished adding DISCO-DJ/scripts/ to sys.path:", sys.path)
+    
 # ---------------------------------------------------------------------------
 # Update DISCO-DJ global state BEFORE importing discodj (gs is read at import
 # time by scatter_and_gather.py: N = gs.N = gs.res, chunk_size = gs.chunk_size)
 # ---------------------------------------------------------------------------
+print("Update Disco-Dj global state BEFORE importing discodj")
 from discodj.core.global_state import update_global_options
 update_global_options(
     res=args.res,
@@ -137,10 +143,10 @@ update_global_options(
     lightcone=args.lightcone,
     run_mode=args.mode,
 )
-
 # ---------------------------------------------------------------------------
 # Env-vars for JAX / CUDA (must be set before JAX is imported)
 # ---------------------------------------------------------------------------
+print(f"Configuring JAX for mode={args.mode} …")
 if args.mode == "gpu":
     os.environ.setdefault("JAX_PLATFORM_NAME", "gpu")
     os.environ.setdefault("XLA_PYTHON_CLIENT_PREALLOCATE", "false")
@@ -149,21 +155,12 @@ if args.mode == "gpu":
 else:
     os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
 
+
 # ---------------------------------------------------------------------------
-# JAX distributed initialisation for multi-GPU SLURM jobs
+# Single-process multi-device: JAX sees all GPUs directly — no distributed init
 # ---------------------------------------------------------------------------
+print("Initializing JAX …")
 import jax
-
-_using_slurm = "SLURM_JOB_ID" in os.environ
-
-if args.mode == "gpu" and _using_slurm:
-    # srun launches one task per GPU; JAX reads SLURM env vars automatically
-    jax.distributed.initialize(
-        heartbeat_timeout_seconds=30,
-        initialization_timeout=60,
-    )
-    _process_id = int(os.environ.get("SLURM_PROCID", 0))
-    print(f"[rank {_process_id}] JAX distributed initialised")
 
 # After init we know the full device count
 _backend    = "gpu" if args.mode == "gpu" else "cpu"
@@ -190,12 +187,6 @@ from jax.experimental.multihost_utils import sync_global_devices
 _script_dir = Path(__file__).parent
 sys.path.insert(0, str(_script_dir))
 from read_tipsy_file import read_tipsy
-
-try:
-    from visualize import plot_density_slice
-    _have_visualize = True
-except ImportError:
-    _have_visualize = False
 
 # ---------------------------------------------------------------------------
 # Helper utilities
@@ -287,16 +278,12 @@ if args.use_internal_ics:
 
     from multigpu_utils import get_white_noise_field
     # get_white_noise_field saves/loads from "data/" relative to cwd.
-    # Redirect that to /capstor/scratch/cscs/damrein/white_noise via a symlink.
-    _wn_dir = Path("/capstor/scratch/cscs/damrein/white_noise")
+    # Ensure the white-noise cache dir exists and provide a data/ subdir
+    # so the helper can save/load files there reliably.
+    _wn_dir = Path("/cluster/scratch/damrein/white_noise")
     _wn_dir.mkdir(parents=True, exist_ok=True)
-    _data_link = Path("/capstor/scratch/cscs/damrein/data")
-    if not _data_link.exists() and not _data_link.is_symlink():
-        try:
-            _data_link.symlink_to(_wn_dir)
-        except FileExistsError:
-            pass  # another rank got there first
-    os.chdir("/capstor/scratch/cscs/damrein")
+    (_wn_dir / "data").mkdir(parents=True, exist_ok=True)
+    os.chdir(str(_wn_dir))
     white_noise = get_white_noise_field(dj, mode, Npart, args.ngenic_seed)
 
     dj = dj.with_ics(
@@ -343,7 +330,7 @@ if args.build_shells and _rank0:
     import numpy as _np
     _a_steps = _np.linspace(a_ini, args.a_end, args.n_steps + 1, dtype=_np.float64)
 
-    print(f"Shell lightcone: nside={args.shells_nside}  z_max={args.shells_z_max}  "
+    print(f"Shell lightcone: nside={args.shells_nside}  z_min={args.shells_z_min}  z_max={args.shells_z_max}  "
           f"prefix={args.shells_prefix}  output={_shells_out}")
 
     _n_shells = run_with_shells(
@@ -352,6 +339,7 @@ if args.build_shells and _rank0:
         res_pm=args.res_pm,
         output_dir=_shells_out,
         nside=args.shells_nside,
+        z_min=args.shells_z_min,
         z_max=args.shells_z_max,
         prefix=args.shells_prefix,
         snap_dir=args.shells_snap_dir,
@@ -434,29 +422,14 @@ if _rank0:
         args.save_final.parent.mkdir(parents=True, exist_ok=True)
         # Derive Eulerian positions from the displacement field
         X_sim = dj.get_pos_from_psi(psi_sim)
-        # Gather positions across ranks
-        local_pos = np.concatenate(
-            [np.asarray(s.data) for s in X_sim.addressable_shards], axis=0
-        )
-        gathered_pos = jax.experimental.multihost_utils.process_allgather(local_pos)
-        full_pos = np.concatenate(gathered_pos, axis=0).reshape(-1, 3)
+        full_pos = np.asarray(X_sim).reshape(-1, 3)
 
         # Prepare data to save; include lightcone S when requested
         save_dict = {"pos": full_pos, "a_hist": np.asarray(a)}
         if args.lightcone:
             # _S is only present when lightcone=True (unpacked above)
             S_sim = _S
-            try:
-                # If S is sharded (like X_sim), gather shards
-                if hasattr(S_sim, "addressable_shards"):
-                    local_S = np.concatenate([np.asarray(s.data) for s in S_sim.addressable_shards], axis=0)
-                else:
-                    local_S = np.asarray(S_sim)
-            except Exception:
-                local_S = np.asarray(S_sim)
-
-            gathered_S = jax.experimental.multihost_utils.process_allgather(local_S)
-            full_S = np.concatenate(gathered_S, axis=0)
+            full_S = np.asarray(S_sim)
             # Remove leading singleton dim if present (run_nbody may leave an extra leading axis)
             if getattr(full_S, 'ndim', 0) > 1 and full_S.shape[0] == 1:
                 full_S = np.squeeze(full_S, axis=0)
