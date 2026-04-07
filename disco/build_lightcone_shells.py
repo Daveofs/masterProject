@@ -172,7 +172,9 @@ class LightconeShellBuilder:
                          pos_prev: np.ndarray,
                          pos_curr: np.ndarray,
                          a_prev: float,
-                         a_curr: float) -> np.ndarray:
+                         a_curr: float,
+                         r_lo_override: float | None = None,
+                         r_hi_override: float | None = None) -> np.ndarray:
         """
         Compute a single HEALPix shell map from two consecutive snapshots.
 
@@ -182,13 +184,15 @@ class LightconeShellBuilder:
         pos_curr  : (N,3) float32  comoving positions [Mpc/h] at a_curr
                     (a_curr > a_prev, i.e. later time)
         a_prev, a_curr : float  scale factors
+        r_lo_override : float or None  override inner shell boundary [Mpc/h]
+        r_hi_override : float or None  override outer shell boundary [Mpc/h]
 
         Returns
         -------
         shell_map : (npix,) float32  particle count per HEALPix pixel
         """
-        r_hi = float(self.chi_of_a(a_prev))
-        r_lo = float(self.chi_of_a(a_curr))
+        r_hi = r_hi_override if r_hi_override is not None else float(self.chi_of_a(a_prev))
+        r_lo = r_lo_override if r_lo_override is not None else float(self.chi_of_a(a_curr))
 
         if r_hi > self.chi_max:
             # Entire shell is beyond the requested z_max; skip
@@ -280,6 +284,79 @@ def save_shell_fits(shell_map: np.ndarray, z_lo: float, z_hi: float,
 
 
 # ---------------------------------------------------------------------------
+# CosmoGridV1 metainfo helpers
+# ---------------------------------------------------------------------------
+
+def load_shell_info_from_metainfo(metainfo_path, cosmo_key: str | None = None):
+    """
+    Load the shell_info structured array from a CosmoGridV1_metainfo.h5 file.
+
+    Parameters
+    ----------
+    metainfo_path : str or Path
+        Path to the HDF5 metainfo file.
+    cosmo_key : str or None
+        Key inside ``shell_info/CosmoGrid/raw/grid/``, e.g. ``"cosmo_000001"``.
+        If None, the first key (alphabetically sorted) is used.
+
+    Returns
+    -------
+    shell_info : structured ndarray, shape (n_shells,)
+        dtype: [('shell_id','<i4'), ('lower_z','<f4'), ('upper_z','<f4'),
+                ('lower_com','<f4'), ('upper_com','<f4'), ('shell_com','<f4')]
+    cosmo_key : str  (the key that was actually used)
+    """
+    import h5py
+    with h5py.File(metainfo_path, 'r') as f:
+        grp = f['shell_info/CosmoGrid/raw/grid']
+        keys = sorted(grp.keys())
+        if cosmo_key is None:
+            cosmo_key = keys[0]
+        shell_info = grp[cosmo_key][:]
+    return shell_info, cosmo_key
+
+
+def save_shells_npz(shells_array: np.ndarray,
+                    shell_info_meta,
+                    output_path,
+                    prefix: str = "CosmoML"):
+    """
+    Save a (n_shells, npix) particle-count array as a CosmoGridV1-compatible NPZ.
+
+    Parameters
+    ----------
+    shells_array : (n_shells, npix) int32
+    shell_info_meta : structured array from load_shell_info_from_metainfo
+        Must have fields shell_id, lower_z, upper_z, lower_com, upper_com, shell_com.
+    output_path : str or Path
+    prefix : str   Used to construct shell_name strings (e.g. "CosmoML").
+    """
+    n_shells = len(shell_info_meta)
+    dt = np.dtype([
+        ('shell_name',  'U64'),
+        ('shell_id',    '<i4'),
+        ('lower_z',     '<f4'),
+        ('upper_z',     '<f4'),
+        ('lower_com',   '<f4'),
+        ('upper_com',   '<f4'),
+        ('shell_com',   '<f4'),
+    ])
+    shell_info_out = np.empty(n_shells, dtype=dt)
+    for field in ('shell_id', 'lower_z', 'upper_z', 'lower_com', 'upper_com', 'shell_com'):
+        shell_info_out[field] = shell_info_meta[field]
+    for i in range(n_shells):
+        lo = float(shell_info_meta['lower_z'][i])
+        hi = float(shell_info_meta['upper_z'][i])
+        shell_info_out['shell_name'][i] = (
+            f"{prefix}-shell_z-high={hi}_z-low={lo}.fits"
+        )
+    np.savez(output_path,
+             shells=shells_array.astype(np.int32),
+             shell_info=shell_info_out)
+    print(f"[save_shells_npz] Saved {n_shells} shells → {output_path}")
+
+
+# ---------------------------------------------------------------------------
 # Simulation-in-a-loop runner (one step at a time, memory-friendly)
 # ---------------------------------------------------------------------------
 
@@ -296,21 +373,30 @@ def run_with_shells(
     method: str = "pm",
     interpolate: bool = True,
     chunk_size: int | None = None,
+    metainfo_path: str | Path | None = None,
+    cosmo_key: str | None = None,
+    output_npz: str | Path | None = None,
     **nbody_kwargs,
 ):
     """
-    Run DiscoDJ using ``collect_all=True`` on groups of steps and
-    accumulate HEALPix shells on-the-fly.
+    Run DiscoDJ using ``collect_all=True`` and accumulate HEALPix shells.
 
     Parameters
     ----------
     dj         : DiscoDJ object (already initialised with ICs)
     a_steps    : 1-D array of scale factors at each output step,
                  e.g. np.linspace(a_ini, 1.0, n_steps+1)
-    output_dir : directory for .fits shell files
+    output_dir : directory for output files (FITS or NPZ)
     snap_dir   : if given, also save intermediate snapshots as NPZ
+    metainfo_path : optional path to CosmoGridV1_metainfo.h5.
+        If provided, shell boundaries are taken from the metainfo z_bins
+        and output is a single NPZ file matching CosmoGridV1 format.
+        If None, falls back to individual FITS files per shell.
+    cosmo_key  : which cosmology entry in metainfo to use (e.g. "cosmo_000001").
+        Defaults to the first key alphabetically.
+    output_npz : output path for the NPZ file when metainfo_path is given.
+        Defaults to ``output_dir / f"shells_nside={nside}.npz"``.
     """
-    import jax.numpy as jnp
 
     # Build comoving-distance function from DiscoDJ cosmology
     chi_of_a, _ = make_chi_of_a(dj.cosmo)
@@ -324,9 +410,28 @@ def run_with_shells(
     )
 
     output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
     if snap_dir:
         snap_dir = Path(snap_dir)
         snap_dir.mkdir(parents=True, exist_ok=True)
+
+    # ── Load metainfo shell bins (NPZ mode) ──────────────────────────────────
+    shell_info_meta = None
+    npix = builder.npix
+    if metainfo_path is not None:
+        shell_info_meta, cosmo_key = load_shell_info_from_metainfo(
+            metainfo_path, cosmo_key)
+        n_meta_shells = len(shell_info_meta)
+        shells_array = np.zeros((n_meta_shells, npix), dtype=np.int32)
+        meta_lower = shell_info_meta['lower_com'].astype(np.float64)
+        meta_upper = shell_info_meta['upper_com'].astype(np.float64)
+        meta_ids   = shell_info_meta['shell_id'].astype(int)
+        print(f"[run_with_shells] NPZ mode: {n_meta_shells} shells from "
+              f"metainfo key={cosmo_key}")
+        if output_npz is None:
+            output_npz = output_dir / f"shells_nside={nside}.npz"
+        else:
+            output_npz = Path(output_npz)
 
     # We always pass time_var as an array so the stepper uses our exact a_steps
     n_steps = len(a_steps) - 1
@@ -369,9 +474,13 @@ def run_with_shells(
         z_prev = 1.0 / a_prev - 1.0
         z_curr = 1.0 / a_curr - 1.0
 
-        chi_hi = chi_of_a(a_prev)
-        if chi_hi > builder.chi_max:
-            # Beyond z_max; skip but still optionally save snapshot
+        r_step_hi = float(chi_of_a(a_prev))
+        r_step_lo = float(chi_of_a(a_curr))
+
+        if shell_info_meta is None and r_step_hi > builder.chi_max:
+            # FITS mode: skip if entirely beyond z_max.
+            # In NPZ mode we skip this guard — the overlap check below handles
+            # it, and avoids dropped boundary steps from floating-point fuzz.
             if snap_dir:
                 pos_i = np.asarray(X_all[i]).reshape(-1, 3)
                 save_snapshot(snap_dir / f"snap_{i:05d}.npz", pos_i, a_prev)
@@ -381,23 +490,53 @@ def run_with_shells(
         pos_curr = np.asarray(X_all[i + 1]).reshape(-1, 3).astype(np.float64)
 
         if snap_dir:
-            save_snapshot(snap_dir / f"snap_{i:05d}.npz", pos_prev.astype(np.float32), a_prev)
+            save_snapshot(snap_dir / f"snap_{i:05d}.npz",
+                          pos_prev.astype(np.float32), a_prev)
 
         t_shell = time()
-        shell = builder.accumulate_shell(pos_prev, pos_curr, a_prev, a_curr)
-        fname = save_shell_fits(shell, z_lo=z_curr, z_hi=z_prev,
-                                output_dir=output_dir, prefix=prefix)
-        dt = time() - t_shell
-        print(f"  shell {i+1}/{n_steps}  z=[{z_curr:.3f},{z_prev:.3f}]  "
-              f"n_part={int(shell.sum())}  → {fname.name}  ({dt:.1f}s)")
-        shells_written += 1
+
+        if shell_info_meta is not None:
+            # ── NPZ mode: assign particles to metainfo z_bins ────────────────
+            # Find all metainfo shells that overlap with this step's range
+            overlap = np.where(
+                (meta_lower < r_step_hi) & (meta_upper > r_step_lo)
+            )[0]
+            for idx in overlap:
+                sid = int(meta_ids[idx])
+                shell_map = builder.accumulate_shell(
+                    pos_prev, pos_curr, a_prev, a_curr,
+                    r_lo_override=float(meta_lower[idx]),
+                    r_hi_override=float(meta_upper[idx]),
+                )
+                shells_array[sid] += shell_map.astype(np.int32)
+            dt = time() - t_shell
+            n_part = sum(int(shells_array[int(meta_ids[idx])].sum()) for idx in overlap)
+            print(f"  step {i+1}/{n_steps}  z=[{z_curr:.3f},{z_prev:.3f}]  "
+                  f"overlapping_shells={len(overlap)}  ({dt:.1f}s)")
+            shells_written += len(overlap)
+        else:
+            # ── FITS mode (original behaviour) ───────────────────────────────
+            shell = builder.accumulate_shell(pos_prev, pos_curr, a_prev, a_curr)
+            fname = save_shell_fits(shell, z_lo=z_curr, z_hi=z_prev,
+                                    output_dir=output_dir, prefix=prefix)
+            dt = time() - t_shell
+            print(f"  shell {i+1}/{n_steps}  z=[{z_curr:.3f},{z_prev:.3f}]  "
+                  f"n_part={int(shell.sum())}  → {fname.name}  ({dt:.1f}s)")
+            shells_written += 1
 
     # Save final snapshot
     if snap_dir:
         pos_last = np.asarray(X_all[-1]).reshape(-1, 3).astype(np.float32)
-        save_snapshot(snap_dir / f"snap_{n_out-1:05d}.npz", pos_last, float(a_all[-1]))
+        save_snapshot(snap_dir / f"snap_{n_out-1:05d}.npz",
+                      pos_last, float(a_all[-1]))
 
-    print(f"Done. {shells_written} shells written to {output_dir}")
+    if shell_info_meta is not None:
+        # Save combined NPZ
+        save_shells_npz(shells_array, shell_info_meta, output_npz, prefix=prefix)
+        print(f"Done. NPZ saved → {output_npz}")
+    else:
+        print(f"Done. {shells_written} shells written to {output_dir}")
+
     return shells_written
 
 

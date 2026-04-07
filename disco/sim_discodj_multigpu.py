@@ -86,7 +86,14 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--shells-z-max",      type=float, default=3.5,
                    help="Maximum redshift for lightcone shells (default: 3.5)")
     p.add_argument("--shells-prefix",     type=str, default="CosmoML",
-                   help="Filename prefix for shell FITS files (default: CosmoML)")
+                   help="Filename prefix for shell FITS files / NPZ shell_name (default: CosmoML)")
+    p.add_argument("--shells-metainfo",   type=Path, default=None,
+                   help="Path to CosmoGridV1_metainfo.h5.  If given, output a single "
+                        "shells_nside=<N>.npz using the z_bins from the metainfo file "
+                        "(NPZ mode); otherwise write individual FITS files.")
+    p.add_argument("--shells-cosmo-key",  type=str, default=None,
+                   help="Which cosmology entry in the metainfo to use for z_bins "
+                        "(e.g. 'cosmo_000001').  Defaults to the first key.")
 
     # --- ICs ---
     p.add_argument("--ic-file", type=Path, required=False,
@@ -100,7 +107,9 @@ def parse_args() -> argparse.Namespace:
 
     # --- outputs ---
     p.add_argument("--save-final", type=Path, default=None,
-                   help="Save final pos/vel/a_hist as NPZ to this path")
+                   help="Save final pos/a_hist as NPZ to this path")
+    p.add_argument("--save-lightcone", type=Path, default=None,
+                   help="Save lightcone S array to a separate NPZ (only used when --lightcone is set)")
     p.add_argument("--output-dir", type=Path, default=None,
                    help="Directory for output plots (default: <project>/outputs/plots)")
     p.add_argument("--plot", action="store_true",
@@ -116,7 +125,7 @@ args = parse_args()
 # the editable install maps discodj.core.multigpu_utils → scripts/utils.py,
 # which does bare `import utils_jens` (a peer module in the same directory).
 # ---------------------------------------------------------------------------
-_discodj_scripts = Path("/users/damrein/DISCO-DJ/scripts")
+_discodj_scripts = Path("/Users/david/Library/CloudStorage/OneDrive-ETHZurich/ETH-Material/Master Project/github/DISCO-DJ/scripts")
 if str(_discodj_scripts) not in sys.path:
     sys.path.insert(0, str(_discodj_scripts))
 
@@ -287,16 +296,10 @@ if args.use_internal_ics:
 
     from multigpu_utils import get_white_noise_field
     # get_white_noise_field saves/loads from "data/" relative to cwd.
-    # Redirect that to /capstor/scratch/cscs/damrein/white_noise via a symlink.
-    _wn_dir = Path("/capstor/scratch/cscs/damrein/white_noise")
+    # Use a "data/" directory next to this script.
+    _wn_dir = Path(__file__).parent / "data"
     _wn_dir.mkdir(parents=True, exist_ok=True)
-    _data_link = Path("/capstor/scratch/cscs/damrein/data")
-    if not _data_link.exists() and not _data_link.is_symlink():
-        try:
-            _data_link.symlink_to(_wn_dir)
-        except FileExistsError:
-            pass  # another rank got there first
-    os.chdir("/capstor/scratch/cscs/damrein")
+    os.chdir(Path(__file__).parent)
     white_noise = get_white_noise_field(dj, mode, Npart, args.ngenic_seed)
 
     dj = dj.with_ics(
@@ -338,10 +341,21 @@ if args.build_shells and _rank0:
         _shells_out = (_script_dir / "outputs" / "shells")
     _shells_out.mkdir(parents=True, exist_ok=True)
 
-    # Use the same explicit a-sequence the normal run would use, so shells
-    # match the pkdgrav step spacing (a_ini → a_end in n_steps equal steps)
     import numpy as _np
-    _a_steps = _np.linspace(a_ini, args.a_end, args.n_steps + 1, dtype=_np.float64)
+    if args.shells_metainfo is not None:
+        # Derive a_steps from the metainfo shell z-boundaries so each
+        # simulation step covers exactly one shell (no overlaps).
+        from build_lightcone_shells import load_shell_info_from_metainfo as _lsi
+        _meta, _mkey = _lsi(args.shells_metainfo, args.shells_cosmo_key)
+        # Collect all unique z-boundaries sorted low→high, then convert to
+        # scale factors high→low (simulation runs from high-z to low-z).
+        _z_bounds = _np.unique(_np.concatenate([_meta['lower_z'], _meta['upper_z']]))
+        _a_steps  = _np.sort(1.0 / (1.0 + _z_bounds.astype(_np.float64)))  # ascending a
+        print(f"[shells] a_steps derived from metainfo ({_mkey}): "
+              f"{len(_a_steps)} steps covering {len(_meta)} shells exactly")
+    else:
+        # Fall back to uniform linspace
+        _a_steps = _np.linspace(a_ini, args.a_end, args.n_steps + 1, dtype=_np.float64)
 
     print(f"Shell lightcone: nside={args.shells_nside}  z_max={args.shells_z_max}  "
           f"prefix={args.shells_prefix}  output={_shells_out}")
@@ -363,6 +377,8 @@ if args.build_shells and _rank0:
         n_resample=args.n_resample,
         chunk_size=chunk_size,
         deconvolve=args.deconvolve,
+        metainfo_path=args.shells_metainfo,
+        cosmo_key=args.shells_cosmo_key,
     )
     print(f"Shell lightcone done: {_n_shells} shells → {_shells_out}")
     sync_global_devices("shells_done")
@@ -397,7 +413,8 @@ run_nbody_result = dj.run_nbody(
 )
 
 if args.lightcone:
-    psi_sim, P, a, _S = run_nbody_result
+    # DISCO-DJ returns (Psi, P, S, a_out) when light_cone=True
+    psi_sim, P, _S, a = run_nbody_result
 else:
     psi_sim, P, a = run_nbody_result
 del run_nbody_result
@@ -439,15 +456,21 @@ if _rank0:
             [np.asarray(s.data) for s in X_sim.addressable_shards], axis=0
         )
         gathered_pos = jax.experimental.multihost_utils.process_allgather(local_pos)
-        full_pos = np.concatenate(gathered_pos, axis=0).reshape(-1, 3)
+        gathered_pos = np.asarray(gathered_pos)
+        # process_allgather always prepends a host dimension → (n_hosts, *local_shape).
+        full_pos = np.concatenate(list(gathered_pos), axis=0).reshape(-1, 3)
 
-        # Prepare data to save; include lightcone S when requested
+        # Save main snapshot (pos + scale factor history)
         save_dict = {"pos": full_pos, "a_hist": np.asarray(a)}
-        if args.lightcone:
-            # _S is only present when lightcone=True (unpacked above)
+
+        if _rank0:
+            np.savez_compressed(args.save_final, **save_dict)
+            print(f"Saved final snapshot → {args.save_final}  pos={full_pos.shape}")
+
+        # ── Save lightcone S to a separate file ───────────────────────────────
+        if args.lightcone and args.save_lightcone is not None:
             S_sim = _S
             try:
-                # If S is sharded (like X_sim), gather shards
                 if hasattr(S_sim, "addressable_shards"):
                     local_S = np.concatenate([np.asarray(s.data) for s in S_sim.addressable_shards], axis=0)
                 else:
@@ -456,18 +479,30 @@ if _rank0:
                 local_S = np.asarray(S_sim)
 
             gathered_S = jax.experimental.multihost_utils.process_allgather(local_S)
-            full_S = np.concatenate(gathered_S, axis=0)
-            # Remove leading singleton dim if present (run_nbody may leave an extra leading axis)
-            if getattr(full_S, 'ndim', 0) > 1 and full_S.shape[0] == 1:
-                full_S = np.squeeze(full_S, axis=0)
-            save_dict["S"] = full_S
-
-        if _rank0:
-            np.savez_compressed(args.save_final, **save_dict)
-            if args.lightcone:
-                print(f"Saved final snapshot + lightcone S → {args.save_final}  pos={full_pos.shape} S={full_S.shape}")
+            gathered_S = np.asarray(gathered_S)
+            # process_allgather always prepends a host dimension → (n_hosts, *local_shape).
+            if local_S.ndim == 0:
+                full_S = gathered_S.flat[0]
             else:
-                print(f"Saved final snapshot → {args.save_final}  pos={full_pos.shape}")
+                full_S = np.concatenate(list(gathered_S), axis=0)
+            # Remove leading singleton dim added by scan_wrapper (shape (1, N, 5) → (N, 5))
+            if full_S.ndim > 1 and full_S.shape[0] == 1:
+                full_S = np.squeeze(full_S, axis=0)
+
+            if _rank0:
+                args.save_lightcone.parent.mkdir(parents=True, exist_ok=True)
+                np.savez_compressed(
+                    args.save_lightcone,
+                    # (N_part^3, 5) per-particle lightcone crossing data
+                    S=full_S,
+                    # column labels: 1+z at crossing (0 = never crossed), comoving X/Y/Z from observer, radial momentum
+                    columns=np.array(['1+z', 'X', 'Y', 'Z', 'p_rad']),
+                    # simulation metadata
+                    a_end=np.float32(args.a_end),
+                    boxsize=np.float32(args.boxsize),
+                    res=np.int32(args.res),
+                )
+                print(f"Saved lightcone S → {args.save_lightcone}  S={full_S.shape}")
 
 # ── Optional density-slice plot (rank 0 only — slices are already gathered) ─
 if args.plot and _rank0:

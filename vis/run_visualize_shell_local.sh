@@ -10,19 +10,19 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="${SCRIPT_DIR}"
-REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 
 PYTHON_BIN_DEFAULT="${REPO_ROOT}/discodj_clean/bin/python"
-INPUT_FILE_DEFAULT="/Users/david/testData/cosmo_000010/shells_nside=512_noisy_shuffle.npz"
+INPUT_FILE_DEFAULT="/Users/david/Library/CloudStorage/OneDrive-ETHZurich/ETH-Material/Master Project/github/outputs/shells/shells_nside=512.npz"
 OUTPUT_DIR_DEFAULT="${REPO_ROOT}/outputs/plots/shells"
 
 PYTHON_BIN="${PYTHON_BIN:-${PYTHON_BIN_DEFAULT}}"
 INPUT_FILE="${INPUT_FILE:-${INPUT_FILE_DEFAULT}}"
 OUTPUT_DIR="${OUTPUT_DIR:-${OUTPUT_DIR_DEFAULT}}"
 
-ZBIN="${ZBIN:-5}"
+ZBIN="${ZBIN:-60}"
 NSIDE="${NSIDE:-128}"
-NAME_SUFFIX="${NAME_SUFFIX:-shells_noisy_shuffle_10_nside=${NSIDE}_zbin${ZBIN}_nside${NSIDE}}"
+NAME_SUFFIX="${NAME_SUFFIX:-discodj_build_lc_zbin${ZBIN}_nside${NSIDE}}"
 PLOT_LOG="${PLOT_LOG:-true}"
 
 if [[ ! -x "${PYTHON_BIN}" ]]; then
