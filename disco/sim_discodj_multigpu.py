@@ -83,6 +83,8 @@ def parse_args() -> argparse.Namespace:
                    help="If set, also save per-step snapshot NPZ files here")
     p.add_argument("--shells-nside",      type=int, default=2048,
                    help="HEALPix Nside for shell maps (default: 2048)")
+    p.add_argument("--shells-z-min",      type=float, default=0.0,
+                   help="Minimum redshift for lightcone shells (default: 0.0)")
     p.add_argument("--shells-z-max",      type=float, default=3.5,
                    help="Maximum redshift for lightcone shells (default: 3.5)")
     p.add_argument("--shells-prefix",     type=str, default="CosmoML",
@@ -125,14 +127,18 @@ args = parse_args()
 # the editable install maps discodj.core.multigpu_utils → scripts/utils.py,
 # which does bare `import utils_jens` (a peer module in the same directory).
 # ---------------------------------------------------------------------------
-_discodj_scripts = Path("/Users/david/Library/CloudStorage/OneDrive-ETHZurich/ETH-Material/Master Project/github/DISCO-DJ/scripts")
+print("Adding DISCO-DJ/scripts/ to sys.path for imports")
+_discodj_scripts = Path("/cluster/work/refregier/damrein/DISCO-DJ/scripts")
 if str(_discodj_scripts) not in sys.path:
     sys.path.insert(0, str(_discodj_scripts))
 
+print("Finished adding DISCO-DJ/scripts/ to sys.path:", sys.path)
+    
 # ---------------------------------------------------------------------------
 # Update DISCO-DJ global state BEFORE importing discodj (gs is read at import
 # time by scatter_and_gather.py: N = gs.N = gs.res, chunk_size = gs.chunk_size)
 # ---------------------------------------------------------------------------
+print("Update Disco-Dj global state BEFORE importing discodj")
 from discodj.core.global_state import update_global_options
 update_global_options(
     res=args.res,
@@ -146,10 +152,10 @@ update_global_options(
     lightcone=args.lightcone,
     run_mode=args.mode,
 )
-
 # ---------------------------------------------------------------------------
 # Env-vars for JAX / CUDA (must be set before JAX is imported)
 # ---------------------------------------------------------------------------
+print(f"Configuring JAX for mode={args.mode} …")
 if args.mode == "gpu":
     os.environ.setdefault("JAX_PLATFORM_NAME", "gpu")
     os.environ.setdefault("XLA_PYTHON_CLIENT_PREALLOCATE", "false")
@@ -158,21 +164,12 @@ if args.mode == "gpu":
 else:
     os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
 
+
 # ---------------------------------------------------------------------------
-# JAX distributed initialisation for multi-GPU SLURM jobs
+# Single-process multi-device: JAX sees all GPUs directly — no distributed init
 # ---------------------------------------------------------------------------
+print("Initializing JAX …")
 import jax
-
-_using_slurm = "SLURM_JOB_ID" in os.environ
-
-if args.mode == "gpu" and _using_slurm:
-    # srun launches one task per GPU; JAX reads SLURM env vars automatically
-    jax.distributed.initialize(
-        heartbeat_timeout_seconds=30,
-        initialization_timeout=60,
-    )
-    _process_id = int(os.environ.get("SLURM_PROCID", 0))
-    print(f"[rank {_process_id}] JAX distributed initialised")
 
 # After init we know the full device count
 _backend    = "gpu" if args.mode == "gpu" else "cpu"
@@ -199,12 +196,6 @@ from jax.experimental.multihost_utils import sync_global_devices
 _script_dir = Path(__file__).parent
 sys.path.insert(0, str(_script_dir))
 from read_tipsy_file import read_tipsy
-
-try:
-    from visualize import plot_density_slice
-    _have_visualize = True
-except ImportError:
-    _have_visualize = False
 
 # ---------------------------------------------------------------------------
 # Helper utilities
@@ -296,10 +287,12 @@ if args.use_internal_ics:
 
     from multigpu_utils import get_white_noise_field
     # get_white_noise_field saves/loads from "data/" relative to cwd.
-    # Use a "data/" directory next to this script.
-    _wn_dir = Path(__file__).parent / "data"
+    # Ensure the white-noise cache dir exists and provide a data/ subdir
+    # so the helper can save/load files there reliably.
+    _wn_dir = Path("/cluster/scratch/damrein/white_noise")
     _wn_dir.mkdir(parents=True, exist_ok=True)
-    os.chdir(Path(__file__).parent)
+    (_wn_dir / "data").mkdir(parents=True, exist_ok=True)
+    os.chdir(str(_wn_dir))
     white_noise = get_white_noise_field(dj, mode, Npart, args.ngenic_seed)
 
     dj = dj.with_ics(
@@ -357,7 +350,7 @@ if args.build_shells and _rank0:
         # Fall back to uniform linspace
         _a_steps = _np.linspace(a_ini, args.a_end, args.n_steps + 1, dtype=_np.float64)
 
-    print(f"Shell lightcone: nside={args.shells_nside}  z_max={args.shells_z_max}  "
+    print(f"Shell lightcone: nside={args.shells_nside}  z_min={args.shells_z_min}  z_max={args.shells_z_max}  "
           f"prefix={args.shells_prefix}  output={_shells_out}")
 
     _n_shells = run_with_shells(
@@ -366,6 +359,7 @@ if args.build_shells and _rank0:
         res_pm=args.res_pm,
         output_dir=_shells_out,
         nside=args.shells_nside,
+        z_min=args.shells_z_min,
         z_max=args.shells_z_max,
         prefix=args.shells_prefix,
         snap_dir=args.shells_snap_dir,
