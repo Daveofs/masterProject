@@ -2,16 +2,16 @@
 #SBATCH --job-name=pkdgrav
 #SBATCH --partition=normal.24h
 #SBATCH --time=24:00:00
-#SBATCH --nodes=30
+#SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
-#SBATCH --cpus-per-task=40
+#SBATCH --cpus-per-task=20
 #SBATCH --mem-per-cpu=4G
-#SBATCH --array=2-3
+#SBATCH --array=1
 #SBATCH --output=/cluster/scratch/damrein/outputs/logs/pkdgrav_%A_%a.out
 #SBATCH --error=/cluster/scratch/damrein/outputs/logs/pkdgrav_%A_%a.err
 
 SCRATCH_DIR=/cluster/scratch/damrein
-PKDGRAV_BIN=${SCRATCH_DIR}/pkdgrav/pkdgrav3_dev-master/build/pkdgrav3
+PKDGRAV_BIN=/cluster/home/damrein/pkdgrav/pkdgrav3_dev-master/build/pkdgrav3
 
 # Load the same module stack used to build pkdgrav3 so the binary is run
 # against the correct OpenMPI 4.1.6 runtime (not conda's OpenMPI 5.x).
@@ -29,7 +29,7 @@ module load hdf5/1.14.3
 # Map array task ID to zero-padded 6-digit cosmology index (1 -> 000001, 2 -> 000002, ...)
 COSMO_ID=$(printf '%06d' "${SLURM_ARRAY_TASK_ID}")
 OUTPUT_DIR=${SCRATCH_DIR}/outputs/ICs/cosmo*_${COSMO_ID}
-PARAM_FILE=${SCRATCH_DIR}/cosmogridv1/cosmo_${COSMO_ID}/param_files/cosmology.par
+PARAM_FILE=/cluster/work/refregier/damrein/cosmogridv1/cosmo_000001/param_files/cosmology.par
 
 mkdir -p "${OUTPUT_DIR}"
 cd "${OUTPUT_DIR}" # PKDGRAV writes output to the current directory, so cd there first

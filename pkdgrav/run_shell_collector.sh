@@ -15,15 +15,13 @@ set -euo pipefail
 PROJECT_DIR=/cluster/scratch/damrein/masterProject
 SCRATCH=/cluster/scratch/damrein
 CONDA_ENV=vir_env
-PARAM_FILE=${SCRATCH}/cosmogridv1/cosmo_000001/param_files/cosmology.par
-RUN_DIR=${SCRATCH}/outputs/ICs/000001_copy7
+PARAM_FILE=/cluster/work/refregier/damrein/cosmogridv1/cosmo_000001/param_files/cosmology.par
+RUN_DIR=${SCRATCH}/outputs/ICs/cosmo*_000001
 
 if [[ -f /cluster/home/damrein/miniconda3/etc/profile.d/conda.sh ]]; then
   CONDA_ROOT=/cluster/home/damrein/miniconda3
-elif [[ -f /cluster/scratch/damrein/miniconda3/etc/profile.d/conda.sh ]]; then
-  CONDA_ROOT=/cluster/scratch/damrein/miniconda3
 else
-  echo "Could not find conda.sh under /cluster/home or /cluster/scratch miniconda3." >&2
+  echo "Could not find conda.sh under /cluster/home/damrein/miniconda3" >&2
   exit 4
 fi
 
@@ -63,5 +61,5 @@ fi
 cd "${RUN_DIR}"
 
 echo "Collecting shells from output namespace in: ${PARAM_FILE}"
-"${PYTHON_BIN}" "${PROJECT_DIR}/shell_collector.py" --param_file "${PARAM_FILE}"
+"${PYTHON_BIN}" "${PROJECT_DIR}/pkdgrav/shell_collector_euler.py" --param_file "${PARAM_FILE}"
 echo "Done."

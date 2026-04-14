@@ -10,19 +10,20 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="${SCRIPT_DIR}"
-REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 
-PYTHON_BIN_DEFAULT="${REPO_ROOT}/discodj_clean/bin/python"
-INPUT_FILE_DEFAULT="/Users/david/testData/cosmo_000010/shells_nside=512_noisy_shuffle.npz"
+PYTHON_BIN_DEFAULT="${REPO_ROOT}/vir_env/bin/python"
+#INPUT_FILE_DEFAULT="/Users/david/projects/outputs/shells/disco_shell_nres64.npz"
+INPUT_FILE_DEFAULT="/Users/david/projects/outputs/pkdgrav_local/CosmoML-shell_z-high=0.1358373_z-low=0.1211429.fits"
 OUTPUT_DIR_DEFAULT="${REPO_ROOT}/outputs/plots/shells"
 
 PYTHON_BIN="${PYTHON_BIN:-${PYTHON_BIN_DEFAULT}}"
 INPUT_FILE="${INPUT_FILE:-${INPUT_FILE_DEFAULT}}"
 OUTPUT_DIR="${OUTPUT_DIR:-${OUTPUT_DIR_DEFAULT}}"
 
-ZBIN="${ZBIN:-5}"
-NSIDE="${NSIDE:-128}"
-NAME_SUFFIX="${NAME_SUFFIX:-shells_noisy_shuffle_10_nside=${NSIDE}_zbin${ZBIN}_nside${NSIDE}}"
+ZBIN="${ZBIN:-10}"
+NSIDE="${NSIDE:-256}"
+NAME_SUFFIX="${NAME_SUFFIX:-pkdgrav_fits_0.135-0.121}"
 PLOT_LOG="${PLOT_LOG:-true}"
 
 if [[ ! -x "${PYTHON_BIN}" ]]; then

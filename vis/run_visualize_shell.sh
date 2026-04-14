@@ -47,14 +47,14 @@ if ! "${PYTHON_BIN}" -c "import numpy, matplotlib, healpy" >/dev/null 2>&1; then
   exit 3
 fi
 
-#SHELL_1=${SCRATCH}/outputs/ICs/000001_copy6/CosmoML-shell_z-high=0.172495_z-low=0.1637719.fits
+SHELL=${SCRATCH}/outputs/ICs/cosmo*_000001/CosmoML-shell_z-high=0.172495_z-low=0.1637719.fits
 #SHELL_2=${SCRATCH}/outputs/ICs/000001_copy6/CosmoML-shell_z-high=0.1813164_z-low=0.172495.fits
-SHELL=${SCRATCH}/cosmogridv1/cosmo_000001/compressed_shells.npz
+#SHELL=${SCRATCH}/cosmogridv1/cosmo_000001/compressed_shells.npz
 
 # Configuration for the visualization (set to your desired z-bin and nside)
 ZBIN=35
-NSIDE=2048
-NAME_SUFFIX="cosmogrid_z-bin${ZBIN}_nside${NSIDE}"
+NSIDE=128
+NAME_SUFFIX="CosmoML-shell_z-high=0.172495_z-low=0.1637719"
 #NAME_SUFFIX="pkdgrav_redshift_0.1637-0.1813_nside${NSIDE}"
 
 cd "${PROJECT_DIR}"
@@ -64,7 +64,7 @@ export NAME_SUFFIX
 "${PYTHON_BIN}" - <<PY
 import os
 from pathlib import Path
-from visualize import plot_shells
+from vis.visualize import plot_shells
 
 plot_shells(
     npz_path=Path(r"${SHELL}"),
