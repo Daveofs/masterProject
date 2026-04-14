@@ -11,7 +11,6 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1         # one task per GPU
 #SBATCH --gpus-per-node=1           # 4 GH200 GPUs; JAX distributed assigns one per task
-#SBATCH --exclusive
 #SBATCH --time=01:00:00
 #SBATCH --output=/capstor/scratch/cscs/damrein/outputs/logs/disco_multigpu_%j.out
 #SBATCH --error=/capstor/scratch/cscs/damrein/outputs/logs/disco_multigpu_%j.err
@@ -53,6 +52,7 @@ LAPLACE_KERNEL_ORDER=0
 NUM_CHUNKS=32
 LIGHTCONE=false
 BUILD_SHELLS=false
+
 # ── JAX compilation cache (avoids 20-sec first-run JIT overhead on re-runs) ──
 JAX_CACHE_DIR=${SCRATCH_DIR}/jax_cache
 export JAX_COMPILATION_CACHE_DIR=${JAX_CACHE_DIR}

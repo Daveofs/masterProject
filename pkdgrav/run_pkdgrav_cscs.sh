@@ -2,16 +2,16 @@
 #SBATCH --job-name=pkdgrav
 #SBATCH --account=sk037
 #SBATCH --partition=normal
-#SBATCH --nodes=10
-#SBATCH --ntasks-per-node=8 
-#SBATCH --cpus-per-task=16
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=1
+#SBATCH --cpus-per-task=250
 #SBATCH --array=1
 #SBATCH --time=12:00:00
 #SBATCH --output=/capstor/scratch/cscs/damrein/outputs/logs/pkdgrav/pkdgrav_%A_%a.out
 #SBATCH --error=/capstor/scratch/cscs/damrein/outputs/logs/pkdgrav/pkdgrav_%A_%a.err
 
 # Run index within each cosmology (run_0 … run_6); change as needed.
-RUN_ID=1
+RUN_ID=0
 
 SCRATCH_DIR=/capstor/scratch/cscs/damrein
 PKDGRAV_BIN=/users/damrein/pkdgrav/pkdgrav3_dev-master/build/pkdgrav3
@@ -47,9 +47,9 @@ MPI_RANKS="${SLURM_NTASKS:-1}"
 
 start_time=$(date +%s)
 echo "[$(date +'%Y-%m-%dT%H:%M:%S%z')] Starting srun (cosmo=${COSMO_ID}, run=${RUN_ID}, mpiranks=${MPI_RANKS}, cpus/task=${SLURM_CPUS_PER_TASK:-1})"
-# Use srun --mpi=pmix so SLURM sets up the PMIx server before launching processes.
-# This prevents the "16 singletons" warning caused by PMI1/2 detection without a server.
-srun --mpi=pmix -n "${MPI_RANKS}" --cpu_bind=cores "${PKDGRAV_BIN}" "${PARAM_FILE}"
+# Use --mpi=pmi2 because pkdgrav3 is built against PMI1/2, not PMIx.
+#srun --mpi=pmi2 -n "${MPI_RANKS}" --cpu_bind=cores "${PKDGRAV_BIN}" "${PARAM_FILE}"
+srun "${PKDGRAV_BIN}" "${PARAM_FILE}"
 rc=$?
 end_time=$(date +%s)
 elapsed=$((end_time - start_time))
