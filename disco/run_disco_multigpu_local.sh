@@ -14,7 +14,7 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 
 # ── Paths ─────────────────────────────────────────────────────────────────
 PROJECT_DIR="${SCRIPT_DIR}"
-VENV_DIR="${REPO_ROOT}/disco_new"
+VENV_DIR="${REPO_ROOT}/vir_env"
 
 # Input IC file (only used when USE_INTERNAL_ICS=false)
 IC_FILE="/Users/david/testData/cosmo_000010/CosmoML.00000"
@@ -30,9 +30,9 @@ PLOT_DIR="${REPO_ROOT}/outputs/plots/multigpu"
 
 # ── Simulation parameters ─────────────────────────────────────────────────
 MODE=cpu            # cpu (no GPU available on local machine)
-RES=128              # keep small for a local test run (N_part = RES^3)
-RES_PM=128           # PM force grid resolution
-BOXSIZE=900.0       # box size [Mpc/h]
+RES=64              # keep small for a local test run (N_part = RES^3)
+RES_PM=64           # PM force grid resolution
+BOXSIZE=450.0       # box size [Mpc/h]
 COSMO=Planck15      # DISCO-DJ cosmology preset
 A_INI=0.2222        # initial scale factor (z=3.5 → a=1/4.5≈0.2222)
 A_END=1.0           # final scale factor (z=0)
@@ -43,8 +43,8 @@ METHOD=pm           # pm | nufftpm
 GRAD_KERNEL_ORDER=4
 LAPLACE_KERNEL_ORDER=0
 NUM_CHUNKS=8        # chunk_size = RES^3 / NUM_CHUNKS
-LIGHTCONE=false
-BUILD_SHELLS=true
+LIGHTCONE=false        # differentiable built-in LC (needs --n-lightcone-replicas, expensive)
+BUILD_SHELLS=false
 SHELLS_NSIDE=512
 SHELLS_Z_MAX=3.5
 # Path to CosmoGridV1_metainfo.h5 for NPZ output (set to "" to use FITS mode)
@@ -77,8 +77,7 @@ if [[ ! -x "${PYTHON_BIN}" ]]; then
 fi
 
 # ── Create output directories ─────────────────────────────────────────────
-mkdir -p "${LOG_DIR}" "${SNAP_DIR}" "${PLOT_DIR}"
-mkdir -p "${PROJECT_DIR}/data"
+mkdir -p "${SNAP_DIR}" "${PLOT_DIR}"
 
 _TS="$(date +%Y%m%d_%H%M%S)"
 SAVE_FINAL="${SNAP_DIR}/final_multigpu_local_${_TS}.npz"

@@ -5,9 +5,8 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 
 # Paths
-PARAM_FILE="${PARAM_FILE:-${REPO_ROOT}/cosmology.par}"
-OUTPUT_DIR="${OUTPUT_DIR:-${REPO_ROOT}/outputs/pkdgrav_local}"
-OMP_NUM_THREADS="${OMP_NUM_THREADS:-1}"
+PARAM_FILE="${PARAM_FILE:-/Users/david/projects/cosmogridv1/param_files/cosmology.par}"
+OUTPUT_DIR="${OUTPUT_DIR:-/Users/david/projects/outputs/pkdgrav_local}"
 
 # Locate pkdgrav binary
 PKDGRAV_BIN="${PKDGRAV_BIN:-}"
@@ -33,7 +32,6 @@ if [[ ! -f "${PARAM_FILE}" ]]; then
 fi
 
 mkdir -p "${OUTPUT_DIR}"
-export OMP_NUM_THREADS
 
 # pkdgrav writes output relative to the working directory
 cd "${OUTPUT_DIR}"

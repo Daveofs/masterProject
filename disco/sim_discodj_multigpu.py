@@ -128,7 +128,7 @@ args = parse_args()
 # which does bare `import utils_jens` (a peer module in the same directory).
 # ---------------------------------------------------------------------------
 print("Adding DISCO-DJ/scripts/ to sys.path for imports")
-_discodj_scripts = Path("/cluster/work/refregier/damrein/DISCO-DJ/scripts")
+_discodj_scripts = Path("/Users/david/projects/DISCO-DJ/scripts")
 if str(_discodj_scripts) not in sys.path:
     sys.path.insert(0, str(_discodj_scripts))
 
@@ -286,12 +286,8 @@ if args.use_internal_ics:
     sync_global_devices("sync_linear_ps")
 
     from multigpu_utils import get_white_noise_field
-    # get_white_noise_field saves/loads from "data/" relative to cwd.
-    # Ensure the white-noise cache dir exists and provide a data/ subdir
-    # so the helper can save/load files there reliably.
-    _wn_dir = Path("/cluster/scratch/damrein/white_noise")
+    _wn_dir = Path("/Users/david/projects/output/white_noise")
     _wn_dir.mkdir(parents=True, exist_ok=True)
-    (_wn_dir / "data").mkdir(parents=True, exist_ok=True)
     os.chdir(str(_wn_dir))
     white_noise = get_white_noise_field(dj, mode, Npart, args.ngenic_seed)
 
@@ -379,12 +375,6 @@ if args.build_shells and _rank0:
     import sys as _sys; _sys.exit(0)
 
 # ── Standard N-body run (no shell accumulation) ──────────────────────────────
-# Optional override: convert requested initial lightcone redshift to scale factor
-a_lc_ini_override = None
-if args.z_lc_ini is not None:
-    a_lc_ini_override = 1.0 / (1.0 + float(args.z_lc_ini))
-    if _rank0:
-        print(f"Forcing lightcone initial redshift z_lc_ini={args.z_lc_ini} -> a_lc_ini={a_lc_ini_override:.6e}")
 
 run_nbody_result = dj.run_nbody(
     a_ini=a_ini,
@@ -401,7 +391,6 @@ run_nbody_result = dj.run_nbody(
     n_resample=args.n_resample,
     chunk_size=chunk_size,
     deconvolve=args.deconvolve,
-    a_lc_ini_override=a_lc_ini_override,
     return_displacement=True,
     convert_to_numpy=False,
 )

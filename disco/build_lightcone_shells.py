@@ -364,7 +364,74 @@ def save_shells_npz(shells_array: np.ndarray,
 
 
 # ---------------------------------------------------------------------------
-# Simulation-in-a-loop runner (one step at a time, memory-friendly)
+# Streaming step generator  (O(N) memory, same approach as pkdgrav3)
+# ---------------------------------------------------------------------------
+
+def _streaming_steps(dj, a_steps, res_pm, stepper, method, chunk_size, nbody_kwargs):
+    """
+    Generator that runs the simulation ONE step at a time and yields
+    ``(pos_prev, pos_curr, a_prev, a_curr)`` for each interval.
+
+    Only two position snapshots exist in memory simultaneously – O(N) instead
+    of the O(n_steps * N) that ``collect_all=True`` would require.
+
+    Works by re-seeding DiscoDJ via ``with_external_ics(pos, vel)`` at each
+    step, exactly analogous to how pkdgrav3 and build_lightcone_shells.py's
+    ``accumulate_shell`` process one time-slab at a time.
+    """
+    import jax.numpy as jnp
+
+    _kw = dict(res_pm=res_pm, stepper=stepper, method=method,
+               light_cone=False, chunk_size=chunk_size,
+               return_displacement=False, **nbody_kwargs)
+
+    n_steps = len(a_steps) - 1
+
+    # ── First call: collect_all=True with n_steps=1 ───────────────────────
+    # This gives us BOTH the IC positions X[0]  *and*  X[1] in one trace,
+    # using the full LPT / BullFrog IC initialisation that only runs once.
+    a0, a1 = float(a_steps[0]), float(a_steps[1])
+    result = dj.run_nbody(
+        a_ini=a0, a_end=a1, n_steps=1,
+        time_var=np.array([a0, a1], dtype=np.float64),
+        collect_all=True, **_kw,
+    )
+    X2, P2, a2 = result
+    pos_prev = np.asarray(X2[0]).reshape(-1, 3).astype(np.float64)
+    pos_curr = np.asarray(X2[1]).reshape(-1, 3).astype(np.float64)
+    vel_curr = np.asarray(P2[1]).reshape(-1, 3).astype(np.float32)
+    del X2, P2
+
+    yield pos_prev, pos_curr, float(a2[0]), float(a2[1])
+    pos_prev = pos_curr
+
+    # ── Subsequent steps: reseed from (pos, canonical_mom) ────────────────
+    # with_external_ics stores pos/vel in _ics so that run_nbody uses them
+    # directly (skipping the LPT init).  The canonical-momentum convention
+    # matches because a_ini here equals the a_end of the previous step, so
+    # the Fplus factors cancel exactly.
+    for i in range(1, n_steps):
+        a_s = float(a_steps[i])
+        a_e = float(a_steps[i + 1])
+        dj_i = dj.with_external_ics(
+            pos=jnp.array(pos_prev.astype(np.float32)),
+            vel=jnp.array(vel_curr),
+        )
+        X_n, P_n, _ = dj_i.run_nbody(
+            a_ini=a_s, a_end=a_e, n_steps=1,
+            time_var=np.array([a_s, a_e], dtype=np.float64),
+            collect_all=False, **_kw,
+        )
+        pos_curr = np.asarray(X_n).reshape(-1, 3).astype(np.float64)
+        vel_curr = np.asarray(P_n).reshape(-1, 3).astype(np.float32)
+        del X_n, P_n
+
+        yield pos_prev, pos_curr, a_s, a_e
+        pos_prev = pos_curr
+
+
+# ---------------------------------------------------------------------------
+# Simulation-in-a-loop runner
 # ---------------------------------------------------------------------------
 
 def run_with_shells(
@@ -384,10 +451,11 @@ def run_with_shells(
     metainfo_path: str | Path | None = None,
     cosmo_key: str | None = None,
     output_npz: str | Path | None = None,
+    streaming: bool = True,
     **nbody_kwargs,
 ):
     """
-    Run DiscoDJ using ``collect_all=True`` and accumulate HEALPix shells.
+    Run DiscoDJ and accumulate HEALPix shells step by step.
 
     Parameters
     ----------
@@ -396,6 +464,10 @@ def run_with_shells(
                  e.g. np.linspace(a_ini, 1.0, n_steps+1)
     output_dir : directory for output files (FITS or NPZ)
     snap_dir   : if given, also save intermediate snapshots as NPZ
+    streaming  : if True (default) run one step at a time – O(N) memory,
+                 same approach as pkdgrav3's on-the-fly lightcone.
+                 If False, use ``collect_all=True`` (O(n_steps * N) memory,
+                 but a single JAX trace / compilation).
     metainfo_path : optional path to CosmoGridV1_metainfo.h5.
         If provided, shell boundaries are taken from the metainfo z_bins
         and output is a single NPZ file matching CosmoGridV1 format.
@@ -442,44 +514,58 @@ def run_with_shells(
         else:
             output_npz = Path(output_npz)
 
-    # We always pass time_var as an array so the stepper uses our exact a_steps
     n_steps = len(a_steps) - 1
     a_ini = float(a_steps[0])
     a_end = float(a_steps[-1])
-
+    mode_str = "streaming (O(N))" if streaming else "collect_all (O(n_steps·N))"
     print(f"Running DiscoDJ with {n_steps} steps, "
-          f"a={a_ini:.4f}→{a_end:.4f}  (collect_all=True)")
+          f"a={a_ini:.4f}→{a_end:.4f}  [{mode_str}]")
     t0 = time()
 
-    result = dj.run_nbody(
-        a_ini=a_ini,
-        a_end=a_end,
-        n_steps=n_steps,
-        time_var=a_steps,           # explicit scale-factor sequence
-        res_pm=res_pm,
-        stepper=stepper,
-        method=method,
-        collect_all=True,           # returns shape (n_steps+1, res,res,res,3)
-        return_displacement=False,  # return absolute positions
-        light_cone=False,           # we do our own lightcone
-        chunk_size=chunk_size,
-        **nbody_kwargs,
-    )
+    # ── Choose step data source ───────────────────────────────────────────
+    if streaming:
+        step_gen = _streaming_steps(
+            dj, a_steps, res_pm, stepper, method, chunk_size, nbody_kwargs)
+        X_all = None  # not used in streaming mode
+    else:
+        result = dj.run_nbody(
+            a_ini=a_ini,
+            a_end=a_end,
+            n_steps=n_steps,
+            time_var=a_steps,
+            res_pm=res_pm,
+            stepper=stepper,
+            method=method,
+            collect_all=True,
+            return_displacement=False,
+            light_cone=False,
+            chunk_size=chunk_size,
+            **nbody_kwargs,
+        )
+        X_all, P_all, a_all = result
+        del P_all
 
-    # result = (X_all, P_all, a_all)
-    # X_all: (n_steps+1, N,N,N, 3) in Mpc/h   (positions, not displacements)
-    X_all, P_all, a_all = result
-    del P_all  # not needed for shell accumulation
+        def _batch_gen():
+            n_out = X_all.shape[0]
+            for _i in range(n_out - 1):
+                yield (
+                    np.asarray(X_all[_i    ]).reshape(-1, 3).astype(np.float64),
+                    np.asarray(X_all[_i + 1]).reshape(-1, 3).astype(np.float64),
+                    float(a_all[_i]),
+                    float(a_all[_i + 1]),
+                )
+        step_gen = _batch_gen()
+        t1 = time()
+        print(f"Simulation done in {t1-t0:.1f}s, now accumulating shells …")
 
-    t1 = time()
-    print(f"Simulation done in {t1-t0:.1f}s, now accumulating shells …")
-
-    n_out = X_all.shape[0]  # == n_steps + 1
     shells_written = 0
+    last_pos_curr: np.ndarray | None = None
+    last_a_curr: float | None = None
 
-    for i in range(n_out - 1):
-        a_prev = float(a_all[i])
-        a_curr = float(a_all[i + 1])
+    for i, (pos_prev, pos_curr, a_prev, a_curr) in enumerate(step_gen):
+        last_pos_curr = pos_curr
+        last_a_curr = a_curr
+
         z_prev = 1.0 / a_prev - 1.0
         z_curr = 1.0 / a_curr - 1.0
 
@@ -488,21 +574,17 @@ def run_with_shells(
 
         if shell_info_meta is None and r_step_hi > builder.chi_max:
             # FITS mode: skip if entirely beyond z_max.
-            # In NPZ mode we skip this guard — the overlap check below handles
-            # it, and avoids dropped boundary steps from floating-point fuzz.
+            # In NPZ mode the overlap check below handles boundary steps.
             if snap_dir:
-                pos_i = np.asarray(X_all[i]).reshape(-1, 3)
-                save_snapshot(snap_dir / f"snap_{i:05d}.npz", pos_i, a_prev)
+                save_snapshot(snap_dir / f"snap_{i:05d}.npz",
+                              pos_prev.astype(np.float32), a_prev)
             continue
-        if z_outer < builder.z_min:
+        if z_prev < builder.z_min:
             # Below z_min; skip but still optionally save snapshot
             if snap_dir:
-                pos_i = np.asarray(X_all[i]).reshape(-1, 3)
-                save_snapshot(snap_dir / f"snap_{i:05d}.npz", pos_i, a_prev)
+                save_snapshot(snap_dir / f"snap_{i:05d}.npz",
+                              pos_prev.astype(np.float32), a_prev)
             continue
-
-        pos_prev = np.asarray(X_all[i]).reshape(-1, 3).astype(np.float64)
-        pos_curr = np.asarray(X_all[i + 1]).reshape(-1, 3).astype(np.float64)
 
         if snap_dir:
             save_snapshot(snap_dir / f"snap_{i:05d}.npz",
@@ -512,7 +594,6 @@ def run_with_shells(
 
         if shell_info_meta is not None:
             # ── NPZ mode: assign particles to metainfo z_bins ────────────────
-            # Find all metainfo shells that overlap with this step's range
             overlap = np.where(
                 (meta_lower < r_step_hi) & (meta_upper > r_step_lo)
             )[0]
@@ -525,12 +606,11 @@ def run_with_shells(
                 )
                 shells_array[sid] += shell_map.astype(np.int32)
             dt = time() - t_shell
-            n_part = sum(int(shells_array[int(meta_ids[idx])].sum()) for idx in overlap)
             print(f"  step {i+1}/{n_steps}  z=[{z_curr:.3f},{z_prev:.3f}]  "
                   f"overlapping_shells={len(overlap)}  ({dt:.1f}s)")
             shells_written += len(overlap)
         else:
-            # ── FITS mode (original behaviour) ───────────────────────────────
+            # ── FITS mode ────────────────────────────────────────────────────
             shell = builder.accumulate_shell(pos_prev, pos_curr, a_prev, a_curr)
             fname = save_shell_fits(shell, z_lo=z_curr, z_hi=z_prev,
                                     output_dir=output_dir, prefix=prefix)
@@ -540,10 +620,9 @@ def run_with_shells(
             shells_written += 1
 
     # Save final snapshot
-    if snap_dir:
-        pos_last = np.asarray(X_all[-1]).reshape(-1, 3).astype(np.float32)
-        save_snapshot(snap_dir / f"snap_{n_out-1:05d}.npz",
-                      pos_last, float(a_all[-1]))
+    if snap_dir and last_pos_curr is not None:
+        save_snapshot(snap_dir / f"snap_{n_steps:05d}.npz",
+                      last_pos_curr.astype(np.float32), last_a_curr)
 
     if shell_info_meta is not None:
         # Save combined NPZ
