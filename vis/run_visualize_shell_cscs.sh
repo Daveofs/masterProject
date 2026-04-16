@@ -46,14 +46,13 @@ if ! "${PYTHON_BIN}" -c "import numpy, matplotlib, healpy" >/dev/null 2>&1; then
   exit 3
 fi
 
-FILENAME="CosmoML-shell_z-high=3.80769_z-low=2.25733.fits"
+#FILENAME="CosmoML-shell_z-high=1.46305_z-low=0.980198.fits"
 
-SHELL=${SCRATCH}/outputs/shells/${FILENAME}
-
+SHELL=/capstor/scratch/cscs/damrein/outputs/shells_with_external_ics/shells_nside=2048.npz
 # Configuration for the visualization (set to your desired z-bin and nside)
-ZBIN=35
+ZBIN=10
 NSIDE=2048
-NAME_SUFFIX="${FILENAME}_zbin${ZBIN}_nside${NSIDE}"
+NAME_SUFFIX="disco_shell_external_ICs_nside${NSIDE}_zbin${ZBIN}"
 
 mkdir -p "${OUTPUT_DIR}"
 cd "${PROJECT_DIR}"

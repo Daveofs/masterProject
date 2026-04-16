@@ -89,6 +89,10 @@ def parse_args() -> argparse.Namespace:
                    help="Maximum redshift for lightcone shells (default: 3.5)")
     p.add_argument("--shells-prefix",     type=str, default="CosmoML",
                    help="Filename prefix for shell FITS files / NPZ shell_name (default: CosmoML)")
+    p.add_argument("--shells-no-interpolate", action="store_true",
+                   help="Disable shell-crossing interpolation for faster shell building")
+    p.add_argument("--shells-chunk-size", type=int, default=2_000_000,
+                   help="Particles per chunk in shell builder (higher can be faster if memory allows)")
     p.add_argument("--shells-metainfo",   type=Path, default=None,
                    help="Path to CosmoGridV1_metainfo.h5.  If given, output a single "
                         "shells_nside=<N>.npz using the z_bins from the metainfo file "
@@ -128,7 +132,7 @@ args = parse_args()
 # which does bare `import utils_jens` (a peer module in the same directory).
 # ---------------------------------------------------------------------------
 print("Adding DISCO-DJ/scripts/ to sys.path for imports")
-_discodj_scripts = Path("/Users/david/projects/DISCO-DJ/scripts")
+_discodj_scripts = Path("/users/damrein/DISCO-DJ/scripts")
 if str(_discodj_scripts) not in sys.path:
     sys.path.insert(0, str(_discodj_scripts))
 
@@ -249,18 +253,6 @@ def _field_slices(field):
 # ---------------------------------------------------------------------------
 t0 = time()
 
-# Only rank 0 needs to print status in multi-process setups
-_rank0 = (jax.process_index() == 0)
-
-if _rank0:
-    print("=" * 60)
-    print("DISCO-DJ Multi-GPU N-body simulation")
-    print(f"  res={Npart}  res_pm={args.res_pm}  boxsize={Lbox} Mpc/h")
-    print(f"  a_ini={a_ini}  a_end={args.a_end}  n_steps={args.n_steps}")
-    print(f"  cosmo={args.cosmo}  stepper={args.stepper}  lightcone={args.lightcone}")
-    print(f"  num_devices={num_devices}  multi_device={num_devices > 1}")
-    print("=" * 60)
-
 # ── Build DiscoDJ object ────────────────────────────────────────────────────
 dj = DiscoDJ(
     dim=3,
@@ -272,21 +264,20 @@ dj = DiscoDJ(
     multi_device=(num_devices > 1),
 ).with_timetables()
 
-if _rank0:
-    print("DISCO-DJ initialised:", dj)
+
+print("DISCO-DJ initialised:", dj)
 
 t1 = time()
 
 # ── Initial Conditions ────────────────────────────────────────────────────
 if args.use_internal_ics:
-    if _rank0:
-        print("Using internal IC generator (LPT)")
+    print("Using internal IC generator (LPT)")
 
     dj = dj.with_linear_ps(transfer_function="Eisenstein-Hu")
     sync_global_devices("sync_linear_ps")
 
     from multigpu_utils import get_white_noise_field
-    _wn_dir = Path("/Users/david/projects/output/white_noise")
+    _wn_dir = Path("/capstor/scratch/cscs/damrein/white_noise")
     _wn_dir.mkdir(parents=True, exist_ok=True)
     os.chdir(str(_wn_dir))
     white_noise = get_white_noise_field(dj, mode, Npart, args.ngenic_seed)
@@ -302,27 +293,23 @@ if args.use_internal_ics:
 
 
 elif args.ic_file is not None:
-    if _rank0:
-        print("Using external PKDGRAV ICs")
+    print("Using external PKDGRAV ICs")
     pos_sorted, vel_sorted = _load_external_ics(args.ic_file)
     dj = dj.with_external_ics(pos=pos_sorted, vel=vel_sorted)
     del pos_sorted, vel_sorted
 
 else:
-    if _rank0:
-        print("ERROR: No initial conditions provided. Use --ic-file or --use-internal-ics.")
+    print("ERROR: No initial conditions provided. Use --ic-file or --use-internal-ics.")
     import sys as _sys; _sys.exit(2)
 
 t2 = time()
-if _rank0:
-    print(f"IC setup took {t2 - t1:.2f} s")
+print(f"IC setup took {t2 - t1:.2f} s")
 
 # ── N-body run ──────────────────────────────────────────────────────────────
-if _rank0:
-    print("Running N-body simulation …")
+print("Running N-body simulation …")
 
 # ── Snapshot-based HEALPix shell lightcone (high-z capable) ─────────────────
-if args.build_shells and _rank0:
+if args.build_shells:
     from build_lightcone_shells import run_with_shells
 
     _shells_out = args.shells_output_dir
@@ -366,6 +353,9 @@ if args.build_shells and _rank0:
         laplace_kernel_order=args.laplace_kernel_order,
         n_resample=args.n_resample,
         chunk_size=chunk_size,
+        shell_chunk_size=args.shells_chunk_size,
+        interpolate=not args.shells_no_interpolate,
+        streaming=True,
         deconvolve=args.deconvolve,
         metainfo_path=args.shells_metainfo,
         cosmo_key=args.shells_cosmo_key,
@@ -391,6 +381,7 @@ run_nbody_result = dj.run_nbody(
     n_resample=args.n_resample,
     chunk_size=chunk_size,
     deconvolve=args.deconvolve,
+    collect_all=True,
     return_displacement=True,
     convert_to_numpy=False,
 )
@@ -403,8 +394,7 @@ else:
 del run_nbody_result
 
 t3 = time()
-if _rank0:
-    print(f"N-body run took {t3 - t2:.2f} s")
+print(f"N-body run took {t3 - t2:.2f} s")
 
 # ── Density field extraction ────────────────────────────────────────────────
 # Match simple_example.py pattern: only constrain the small 2D SLICES to
@@ -423,72 +413,73 @@ def delta_subset(dj, psi_sim):
 
 
 delta_subset = jax.jit(delta_subset)
-out = delta_subset(dj, psi_sim)
+# psi_sim has shape (n_steps+1, N, N, N, 3) when collect_all=True; take only the
+# final timestep so get_pos_from_psi returns (N^3, 3) not (21*N^3, 3).
+_psi_final = psi_sim[-1] if psi_sim.ndim == 5 else psi_sim
+out = delta_subset(dj, _psi_final)
 delta_mean, delta_slice, delta_thin_slice = out
 
-if _rank0:
-    print("delta_mean shape:", delta_mean.shape)
+print("delta_mean shape:", delta_mean.shape)
 
 # ── Save final snapshot (rank 0 gathers all shards and saves one file) ───────
-    if args.save_final is not None:
-        args.save_final.parent.mkdir(parents=True, exist_ok=True)
-        # Derive Eulerian positions from the displacement field
-        X_sim = dj.get_pos_from_psi(psi_sim)
-        # Gather positions across ranks
-        local_pos = np.concatenate(
-            [np.asarray(s.data) for s in X_sim.addressable_shards], axis=0
-        )
-        gathered_pos = jax.experimental.multihost_utils.process_allgather(local_pos)
-        gathered_pos = np.asarray(gathered_pos)
-        # process_allgather always prepends a host dimension → (n_hosts, *local_shape).
-        full_pos = np.concatenate(list(gathered_pos), axis=0).reshape(-1, 3)
+if args.save_final is not None:
+    args.save_final.parent.mkdir(parents=True, exist_ok=True)
+    # Derive Eulerian positions from the FINAL displacement field only (not all steps)
+    X_sim = dj.get_pos_from_psi(_psi_final)
+    # Gather positions across ranks
+    local_pos = np.concatenate(
+        [np.asarray(s.data) for s in X_sim.addressable_shards], axis=0
+    )
+    gathered_pos = jax.experimental.multihost_utils.process_allgather(local_pos)
+    gathered_pos = np.asarray(gathered_pos)
+    # process_allgather always prepends a host dimension → (n_hosts, *local_shape).
+    full_pos = np.concatenate(list(gathered_pos), axis=0).reshape(-1, 3)
 
-        # Save main snapshot (pos + scale factor history)
-        save_dict = {"pos": full_pos, "a_hist": np.asarray(a)}
+    # Save main snapshot (pos + scale factor history)
+    # Uncompressed NPZ: much faster to write and supports mmap_mode='r' on load.
+    save_dict = {"pos": full_pos, "a_hist": np.asarray(a)}
+    np.savez(args.save_final, **save_dict)
+    print(f"Saved final snapshot → {args.save_final}  pos={full_pos.shape}")
 
-        if _rank0:
-            np.savez_compressed(args.save_final, **save_dict)
-            print(f"Saved final snapshot → {args.save_final}  pos={full_pos.shape}")
-
-        # ── Save lightcone S to a separate file ───────────────────────────────
-        if args.lightcone and args.save_lightcone is not None:
-            S_sim = _S
-            try:
-                if hasattr(S_sim, "addressable_shards"):
-                    local_S = np.concatenate([np.asarray(s.data) for s in S_sim.addressable_shards], axis=0)
-                else:
-                    local_S = np.asarray(S_sim)
-            except Exception:
-                local_S = np.asarray(S_sim)
-
-            gathered_S = jax.experimental.multihost_utils.process_allgather(local_S)
-            gathered_S = np.asarray(gathered_S)
-            # process_allgather always prepends a host dimension → (n_hosts, *local_shape).
-            if local_S.ndim == 0:
-                full_S = gathered_S.flat[0]
+    # ── Save lightcone S to a separate file ───────────────────────────────
+    if args.lightcone and args.save_lightcone is not None:
+        S_sim = _S
+        try:
+            if hasattr(S_sim, "addressable_shards"):
+                local_S = np.concatenate([np.asarray(s.data) for s in S_sim.addressable_shards], axis=0)
             else:
-                full_S = np.concatenate(list(gathered_S), axis=0)
-            # Remove leading singleton dim added by scan_wrapper (shape (1, N, 5) → (N, 5))
-            if full_S.ndim > 1 and full_S.shape[0] == 1:
-                full_S = np.squeeze(full_S, axis=0)
+                local_S = np.asarray(S_sim)
+        except Exception:
+            local_S = np.asarray(S_sim)
 
-            if _rank0:
-                args.save_lightcone.parent.mkdir(parents=True, exist_ok=True)
-                np.savez_compressed(
-                    args.save_lightcone,
-                    # (N_part^3, 5) per-particle lightcone crossing data
-                    S=full_S,
-                    # column labels: 1+z at crossing (0 = never crossed), comoving X/Y/Z from observer, radial momentum
-                    columns=np.array(['1+z', 'X', 'Y', 'Z', 'p_rad']),
-                    # simulation metadata
-                    a_end=np.float32(args.a_end),
-                    boxsize=np.float32(args.boxsize),
-                    res=np.int32(args.res),
-                )
-                print(f"Saved lightcone S → {args.save_lightcone}  S={full_S.shape}")
+        gathered_S = jax.experimental.multihost_utils.process_allgather(local_S)
+        gathered_S = np.asarray(gathered_S)
+        # process_allgather always prepends a host dimension → (n_hosts, *local_shape).
+        if local_S.ndim == 0:
+            full_S = gathered_S.flat[0]
+        else:
+            full_S = np.concatenate(list(gathered_S), axis=0)
+        # Remove leading singleton dim added by scan_wrapper (shape (1, N, 5) → (N, 5))
+        if full_S.ndim > 1 and full_S.shape[0] == 1:
+            full_S = np.squeeze(full_S, axis=0)
+
+        
+        args.save_lightcone.parent.mkdir(parents=True, exist_ok=True)
+        np.savez(
+            args.save_lightcone,
+            # (N_part^3, 5) per-particle lightcone crossing data
+            S=full_S,
+            # column labels: 1+z at crossing (0 = never crossed), comoving X/Y/Z from observer, radial momentum
+            columns=np.array(['1+z', 'X', 'Y', 'Z', 'p_rad']),
+            # simulation metadata
+            a_end=np.float32(args.a_end),
+            boxsize=np.float32(args.boxsize),
+            res=np.int32(args.res),
+        )
+        print(f"Saved lightcone S → {args.save_lightcone}  S={full_S.shape}")
 
 # ── Optional density-slice plot (rank 0 only — slices are already gathered) ─
-if args.plot and _rank0:
+if args.plot:
     output_dir = args.output_dir
     if output_dir is None:
         output_dir = _script_dir / "outputs" / "plots"
@@ -507,6 +498,5 @@ if args.plot and _rank0:
 t4 = time()
 # Proper multi-GPU shutdown sync
 sync_global_devices("final_sync")
-if _rank0:
-    print(f"Total wall time: {t4 - t0:.2f} s")
-    print("Done.")
+print(f"Total wall time: {t4 - t0:.2f} s")
+print("Done.")

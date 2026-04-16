@@ -55,6 +55,7 @@ from __future__ import annotations
 
 import argparse
 import os
+from functools import partial
 from pathlib import Path
 from time import time
 
@@ -126,6 +127,154 @@ def build_replica_offsets(chi_max_Mpch: float, boxsize: float) -> np.ndarray:
 
 
 # ---------------------------------------------------------------------------
+# JAX-native GPU helpers (lazy-loaded to keep the CPU-only path importable)
+# ---------------------------------------------------------------------------
+
+def _vec2pix_ring_jax(nside: int, x, y, z):
+    """
+    Pure-JAX HEALPix RING-scheme pixel index for a batch of unit vectors.
+    x, y, z are JAX arrays of the same shape; nside must be a power of 2.
+
+    Implements the healpix_bare C algorithm:  loc2hpd -> hpd2ring.
+    Reference: https://github.com/ntessore/healpix (BSD-3-Clause).
+    """
+    import jax.numpy as jnp
+
+    # ── normalise ─────────────────────────────────────────────────────────
+    norm = jnp.sqrt(x * x + y * y + z * z)
+    safe_norm = jnp.where(norm > 0.0, norm, jnp.ones_like(norm))
+    x = x / safe_norm;  y = y / safe_norm;  z = z / safe_norm
+
+    za  = jnp.abs(z)
+    s   = jnp.sqrt(jnp.maximum(1.0 - z * z, 0.0))   # sin(theta)
+    phi = jnp.arctan2(y, x)
+    phi = jnp.where(phi < 0.0, phi + 2.0 * jnp.pi, phi)   # [0, 2π)
+    tt  = phi * (2.0 / jnp.pi)   # = 4·phi/(2π), in [0, 4)
+
+    # Face lookup tables (size 12, indexed by face number 0-11)
+    _jrll = jnp.array([2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4], dtype=jnp.int32)
+    _jpll = jnp.array([1, 3, 5, 7, 0, 2, 4, 6, 1, 3, 5, 7], dtype=jnp.int32)
+
+    # ── loc2hpd: equatorial region  |z| ≤ 2/3 ────────────────────────────
+    temp1e = 0.5 + tt                    # [0.5, 4.5)
+    temp2e = z * 0.75                    # [-0.5, +0.5]
+    jp_fe  = temp1e - temp2e             # ascending-edge line index  [0, 5)
+    jm_fe  = temp1e + temp2e             # descending-edge line index [0, 5)
+    ifp    = jnp.floor(jp_fe).astype(jnp.int32)   # face index along ascending  {0..4}
+    ifm    = jnp.floor(jm_fe).astype(jnp.int32)   # face index along descending {0..4}
+    xe     = (jm_fe - ifm.astype(jnp.float32)) * nside            # x within face [0, n)
+    ye     = (1.0 + ifp.astype(jnp.float32) - jp_fe) * nside      # y within face [0, n)
+    fe     = jnp.where(ifp == ifm,  ifp | 4,
+             jnp.where(ifp <  ifm,  ifp,
+                                    ifm + 8))      # face number 0-11
+
+    # ── loc2hpd: polar regions  |z| > 2/3 ────────────────────────────────
+    ntt_p  = jnp.minimum(jnp.floor(tt).astype(jnp.int32),
+                         jnp.full_like(jnp.floor(tt).astype(jnp.int32), 3))
+    tp_p   = tt - ntt_p.astype(jnp.float32)        # fractional part ∈ [0, 1)
+    tmp_p  = s / jnp.sqrt(jnp.maximum((1.0 + za) / 3.0, 1e-30))
+    jp_p   = jnp.minimum(tp_p * tmp_p, 1.0)
+    jm_p   = jnp.minimum((1.0 - tp_p) * tmp_p, 1.0)
+    # North polar: swap  jp←(1−jm),  jm←(1−jp)
+    jp_p2  = jnp.where(z >= 0.0,  1.0 - jm_p,  jp_p)
+    jm_p2  = jnp.where(z >= 0.0,  1.0 - jp_p,  jm_p)
+    xp     = jp_p2 * nside
+    yp     = jm_p2 * nside
+    fp     = jnp.where(z >= 0.0,  ntt_p,  ntt_p + 8)
+
+    # ── select region and floor/clamp hpd coordinates ────────────────────
+    is_eq  = za <= 2.0 / 3.0
+    hx_f   = jnp.where(is_eq, xe, xp)
+    hy_f   = jnp.where(is_eq, ye, yp)
+    hf     = jnp.where(is_eq, fe, fp).astype(jnp.int32)
+    hpd_x  = jnp.minimum(jnp.floor(hx_f).astype(jnp.int32), nside - 1)
+    hpd_y  = jnp.minimum(jnp.floor(hy_f).astype(jnp.int32), nside - 1)
+
+    # ── hpd2ring ──────────────────────────────────────────────────────────
+    jrll_v = jnp.take(_jrll, hf)
+    jpll_v = jnp.take(_jpll, hf)
+    jr     = jrll_v * nside - hpd_x - hpd_y - 1   # ring number
+    nl4    = 4 * nside
+    npix_  = 12 * nside * nside
+
+    def _wrap(jp):
+        return jnp.where(jp > nl4, jp - nl4,
+               jnp.where(jp < 1,   jp + nl4, jp))
+
+    # North polar cap  (jr < nside)
+    jpn   = _wrap((jpll_v * jr + hpd_x - hpd_y + 1) // 2)
+    ipn   = 2 * jr * (jr - 1) + jpn - 1
+
+    # Equatorial belt  (nside ≤ jr ≤ 3·nside)
+    ksh   = (jr + nside) & 1
+    jpe   = _wrap((jpll_v * nside + hpd_x - hpd_y + 1 + ksh) // 2)
+    ipe   = 2 * nside * (nside - 1) + (jr - nside) * nl4 + jpe - 1
+
+    # South polar cap  (jr > 3·nside)
+    jr_s  = nl4 - jr
+    jps   = _wrap((jpll_v * jr_s + hpd_x - hpd_y + 1) // 2)
+    ips   = npix_ - 2 * (jr_s + 1) * jr_s + jps - 1
+
+    return jnp.where(jr < nside, ipn,
+           jnp.where(jr > 3 * nside, ips, ipe))
+
+
+# Module-level cache so the JIT-compiled GPU kernel is built only once per process.
+_JAX_SHELL_KERNEL = None
+
+
+def _get_jax_shell_kernel():
+    """Return (building once) the JIT-compiled per-replica GPU scatter kernel."""
+    global _JAX_SHELL_KERNEL
+    if _JAX_SHELL_KERNEL is not None:
+        return _JAX_SHELL_KERNEL
+
+    import jax
+    import jax.numpy as jnp
+
+    @partial(jax.jit, static_argnames=['nside', 'npix', 'interpolate'])
+    def _kernel(X0, X1, d, r_lo, r_hi, nside, npix, interpolate):
+        """
+        GPU kernel: contribution of ONE periodic replica to a HEALPix shell.
+
+        Parameters
+        ----------
+        X0, X1     : (N, 3) float32  positions relative to observer [Mpc/h]
+        d          : (3,)   float32  replica offset [Mpc/h]
+        r_lo, r_hi : float32         shell boundaries [Mpc/h]
+        nside, npix, interpolate : static compile-time constants
+        """
+        R0 = X0 + d
+        R1 = X1 + d
+        r0 = jnp.sqrt(jnp.sum(R0 * R0, axis=1))
+        r1 = jnp.sqrt(jnp.sum(R1 * R1, axis=1))
+        mask = (jnp.maximum(r0, r1) >= r_lo) & (jnp.minimum(r0, r1) < r_hi)
+
+        if interpolate:
+            denom      = r0 - r1
+            safe_denom = jnp.where(jnp.abs(denom) > 1e-10, denom, jnp.float32(1e-10))
+            t_hi       = jnp.clip((r_hi - r0) / safe_denom, 0.0, 1.0)
+            direction  = (1.0 - t_hi[:, None]) * R0 + t_hi[:, None] * R1
+        else:
+            direction = 0.5 * (R0 + R1)
+
+        # Steer masked-out particles to a safe sky direction so they don't NaN.
+        safe_dir = jnp.where(
+            mask[:, None],
+            direction,
+            jnp.broadcast_to(jnp.array([1.0, 0.0, 0.0], dtype=jnp.float32),
+                             direction.shape),
+        )
+        pix     = _vec2pix_ring_jax(nside, safe_dir[:, 0], safe_dir[:, 1], safe_dir[:, 2])
+        pix     = jnp.clip(pix, 0, npix - 1)          # safety clamp
+        weights = mask.astype(jnp.float32)
+        return jnp.zeros(npix, dtype=jnp.float32).at[pix].add(weights)
+
+    _JAX_SHELL_KERNEL = _kernel
+    return _JAX_SHELL_KERNEL
+
+
+# ---------------------------------------------------------------------------
 # Core shell accumulator
 # ---------------------------------------------------------------------------
 
@@ -149,7 +298,8 @@ class LightconeShellBuilder:
                  nside: int = 2048,
                  z_min: float = 0.0,
                  z_max: float = 3.5,
-                 interpolate: bool = True):
+                 interpolate: bool = True,
+                 particle_chunk_size: int = 2_000_000):
         self.L = boxsize
         self.chi_of_a = chi_of_a
         self.nside = nside
@@ -164,11 +314,20 @@ class LightconeShellBuilder:
         # Precompute replica offsets (integer multiples of L, relative to obs)
         self._rep_ints = build_replica_offsets(self.chi_max, boxsize)  # shape (N,3)
         self._rep_offsets = self._rep_ints * boxsize  # Mpc/h
+        # Precompute radial bounds of each replicated cube relative to observer.
+        # If a shell [r_lo, r_hi] does not intersect [rmin, rmax], this replica
+        # cannot contribute and is skipped entirely.
+        rep_abs = np.abs(self._rep_offsets)
+        rep_near = np.maximum(0.0, rep_abs - boxsize / 2.0)
+        rep_far = rep_abs + boxsize / 2.0
+        self._rep_rmin = np.sqrt(np.sum(rep_near * rep_near, axis=1))
+        self._rep_rmax = np.sqrt(np.sum(rep_far * rep_far, axis=1))
         print(f"[LightconeShellBuilder] nside={nside}  z=[{z_min:.2f},{z_max:.2f}]  "
               f"chi_max={self.chi_max:.1f} Mpc/h  "
               f"n_replicas={len(self._rep_offsets)}")
 
         self.interpolate = interpolate
+        self.particle_chunk_size = int(particle_chunk_size)
 
     def accumulate_shell(self,
                          pos_prev: np.ndarray,
@@ -176,7 +335,8 @@ class LightconeShellBuilder:
                          a_prev: float,
                          a_curr: float,
                          r_lo_override: float | None = None,
-                         r_hi_override: float | None = None) -> np.ndarray:
+                         r_hi_override: float | None = None,
+                         verbose: bool = True) -> np.ndarray:
         """
         Compute a single HEALPix shell map from two consecutive snapshots.
 
@@ -188,11 +348,13 @@ class LightconeShellBuilder:
         a_prev, a_curr : float  scale factors
         r_lo_override : float or None  override inner shell boundary [Mpc/h]
         r_hi_override : float or None  override outer shell boundary [Mpc/h]
+        verbose   : bool  if True (default), print per-shell timing diagnostics
 
         Returns
         -------
         shell_map : (npix,) float32  particle count per HEALPix pixel
         """
+        t_acc_start = time()
         r_hi = r_hi_override if r_hi_override is not None else float(self.chi_of_a(a_prev))
         r_lo = r_lo_override if r_lo_override is not None else float(self.chi_of_a(a_curr))
 
@@ -210,63 +372,200 @@ class LightconeShellBuilder:
 
         # Relative positions (Mpc/h, centred on observer, periodically wrapped
         # to nearest image is NOT needed here since we explicitly loop replicas)
-        X0 = pos_prev.astype(np.float64) - obs  # (N,3)
-        X1 = pos_curr.astype(np.float64) - obs  # (N,3)
+        t_cast = time()
+        X0 = pos_prev.astype(np.float32, copy=False) - obs.astype(np.float32)
+        X1 = pos_curr.astype(np.float32, copy=False) - obs.astype(np.float32)
+        n_part = X0.shape[0]
+        csize = max(1, self.particle_chunk_size)
+        n_chunks = int(np.ceil(n_part / csize))
+        t_cast_done = time()
 
-        for d in self._rep_offsets:
-            # Positions of this replica relative to observer
-            R0 = X0 + d  # (N,3)
-            R1 = X1 + d  # (N,3)
+        # Count how many replicas survive the fast-reject test
+        n_rep_total = len(self._rep_offsets)
+        n_rep_kept = 0
+        t_loop_start = time()
+        t_r_sq = 0.0
+        t_mask = 0.0
+        t_interp = 0.0
+        t_healpix = 0.0
+        n_particles_placed = 0
 
-            r0 = np.linalg.norm(R0, axis=1)  # (N,)
-            r1 = np.linalg.norm(R1, axis=1)  # (N,)
-
-            # Particles whose trajectory straddles or crosses the shell.
-            # A particle contributes to this shell if at some t in [0,1]
-            # its distance is in [r_lo, r_hi].
-            # Simple criterion: max(r0,r1) >= r_lo  and  min(r0,r1) < r_hi
-            r_min = np.minimum(r0, r1)
-            r_max = np.maximum(r0, r1)
-            mask = (r_max >= r_lo) & (r_min < r_hi)
-
-            if not np.any(mask):
+        for rep_idx, d in enumerate(self._rep_offsets):
+            # Fast reject using replica radial bounds.
+            if r_hi < self._rep_rmin[rep_idx] or r_lo > self._rep_rmax[rep_idx]:
                 continue
+            n_rep_kept += 1
 
-            if self.interpolate:
-                # Linearly interpolate to the inner boundary crossing (r_hi side)
-                # t* = (r_hi - r0) / (r0 - r1)  when r0 > r_hi > r1
-                # For simplicity use midpoint when both are within shell.
-                r0_m = r0[mask]
-                r1_m = r1[mask]
-                R0_m = R0[mask]
-                R1_m = R1[mask]
+            for i0 in range(0, n_part, csize):
+                i1 = min(i0 + csize, n_part)
+                R0 = X0[i0:i1] + d
+                R1 = X1[i0:i1] + d
 
-                # Interpolation fraction to r_hi crossing (clamped to [0,1])
-                denom = r0_m - r1_m
-                safe_denom = np.where(np.abs(denom) > 1e-10, denom, 1e-10)
-                t_hi = np.clip((r_hi - r0_m) / safe_denom, 0.0, 1.0)
-                # Use r_hi crossing as the representative position
-                direction = (1.0 - t_hi[:, None]) * R0_m + t_hi[:, None] * R1_m
-            else:
-                # Use midpoint snapshot position
-                direction = 0.5 * (R0[mask] + R1[mask])
+                _t = time()
+                r0 = np.sqrt(np.sum(R0 * R0, axis=1, dtype=np.float32))
+                r1 = np.sqrt(np.sum(R1 * R1, axis=1, dtype=np.float32))
+                t_r_sq += time() - _t
 
-            # Normalise direction and compute HEALPix pixel
-            norm = np.linalg.norm(direction, axis=1, keepdims=True)
-            norm = np.where(norm > 0, norm, 1.0)
-            d_hat = direction / norm  # (K,3)
+                # A trajectory contributes if its radius interval overlaps shell.
+                _t = time()
+                r_min = np.minimum(r0, r1)
+                r_max = np.maximum(r0, r1)
+                mask = (r_max >= r_lo) & (r_min < r_hi)
+                t_mask += time() - _t
+                if not np.any(mask):
+                    continue
 
-            theta = np.arccos(np.clip(d_hat[:, 2], -1.0, 1.0))
-            phi = np.arctan2(d_hat[:, 1], d_hat[:, 0]) % (2 * np.pi)
-            pix = hp.ang2pix(self.nside, theta, phi, nest=False)
-            np.add.at(shell_map, pix, 1.0)
+                _t = time()
+                if self.interpolate:
+                    r0_m = r0[mask]
+                    r1_m = r1[mask]
+                    R0_m = R0[mask]
+                    R1_m = R1[mask]
+
+                    denom = r0_m - r1_m
+                    safe_denom = np.where(np.abs(denom) > 1e-10, denom, 1e-10)
+                    t_hi = np.clip((r_hi - r0_m) / safe_denom, 0.0, 1.0).astype(np.float32)
+                    direction = (1.0 - t_hi[:, None]) * R0_m + t_hi[:, None] * R1_m
+                else:
+                    direction = 0.5 * (R0[mask] + R1[mask])
+                t_interp += time() - _t
+
+                # healpy's vector form is generally faster than angle conversion.
+                _t = time()
+                pix = hp.vec2pix(
+                    self.nside,
+                    direction[:, 0],
+                    direction[:, 1],
+                    direction[:, 2],
+                    nest=False,
+                )
+                shell_map += np.bincount(pix, minlength=self.npix).astype(np.float32, copy=False)
+                t_healpix += time() - _t
+                n_particles_placed += int(np.sum(mask))
+
+        t_total = time() - t_acc_start
+        if verbose:
+            print(
+                f"    [accumulate_shell] r=[{r_lo:.1f},{r_hi:.1f}] Mpc/h  "
+                f"n_part={n_part:,}  chunks={n_chunks}  "
+                f"replicas={n_rep_kept}/{n_rep_total}  "
+                f"placed={n_particles_placed:,}  "
+                f"| cast={t_cast_done-t_cast:.2f}s  "
+                f"rsq={t_r_sq:.2f}s  mask={t_mask:.2f}s  "
+                f"interp={t_interp:.2f}s  healpix={t_healpix:.2f}s  "
+                f"total={t_total:.2f}s"
+            )
 
         return shell_map
 
+    # ------------------------------------------------------------------
+    def accumulate_shell_jax(self,
+                             pos_prev_jax,
+                             pos_curr_jax,
+                             a_prev: float,
+                             a_curr: float,
+                             r_lo_override: float | None = None,
+                             r_hi_override: float | None = None) -> np.ndarray:
+        """
+        GPU-accelerated shell accumulation from JAX float32 position arrays.
 
-# ---------------------------------------------------------------------------
-# Snapshot file I/O
-# ---------------------------------------------------------------------------
+        Equivalent to ``accumulate_shell()`` but runs entirely on GPU:
+        distances, masking, quadratic interpolation, HEALPix indexing, and
+        scatter-add are all performed as a single JIT-compiled JAX kernel per
+        replica.  Avoids the CPU round-trip and float64 cast.
+
+        Parameters
+        ----------
+        pos_prev_jax, pos_curr_jax : JAX arrays (any leading shape, float32)
+            Comoving particle positions [Mpc/h] at a_prev / a_curr.
+            Will be reshaped to (N, 3) and broadcast to all available GPUs.
+        a_prev, a_curr : float
+        r_lo_override, r_hi_override : optional boundary overrides [Mpc/h]
+
+        Returns
+        -------
+        shell_map : (npix,) float32 numpy array
+        """
+        import jax
+        import jax.numpy as jnp
+
+        r_hi = r_hi_override if r_hi_override is not None else float(self.chi_of_a(a_prev))
+        r_lo = r_lo_override if r_lo_override is not None else float(self.chi_of_a(a_curr))
+
+        if r_hi > self.chi_max:
+            return np.zeros(self.npix, dtype=np.float32)
+        if 1.0 / a_prev - 1.0 < self.z_min:
+            return np.zeros(self.npix, dtype=np.float32)
+
+        from concurrent.futures import ThreadPoolExecutor
+
+        kernel = _get_jax_shell_kernel()
+
+        # Broadcast positions to ALL GPUs so replicas can be processed in
+        # parallel (round-robin GPU assignment).  NVLink device-to-device
+        # transfers are fast; each GH200 has 96 GB so duplicating 6.5 GB of
+        # positions across 4 devices is well within budget.
+        t_gather = time()
+        devs   = jax.devices()
+        n_devs = len(devs)
+        obs_arr = np.array(self.obs, dtype=np.float32)
+        # Flatten and centre on observer; keep as JAX array to stay on GPU.
+        X0_base = pos_prev_jax.reshape(-1, 3).astype(jnp.float32)
+        X1_base = pos_curr_jax.reshape(-1, 3).astype(jnp.float32)
+        # One copy per device (NVLink allgather under the hood).
+        X0_devs = [
+            jax.device_put(X0_base, d) - jax.device_put(jnp.array(obs_arr), d)
+            for d in devs
+        ]
+        X1_devs = [
+            jax.device_put(X1_base, d) - jax.device_put(jnp.array(obs_arr), d)
+            for d in devs
+        ]
+        n_part = X0_devs[0].shape[0]
+        print(f"    [jax_shell] gather/cast {time()-t_gather:.2f}s  "
+              f"r=[{r_lo:.1f},{r_hi:.1f}] Mpc/h  n_part={n_part:,}  n_devs={n_devs}")
+
+        # ---- pre-collect kept replica offsets, grouped by device (round-robin)
+        # This must happen before threading so we can split work without a lock.
+        n_rep_total = len(self._rep_offsets)
+        device_reps: list[list[np.ndarray]] = [[] for _ in range(n_devs)]
+        n_rep_kept = 0
+        for rep_idx, d in enumerate(self._rep_offsets):
+            if r_hi < self._rep_rmin[rep_idx] or r_lo > self._rep_rmax[rep_idx]:
+                continue
+            device_reps[n_rep_kept % n_devs].append(d)
+            n_rep_kept += 1
+
+        # ---- dispatch per-device work in parallel threads so all GPUs run
+        # concurrently.  A single-threaded round-robin loop serialises dispatch
+        # even though JAX is async; threads give each GPU its own dispatch path.
+        r_lo_f32 = np.float32(r_lo)
+        r_hi_f32 = np.float32(r_hi)
+        nside_    = self.nside
+        npix_     = self.npix
+        interp_   = self.interpolate
+
+        def _run_device(dev_i: int) -> np.ndarray:
+            pm = jax.device_put(jnp.zeros(npix_, dtype=jnp.float32), devs[dev_i])
+            for d in device_reps[dev_i]:
+                d_jax = jax.device_put(np.array(d, dtype=np.float32), devs[dev_i])
+                contrib = kernel(
+                    X0_devs[dev_i], X1_devs[dev_i], d_jax,
+                    r_lo_f32, r_hi_f32, nside_, npix_, interp_,
+                )
+                pm = pm + contrib
+            return np.asarray(pm)   # block until this device finishes
+
+        t0 = time()
+        with ThreadPoolExecutor(max_workers=n_devs) as pool:
+            partial_np = list(pool.map(_run_device, range(n_devs)))
+        t_gpu = time() - t0
+
+        shell_map = sum(partial_np)
+        print(f"    [jax_shell] gpu={t_gpu:.2f}s  "
+              f"replicas={n_rep_kept}/{n_rep_total}  "
+              f"placed={int(shell_map.sum()):,}")
+        return shell_map
 
 def save_snapshot(path: Path | str, pos: np.ndarray, a: float):
     """Save positions + scale factor to NPZ."""
@@ -280,7 +579,7 @@ def load_snapshot(path: Path | str):
 
 
 def save_shell_fits(shell_map: np.ndarray, z_lo: float, z_hi: float,
-                    output_dir: Path, prefix: str = "CosmoML"):
+                    output_dir: Path, prefix: str = "Cosmo"):
     """Save HEALPix shell as FITS, matching shell_collector.py naming."""
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -367,7 +666,8 @@ def save_shells_npz(shells_array: np.ndarray,
 # Streaming step generator  (O(N) memory, same approach as pkdgrav3)
 # ---------------------------------------------------------------------------
 
-def _streaming_steps(dj, a_steps, res_pm, stepper, method, chunk_size, nbody_kwargs):
+def _streaming_steps(dj, a_steps, res_pm, stepper, method, chunk_size, nbody_kwargs,
+                     return_jax: bool = False):
     """
     Generator that runs the simulation ONE step at a time and yields
     ``(pos_prev, pos_curr, a_prev, a_curr)`` for each interval.
@@ -378,7 +678,16 @@ def _streaming_steps(dj, a_steps, res_pm, stepper, method, chunk_size, nbody_kwa
     Works by re-seeding DiscoDJ via ``with_external_ics(pos, vel)`` at each
     step, exactly analogous to how pkdgrav3 and build_lightcone_shells.py's
     ``accumulate_shell`` process one time-slab at a time.
+
+    Parameters
+    ----------
+    return_jax : bool
+        If False (default) positions are returned as numpy float64 arrays on CPU.
+        If True positions are returned as JAX float32 arrays gathered to GPU 0,
+        which avoids the device→host transfer and float64 cast.  Use together
+        with ``LightconeShellBuilder.accumulate_shell_jax``.
     """
+    import jax
     import jax.numpy as jnp
 
     _kw = dict(res_pm=res_pm, stepper=stepper, method=method,
@@ -391,16 +700,30 @@ def _streaming_steps(dj, a_steps, res_pm, stepper, method, chunk_size, nbody_kwa
     # This gives us BOTH the IC positions X[0]  *and*  X[1] in one trace,
     # using the full LPT / BullFrog IC initialisation that only runs once.
     a0, a1 = float(a_steps[0]), float(a_steps[1])
+    t_nbody = time()
     result = dj.run_nbody(
         a_ini=a0, a_end=a1, n_steps=1,
         time_var=np.array([a0, a1], dtype=np.float64),
         collect_all=True, **_kw,
     )
+    print(f"  [streaming] step 1/{n_steps}  a=[{a0:.4f},{a1:.4f}]  "
+          f"nbody (2-snapshot init) took {time()-t_nbody:.1f}s")
     X2, P2, a2 = result
-    pos_prev = np.asarray(X2[0]).reshape(-1, 3).astype(np.float64)
-    pos_curr = np.asarray(X2[1]).reshape(-1, 3).astype(np.float64)
-    vel_curr = np.asarray(P2[1]).reshape(-1, 3).astype(np.float32)
+    t_gather = time()
+    if return_jax:
+        # Keep native sharding (all 4 GPUs) so with_external_ics stays compatible
+        # with DiscoDJ's internal sharded grid self.q.  accumulate_shell_jax
+        # does its own device_put to GPU 0 independently.
+        pos_prev = X2[0].reshape(-1, 3).astype(jnp.float32)
+        pos_curr = X2[1].reshape(-1, 3).astype(jnp.float32)
+        vel_curr = P2[1].reshape(-1, 3).astype(jnp.float32)
+    else:
+        pos_prev = np.asarray(X2[0]).reshape(-1, 3).astype(np.float64)
+        pos_curr = np.asarray(X2[1]).reshape(-1, 3).astype(np.float64)
+        vel_curr = np.asarray(P2[1]).reshape(-1, 3).astype(np.float32)
     del X2, P2
+    print(f"  [streaming] step 1 gather/cast took {time()-t_gather:.1f}s  "
+          f"n_part={pos_prev.shape[0]:,}")
 
     yield pos_prev, pos_curr, float(a2[0]), float(a2[1])
     pos_prev = pos_curr
@@ -413,18 +736,33 @@ def _streaming_steps(dj, a_steps, res_pm, stepper, method, chunk_size, nbody_kwa
     for i in range(1, n_steps):
         a_s = float(a_steps[i])
         a_e = float(a_steps[i + 1])
-        dj_i = dj.with_external_ics(
-            pos=jnp.array(pos_prev.astype(np.float32)),
-            vel=jnp.array(vel_curr),
-        )
+        t_nbody = time()
+        if return_jax:
+            # pos_prev is a sharded JAX float32 array (all 4 GPUs), matching
+            # DiscoDJ's internal grid sharding.  Pass directly.
+            dj_i = dj.with_external_ics(pos=pos_prev, vel=vel_curr)
+        else:
+            dj_i = dj.with_external_ics(
+                pos=jnp.array(pos_prev.astype(np.float32)),
+                vel=jnp.array(vel_curr),
+            )
         X_n, P_n, _ = dj_i.run_nbody(
             a_ini=a_s, a_end=a_e, n_steps=1,
             time_var=np.array([a_s, a_e], dtype=np.float64),
             collect_all=False, **_kw,
         )
-        pos_curr = np.asarray(X_n).reshape(-1, 3).astype(np.float64)
-        vel_curr = np.asarray(P_n).reshape(-1, 3).astype(np.float32)
+        print(f"  [streaming] step {i+1}/{n_steps}  a=[{a_s:.4f},{a_e:.4f}]  "
+              f"nbody took {time()-t_nbody:.1f}s")
+        t_gather = time()
+        if return_jax:
+            # Keep native sharding; same reason as step 1.
+            pos_curr = X_n.reshape(-1, 3).astype(jnp.float32)
+            vel_curr = P_n.reshape(-1, 3).astype(jnp.float32)
+        else:
+            pos_curr = np.asarray(X_n).reshape(-1, 3).astype(np.float64)
+            vel_curr = np.asarray(P_n).reshape(-1, 3).astype(np.float32)
         del X_n, P_n
+        print(f"  [streaming] step {i+1} gather/cast took {time()-t_gather:.1f}s")
 
         yield pos_prev, pos_curr, a_s, a_e
         pos_prev = pos_curr
@@ -452,6 +790,8 @@ def run_with_shells(
     cosmo_key: str | None = None,
     output_npz: str | Path | None = None,
     streaming: bool = True,
+    shell_chunk_size: int = 2_000_000,
+    use_gpu: bool = True,
     **nbody_kwargs,
 ):
     """
@@ -468,6 +808,12 @@ def run_with_shells(
                  same approach as pkdgrav3's on-the-fly lightcone.
                  If False, use ``collect_all=True`` (O(n_steps * N) memory,
                  but a single JAX trace / compilation).
+    use_gpu    : if True (default) use the JAX GPU kernel for shell
+                 accumulation (``accumulate_shell_jax``).  Avoids the
+                 device→host transfer and float64 cast; runs distances,
+                 masking, interpolation, HEALPix indexing and scatter-add
+                 entirely on the GPU.  Set False to fall back to the original
+                 NumPy CPU path (useful for debugging or CPU-only machines).
     metainfo_path : optional path to CosmoGridV1_metainfo.h5.
         If provided, shell boundaries are taken from the metainfo z_bins
         and output is a single NPZ file matching CosmoGridV1 format.
@@ -488,6 +834,7 @@ def run_with_shells(
         z_min=z_min,
         z_max=z_max,
         interpolate=interpolate,
+        particle_chunk_size=shell_chunk_size,
     )
 
     output_dir = Path(output_dir)
@@ -518,14 +865,18 @@ def run_with_shells(
     a_ini = float(a_steps[0])
     a_end = float(a_steps[-1])
     mode_str = "streaming (O(N))" if streaming else "collect_all (O(n_steps·N))"
+    accel_str = "GPU (JAX kernel)" if use_gpu else "CPU (NumPy)"
     print(f"Running DiscoDJ with {n_steps} steps, "
-          f"a={a_ini:.4f}→{a_end:.4f}  [{mode_str}]")
+          f"a={a_ini:.4f}→{a_end:.4f}  [{mode_str}]  shell_accum={accel_str}")
     t0 = time()
+    t_nbody_total = 0.0
+    t_shell_total = 0.0
 
     # ── Choose step data source ───────────────────────────────────────────
     if streaming:
         step_gen = _streaming_steps(
-            dj, a_steps, res_pm, stepper, method, chunk_size, nbody_kwargs)
+            dj, a_steps, res_pm, stepper, method, chunk_size, nbody_kwargs,
+            return_jax=use_gpu)
         X_all = None  # not used in streaming mode
     else:
         result = dj.run_nbody(
@@ -577,59 +928,86 @@ def run_with_shells(
             # In NPZ mode the overlap check below handles boundary steps.
             if snap_dir:
                 save_snapshot(snap_dir / f"snap_{i:05d}.npz",
-                              pos_prev.astype(np.float32), a_prev)
+                              np.asarray(pos_prev).astype(np.float32), a_prev)
             continue
         if z_prev < builder.z_min:
             # Below z_min; skip but still optionally save snapshot
             if snap_dir:
                 save_snapshot(snap_dir / f"snap_{i:05d}.npz",
-                              pos_prev.astype(np.float32), a_prev)
+                              np.asarray(pos_prev).astype(np.float32), a_prev)
             continue
 
         if snap_dir:
             save_snapshot(snap_dir / f"snap_{i:05d}.npz",
-                          pos_prev.astype(np.float32), a_prev)
+                          np.asarray(pos_prev).astype(np.float32), a_prev)
 
-        t_shell = time()
+        t_step_wall = time() - t0
+        t_shell_start = time()
 
         if shell_info_meta is not None:
             # ── NPZ mode: assign particles to metainfo z_bins ────────────────
             overlap = np.where(
                 (meta_lower < r_step_hi) & (meta_upper > r_step_lo)
             )[0]
+            print(f"  step {i+1}/{n_steps}  z=[{z_curr:.3f},{z_prev:.3f}]  "
+                  f"r=[{r_step_lo:.1f},{r_step_hi:.1f}] Mpc/h  "
+                  f"overlapping_shells={len(overlap)}  "
+                  f"wall={t_step_wall:.1f}s")
             for idx in overlap:
                 sid = int(meta_ids[idx])
-                shell_map = builder.accumulate_shell(
-                    pos_prev, pos_curr, a_prev, a_curr,
-                    r_lo_override=float(meta_lower[idx]),
-                    r_hi_override=float(meta_upper[idx]),
-                )
+                if use_gpu:
+                    shell_map = builder.accumulate_shell_jax(
+                        pos_prev, pos_curr, a_prev, a_curr,
+                        r_lo_override=float(meta_lower[idx]),
+                        r_hi_override=float(meta_upper[idx]),
+                    )
+                else:
+                    shell_map = builder.accumulate_shell(
+                        pos_prev, pos_curr, a_prev, a_curr,
+                        r_lo_override=float(meta_lower[idx]),
+                        r_hi_override=float(meta_upper[idx]),
+                    )
                 shells_array[sid] += shell_map.astype(np.int32)
-            dt = time() - t_shell
-            print(f"  step {i+1}/{n_steps}  z=[{z_curr:.3f},{z_prev:.3f}]  "
-                  f"overlapping_shells={len(overlap)}  ({dt:.1f}s)")
+            dt_shell = time() - t_shell_start
+            t_shell_total += dt_shell
+            print(f"  step {i+1}/{n_steps}  shell_accum={dt_shell:.1f}s  "
+                  f"(cumulative: shell={t_shell_total:.1f}s  "
+                  f"total_wall={time()-t0:.1f}s)")
             shells_written += len(overlap)
         else:
             # ── FITS mode ────────────────────────────────────────────────────
-            shell = builder.accumulate_shell(pos_prev, pos_curr, a_prev, a_curr)
+            print(f"  shell {i+1}/{n_steps}  z=[{z_curr:.3f},{z_prev:.3f}]  "
+                  f"r=[{r_step_lo:.1f},{r_step_hi:.1f}] Mpc/h  "
+                  f"wall={t_step_wall:.1f}s")
+            if use_gpu:
+                shell = builder.accumulate_shell_jax(pos_prev, pos_curr, a_prev, a_curr)
+            else:
+                shell = builder.accumulate_shell(pos_prev, pos_curr, a_prev, a_curr)
             fname = save_shell_fits(shell, z_lo=z_curr, z_hi=z_prev,
                                     output_dir=output_dir, prefix=prefix)
-            dt = time() - t_shell
-            print(f"  shell {i+1}/{n_steps}  z=[{z_curr:.3f},{z_prev:.3f}]  "
-                  f"n_part={int(shell.sum())}  → {fname.name}  ({dt:.1f}s)")
+            dt_shell = time() - t_shell_start
+            t_shell_total += dt_shell
+            print(f"  shell {i+1}/{n_steps}  n_part={int(shell.sum())}  "
+                  f"→ {fname.name}  shell_accum={dt_shell:.1f}s  "
+                  f"(cumulative: shell={t_shell_total:.1f}s  "
+                  f"total_wall={time()-t0:.1f}s)")
             shells_written += 1
 
     # Save final snapshot
     if snap_dir and last_pos_curr is not None:
         save_snapshot(snap_dir / f"snap_{n_steps:05d}.npz",
-                      last_pos_curr.astype(np.float32), last_a_curr)
+                      np.asarray(last_pos_curr).astype(np.float32), last_a_curr)
 
+    t_total_wall = time() - t0
     if shell_info_meta is not None:
         # Save combined NPZ
         save_shells_npz(shells_array, shell_info_meta, output_npz, prefix=prefix)
         print(f"Done. NPZ saved → {output_npz}")
     else:
         print(f"Done. {shells_written} shells written to {output_dir}")
+    print(f"[run_with_shells] total wall time: {t_total_wall:.1f}s  "
+          f"shell_accum: {t_shell_total:.1f}s  "
+          f"other (nbody+IO): {t_total_wall - t_shell_total:.1f}s")
 
     return shells_written
 

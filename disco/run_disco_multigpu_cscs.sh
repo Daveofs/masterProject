@@ -10,10 +10,10 @@
 #SBATCH --partition=normal
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1         # one task per GPU
-#SBATCH --gpus-per-node=1           # 4 GH200 GPUs; JAX distributed assigns one per task
-#SBATCH --time=01:00:00
-#SBATCH --output=/capstor/scratch/cscs/damrein/outputs/logs/disco_multigpu_%j.out
-#SBATCH --error=/capstor/scratch/cscs/damrein/outputs/logs/disco_multigpu_%j.err
+#SBATCH --gpus-per-node=4           # 4 GH200 GPUs; JAX distributed assigns one per task
+#SBATCH --time=24:00:00
+#SBATCH --output=/capstor/scratch/cscs/damrein/outputs/logs/disco/disco_multigpu_%j.out
+#SBATCH --error=/capstor/scratch/cscs/damrein/outputs/logs/disco/disco_multigpu_%j.err
 
 set -euo pipefail
 
@@ -23,27 +23,29 @@ SCRATCH_DIR=/capstor/scratch/cscs/damrein
 CONDA_ENV=disco-dj
 CONDA_INIT=$HOME/miniforge3/etc/profile.d/conda.sh
 
-# Input IC file (only used when USE_EXTERNAL_ICS=true)
-IC_FILE=${SCRATCH_DIR}/outputs/ICs/000001_copy6/CosmoML.00000
+# Input IC file (only used when USE_INTERNAL_ICS=false)
+IC_FILE=/capstor/scratch/cscs/damrein/outputs/ICs/cosmo_000001/run_0/CosmoML.00000
 
 # Use internal ngenic-like ICs instead of an external tipsy file
-USE_INTERNAL_ICS=true
+USE_INTERNAL_ICS=false
 NGENIC_SEED=180723
 
 # Output paths
 LOG_DIR=${SCRATCH_DIR}/outputs/logs
 SNAP_DIR=${SCRATCH_DIR}/outputs/snapshots
+SHELL_DIR=${SCRATCH_DIR}/outputs/shells_with_external_ics
 PLOT_DIR=${SCRATCH_DIR}/outputs/plots/multigpu
+
 
 # ── Simulation parameters ─────────────────────────────────────────────────
 MODE=gpu
 RES=832
-RES_PM=1664
+RES_PM=832
 BOXSIZE=900.0
 COSMO=Planck15
 A_INI=0.01
 A_END=1.0
-N_STEPS=100
+N_STEPS=5 # if meta_info is given n_steps = 70 is used
 STEPPER=bullfrog
 TIME_VAR=D
 METHOD=pm
@@ -51,7 +53,9 @@ GRAD_KERNEL_ORDER=4
 LAPLACE_KERNEL_ORDER=0
 NUM_CHUNKS=32
 LIGHTCONE=false
-BUILD_SHELLS=false
+BUILD_SHELLS=true
+SHELLS_METAINFO="/capstor/scratch/cscs/damrein/cosmogridv1/CosmoGridV1_metainfo.h5"
+#SHELLS_METAINFO=""
 
 # ── JAX compilation cache (avoids 20-sec first-run JIT overhead on re-runs) ──
 JAX_CACHE_DIR=${SCRATCH_DIR}/jax_cache
@@ -100,7 +104,7 @@ if ! "${PYTHON_BIN}" -c "import discodj" 2>/dev/null; then
 fi
 
 # ── Create output directories ─────────────────────────────────────────────
-mkdir -p "${LOG_DIR}" "${SNAP_DIR}" "${PLOT_DIR}" "${PROJECT_DIR}/data"
+mkdir -p "${LOG_DIR}" "${SNAP_DIR}" "${PLOT_DIR}" "${SHELL_DIR}" "${PROJECT_DIR}/data"
 
 SAVE_FINAL="${SNAP_DIR}/final_multigpu_${SLURM_JOB_ID}.npz"
 
@@ -123,6 +127,7 @@ PYTHON_ARGS=(
     --num-chunks  "${NUM_CHUNKS}"
     --save-final  "${SAVE_FINAL}"
     --output-dir  "${PLOT_DIR}"
+    --shells-output-dir   "${SHELL_DIR}"
     --plot
 )
 
@@ -139,16 +144,13 @@ fi
 
 if [[ "${BUILD_SHELLS}" == "true" ]]; then
     PYTHON_ARGS+=(--build-shells)
+     if [[ -n "${SHELLS_METAINFO}" && -f "${SHELLS_METAINFO}" ]]; then
+        PYTHON_ARGS+=(--shells-metainfo "${SHELLS_METAINFO}")
+    fi
 fi
 
 cd "${PROJECT_DIR}"
 echo "[$(date --iso-8601=seconds)] Starting DISCO-DJ multi-GPU run on $(hostname)"
-echo "  Nodes: ${SLURM_NODELIST}"
-echo "  Tasks (processes): ${SLURM_NTASKS}"
-nvidia-smi --query-gpu=index,name,memory.total --format=csv,noheader 2>/dev/null || true
-
-srun --output "${LOG_DIR}/disco_multigpu_${SLURM_JOB_ID}_%t.out" \
-     --error  "${LOG_DIR}/disco_multigpu_${SLURM_JOB_ID}_%t.err" \
-    "${PYTHON_BIN}" -u "${PYTHON_ARGS[@]}"
-
-echo "[$(date --iso-8601=seconds)] Done. Snapshot at: ${SAVE_FINAL}"
+echo -e "[$(date --iso-8601=seconds)] GPUs in use: \n$(nvidia-smi --query-gpu=index,name,uuid --format=csv,noheader 2>/dev/null || echo 'nvidia-smi not available')"
+srun "${PYTHON_BIN}" -u "${PYTHON_ARGS[@]}"
+echo "[$(date --iso-8601=seconds)] Done.
