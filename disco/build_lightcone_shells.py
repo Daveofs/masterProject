@@ -506,21 +506,30 @@ class LightconeShellBuilder:
         # transfers are fast; each GH200 has 96 GB so duplicating 6.5 GB of
         # positions across 4 devices is well within budget.
         t_gather = time()
-        devs   = jax.devices()
+        # Use only this process's local devices.  In multi-node distributed
+        # runs jax.devices() returns all global GPUs, but device_put requires
+        # a fully-addressable (local) array — use jax.local_devices() instead.
+        devs   = jax.local_devices()
         n_devs = len(devs)
         obs_arr = np.array(self.obs, dtype=np.float32)
-        # Flatten and centre on observer; keep as JAX array to stay on GPU.
-        X0_base = pos_prev_jax.reshape(-1, 3).astype(jnp.float32)
-        X1_base = pos_curr_jax.reshape(-1, 3).astype(jnp.float32)
-        # One copy per device (NVLink allgather under the hood).
-        X0_devs = [
-            jax.device_put(X0_base, d) - jax.device_put(jnp.array(obs_arr), d)
-            for d in devs
-        ]
-        X1_devs = [
-            jax.device_put(X1_base, d) - jax.device_put(jnp.array(obs_arr), d)
-            for d in devs
-        ]
+        # Flatten to (N, 3).  In a multi-process run pos_prev_jax is a
+        # globally-sharded array; we must extract only the locally-addressable
+        # shards before calling device_put on a single local device.
+        X0_flat = pos_prev_jax.reshape(-1, 3).astype(jnp.float32)
+        X1_flat = pos_curr_jax.reshape(-1, 3).astype(jnp.float32)
+        if jax.process_count() > 1:
+            # Each process holds a partition of particles on its local GPUs.
+            # Concatenate local shards → (N_local, 3) numpy array.
+            X0_np = np.concatenate(
+                [np.asarray(s.data) for s in X0_flat.addressable_shards], axis=0)
+            X1_np = np.concatenate(
+                [np.asarray(s.data) for s in X1_flat.addressable_shards], axis=0)
+        else:
+            X0_np = np.asarray(X0_flat)
+            X1_np = np.asarray(X1_flat)
+        # One copy per local device, centred on observer.
+        X0_devs = [jax.device_put(X0_np - obs_arr, d) for d in devs]
+        X1_devs = [jax.device_put(X1_np - obs_arr, d) for d in devs]
         n_part = X0_devs[0].shape[0]
         print(f"    [jax_shell] gather/cast {time()-t_gather:.2f}s  "
               f"r=[{r_lo:.1f},{r_hi:.1f}] Mpc/h  n_part={n_part:,}  n_devs={n_devs}")
@@ -562,6 +571,15 @@ class LightconeShellBuilder:
         t_gpu = time() - t0
 
         shell_map = sum(partial_np)
+
+        # In a multi-process JAX distributed run each process holds a shard of
+        # the particles, so shell_map contains only the partial count from this
+        # process's particles.  Sum across all processes to get the global count.
+        if jax.process_count() > 1:
+            from jax.experimental.multihost_utils import process_allgather as _pag
+            gathered = np.asarray(_pag(shell_map))  # (n_procs, npix)
+            shell_map = gathered.sum(axis=0).astype(np.float32)
+
         print(f"    [jax_shell] gpu={t_gpu:.2f}s  "
               f"replicas={n_rep_kept}/{n_rep_total}  "
               f"placed={int(shell_map.sum()):,}")
@@ -824,6 +842,8 @@ def run_with_shells(
         Defaults to ``output_dir / f"shells_nside={nside}.npz"``.
     """
 
+    import jax  # needed here for process_index() / process_count() guards
+
     # Build comoving-distance function from DiscoDJ cosmology
     chi_of_a, _ = make_chi_of_a(dj.cosmo)
 
@@ -932,12 +952,12 @@ def run_with_shells(
             continue
         if z_prev < builder.z_min:
             # Below z_min; skip but still optionally save snapshot
-            if snap_dir:
+            if snap_dir and jax.process_index() == 0:
                 save_snapshot(snap_dir / f"snap_{i:05d}.npz",
                               np.asarray(pos_prev).astype(np.float32), a_prev)
             continue
 
-        if snap_dir:
+        if snap_dir and jax.process_index() == 0:
             save_snapshot(snap_dir / f"snap_{i:05d}.npz",
                           np.asarray(pos_prev).astype(np.float32), a_prev)
 
@@ -949,10 +969,11 @@ def run_with_shells(
             overlap = np.where(
                 (meta_lower < r_step_hi) & (meta_upper > r_step_lo)
             )[0]
-            print(f"  step {i+1}/{n_steps}  z=[{z_curr:.3f},{z_prev:.3f}]  "
-                  f"r=[{r_step_lo:.1f},{r_step_hi:.1f}] Mpc/h  "
-                  f"overlapping_shells={len(overlap)}  "
-                  f"wall={t_step_wall:.1f}s")
+            if jax.process_index() == 0:
+                print(f"  step {i+1}/{n_steps}  z=[{z_curr:.3f},{z_prev:.3f}]  "
+                      f"r=[{r_step_lo:.1f},{r_step_hi:.1f}] Mpc/h  "
+                      f"overlapping_shells={len(overlap)}  "
+                      f"wall={t_step_wall:.1f}s")
             for idx in overlap:
                 sid = int(meta_ids[idx])
                 if use_gpu:
@@ -970,44 +991,53 @@ def run_with_shells(
                 shells_array[sid] += shell_map.astype(np.int32)
             dt_shell = time() - t_shell_start
             t_shell_total += dt_shell
-            print(f"  step {i+1}/{n_steps}  shell_accum={dt_shell:.1f}s  "
-                  f"(cumulative: shell={t_shell_total:.1f}s  "
-                  f"total_wall={time()-t0:.1f}s)")
+            if jax.process_index() == 0:
+                print(f"  step {i+1}/{n_steps}  shell_accum={dt_shell:.1f}s  "
+                      f"(cumulative: shell={t_shell_total:.1f}s  "
+                      f"total_wall={time()-t0:.1f}s)")
             shells_written += len(overlap)
         else:
             # ── FITS mode ────────────────────────────────────────────────────
-            print(f"  shell {i+1}/{n_steps}  z=[{z_curr:.3f},{z_prev:.3f}]  "
-                  f"r=[{r_step_lo:.1f},{r_step_hi:.1f}] Mpc/h  "
-                  f"wall={t_step_wall:.1f}s")
+            if jax.process_index() == 0:
+                print(f"  shell {i+1}/{n_steps}  z=[{z_curr:.3f},{z_prev:.3f}]  "
+                      f"r=[{r_step_lo:.1f},{r_step_hi:.1f}] Mpc/h  "
+                      f"wall={t_step_wall:.1f}s")
             if use_gpu:
                 shell = builder.accumulate_shell_jax(pos_prev, pos_curr, a_prev, a_curr)
             else:
                 shell = builder.accumulate_shell(pos_prev, pos_curr, a_prev, a_curr)
-            fname = save_shell_fits(shell, z_lo=z_curr, z_hi=z_prev,
-                                    output_dir=output_dir, prefix=prefix)
+            if jax.process_index() == 0:
+                fname = save_shell_fits(shell, z_lo=z_curr, z_hi=z_prev,
+                                        output_dir=output_dir, prefix=prefix)
             dt_shell = time() - t_shell_start
             t_shell_total += dt_shell
-            print(f"  shell {i+1}/{n_steps}  n_part={int(shell.sum())}  "
-                  f"→ {fname.name}  shell_accum={dt_shell:.1f}s  "
-                  f"(cumulative: shell={t_shell_total:.1f}s  "
-                  f"total_wall={time()-t0:.1f}s)")
+            if jax.process_index() == 0:
+                print(f"  shell {i+1}/{n_steps}  n_part={int(shell.sum())}  "
+                      f"→ {fname.name}  shell_accum={dt_shell:.1f}s  "
+                      f"(cumulative: shell={t_shell_total:.1f}s  "
+                      f"total_wall={time()-t0:.1f}s)")
             shells_written += 1
 
     # Save final snapshot
     if snap_dir and last_pos_curr is not None:
-        save_snapshot(snap_dir / f"snap_{n_steps:05d}.npz",
-                      np.asarray(last_pos_curr).astype(np.float32), last_a_curr)
+        if jax.process_index() == 0:
+            save_snapshot(snap_dir / f"snap_{n_steps:05d}.npz",
+                          np.asarray(last_pos_curr).astype(np.float32), last_a_curr)
 
     t_total_wall = time() - t0
     if shell_info_meta is not None:
-        # Save combined NPZ
-        save_shells_npz(shells_array, shell_info_meta, output_npz, prefix=prefix)
-        print(f"Done. NPZ saved → {output_npz}")
+        # Save combined NPZ — only process 0 writes; shells_array already has
+        # the global per-shell counts (allreduced inside accumulate_shell_jax).
+        if jax.process_index() == 0:
+            save_shells_npz(shells_array, shell_info_meta, output_npz, prefix=prefix)
+            print(f"Done. NPZ saved → {output_npz}")
     else:
-        print(f"Done. {shells_written} shells written to {output_dir}")
-    print(f"[run_with_shells] total wall time: {t_total_wall:.1f}s  "
-          f"shell_accum: {t_shell_total:.1f}s  "
-          f"other (nbody+IO): {t_total_wall - t_shell_total:.1f}s")
+        if jax.process_index() == 0:
+            print(f"Done. {shells_written} shells written to {output_dir}")
+    if jax.process_index() == 0:
+        print(f"[run_with_shells] total wall time: {t_total_wall:.1f}s  "
+              f"shell_accum: {t_shell_total:.1f}s  "
+              f"other (nbody+IO): {t_total_wall - t_shell_total:.1f}s")
 
     return shells_written
 

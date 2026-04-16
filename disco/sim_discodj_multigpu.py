@@ -121,6 +121,12 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--plot", action="store_true",
                    help="Generate a 2D density slice from the final snapshot")
 
+    # --- multi-node ---
+    p.add_argument("--gpus-per-node", type=int, default=None,
+                   help="Number of GPUs per node for JAX distributed init when running "
+                        "on multiple nodes (default: auto-detect from SLURM_GPUS_PER_NODE, "
+                        "fallback to total visible GPUs)")
+
     return p.parse_args()
 
 
@@ -170,10 +176,36 @@ else:
 
 
 # ---------------------------------------------------------------------------
-# Single-process multi-device: JAX sees all GPUs directly — no distributed init
+# JAX init — single-node: all GPUs visible directly (no distributed init).
+#             multi-node: call jax.distributed.initialize() so all processes
+#             form one global device mesh before any computation.
 # ---------------------------------------------------------------------------
-print("Initializing JAX …")
+_slurm_nnodes = int(os.environ.get("SLURM_NNODES", "1"))
+
 import jax
+
+if args.mode == "gpu" and _slurm_nnodes > 1:
+    # Resolve how many GPUs this process owns locally.
+    _gpus_per_node = args.gpus_per_node
+    if _gpus_per_node is None:
+        # SLURM sets SLURM_GPUS_PER_NODE; may be "4" or "gh200:4" etc.
+        _slurm_gpus = os.environ.get("SLURM_GPUS_PER_NODE", "")
+        if _slurm_gpus:
+            _gpus_per_node = int(_slurm_gpus.split(":")[-1])
+        else:
+            import subprocess as _sp
+            _gpus_per_node = int(_sp.check_output(
+                ["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"],
+                text=True).strip().count("\n")) + 1
+    print(f"Multi-node run: {_slurm_nnodes} nodes × {_gpus_per_node} GPUs/node "
+          f"→ calling jax.distributed.initialize(local_device_ids=range({_gpus_per_node}))")
+    jax.distributed.initialize(
+        local_device_ids=list(range(_gpus_per_node)),
+        heartbeat_timeout_seconds=60,
+        initialization_timeout=120,
+    )
+else:
+    print("Single-node run: JAX sees all GPUs directly — no distributed init")
 
 # After init we know the full device count
 _backend    = "gpu" if args.mode == "gpu" else "cpu"
@@ -327,8 +359,17 @@ if args.build_shells:
         # scale factors high→low (simulation runs from high-z to low-z).
         _z_bounds = _np.unique(_np.concatenate([_meta['lower_z'], _meta['upper_z']]))
         _a_steps  = _np.sort(1.0 / (1.0 + _z_bounds.astype(_np.float64)))  # ascending a
+        # If the IC scale factor is earlier than the first shell boundary,
+        # prepend it so that the simulation actually starts from a_ini and
+        # evolves the particles to z_max before accumulating any shells.
+        # Without this, external ICs at a=0.01 would be used as if they were
+        # already at z=z_max (e.g. a=0.2222), producing wrong structure.
+        if _a_steps[0] > a_ini:
+            _a_steps = _np.concatenate([[a_ini], _a_steps])
+            print(f"[shells] Prepended a_ini={a_ini:.4f} to a_steps "
+                  f"(IC scale factor earlier than first shell boundary a={_a_steps[1]:.4f})")
         print(f"[shells] a_steps derived from metainfo ({_mkey}): "
-              f"{len(_a_steps)} steps covering {len(_meta)} shells exactly")
+              f"{len(_a_steps)-1} steps covering {len(_meta)} shells exactly")
     else:
         # Fall back to uniform linspace
         _a_steps = _np.linspace(a_ini, args.a_end, args.n_steps + 1, dtype=_np.float64)

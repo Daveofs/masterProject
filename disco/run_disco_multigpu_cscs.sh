@@ -8,9 +8,10 @@
 #SBATCH --job-name=disco_multigpu
 #SBATCH --account=sk037
 #SBATCH --partition=normal
-#SBATCH --nodes=1
-#SBATCH --ntasks-per-node=1         # one task per GPU
-#SBATCH --gpus-per-node=4           # 4 GH200 GPUs; JAX distributed assigns one per task
+#SBATCH --nodes=4
+#SBATCH --ntasks-per-node=1         # one Python process per node
+#SBATCH --gpus-per-node=4           # 4 GH200 GPUs per node (8 total, 2x4); process owns all local GPUs
+# NOTE: RES must be divisible by (nodes * gpus-per-node).
 #SBATCH --time=24:00:00
 #SBATCH --output=/capstor/scratch/cscs/damrein/outputs/logs/disco/disco_multigpu_%j.out
 #SBATCH --error=/capstor/scratch/cscs/damrein/outputs/logs/disco/disco_multigpu_%j.err
@@ -33,9 +34,12 @@ NGENIC_SEED=180723
 # Output paths
 LOG_DIR=${SCRATCH_DIR}/outputs/logs
 SNAP_DIR=${SCRATCH_DIR}/outputs/snapshots
-SHELL_DIR=${SCRATCH_DIR}/outputs/shells_with_external_ics
+SHELL_DIR=${SCRATCH_DIR}/outputs/shells_with_external_ics_multinode
 PLOT_DIR=${SCRATCH_DIR}/outputs/plots/multigpu
 
+
+# ── Multi-node settings ──────────────────────────────────────────────────
+GPUS_PER_NODE=4              # must match --gpus-per-node above
 
 # ── Simulation parameters ─────────────────────────────────────────────────
 MODE=gpu
@@ -128,6 +132,7 @@ PYTHON_ARGS=(
     --save-final  "${SAVE_FINAL}"
     --output-dir  "${PLOT_DIR}"
     --shells-output-dir   "${SHELL_DIR}"
+    --gpus-per-node   "${GPUS_PER_NODE}"
     --plot
 )
 
@@ -152,5 +157,8 @@ fi
 cd "${PROJECT_DIR}"
 echo "[$(date --iso-8601=seconds)] Starting DISCO-DJ multi-GPU run on $(hostname)"
 echo -e "[$(date --iso-8601=seconds)] GPUs in use: \n$(nvidia-smi --query-gpu=index,name,uuid --format=csv,noheader 2>/dev/null || echo 'nvidia-smi not available')"
-srun "${PYTHON_BIN}" -u "${PYTHON_ARGS[@]}"
+# --ntasks must equal SLURM_NNODES (one process per node, each owns GPUS_PER_NODE GPUs)
+N_NODES=$(( SLURM_NNODES ))
+srun --ntasks="${N_NODES}" --ntasks-per-node=1 \
+    "${PYTHON_BIN}" -u "${PYTHON_ARGS[@]}"
 echo "[$(date --iso-8601=seconds)] Done.
