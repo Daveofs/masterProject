@@ -111,6 +111,11 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--n-order", type=int, default=3,
                    help="LPT order for internal IC generation (default: 3)")
 
+    # --- cosmology from params.yml ---
+    p.add_argument("--params-yml", type=Path, default=None,
+                   help="Path to a CosmoGridV1 params.yml file. When given, cosmological "
+                        "parameters are loaded from it and override --cosmo.")
+
     # --- outputs ---
     p.add_argument("--save-final", type=Path, default=None,
                    help="Save final pos/a_hist as NPZ to this path")
@@ -233,6 +238,27 @@ _script_dir = Path(__file__).parent
 sys.path.insert(0, str(_script_dir))
 from read_tipsy_file import read_tipsy
 
+
+def _load_cosmo_from_params_yml(yml_path: Path) -> dict:
+    """Read a CosmoGridV1 params.yml and return a DiscoDJ cosmology dict."""
+    import yaml
+    with yml_path.open() as f:
+        p = yaml.safe_load(f)
+    cosmo_dict = dict(
+        Omega_c=float(p["O_cdm"]),
+        Omega_b=float(p["Ob"]),
+        h=float(p["H0"]) / 100.0,
+        sigma8=float(p["s8"]),
+        n_s=float(p["ns"]),
+        Omega_k=0.0,
+        w0=float(p.get("w0", -1.0)),
+        wa=float(p.get("wa", 0.0)),
+    )
+    print(f"[params_yml] Loaded cosmology from {yml_path}:")
+    for k, v in cosmo_dict.items():
+        print(f"  {k} = {v}")
+    return cosmo_dict
+
 # ---------------------------------------------------------------------------
 # Helper utilities
 # ---------------------------------------------------------------------------
@@ -286,12 +312,13 @@ def _field_slices(field):
 t0 = time()
 
 # ── Build DiscoDJ object ────────────────────────────────────────────────────
+_cosmo_arg = _load_cosmo_from_params_yml(args.params_yml) if args.params_yml is not None else args.cosmo
 dj = DiscoDJ(
     dim=3,
     res=Npart,
     boxsize=Lbox,
     device=device,
-    cosmo=args.cosmo,
+    cosmo=_cosmo_arg,
     requires_grad_wrt_cosmo=False,
     multi_device=(num_devices > 1),
 ).with_timetables()

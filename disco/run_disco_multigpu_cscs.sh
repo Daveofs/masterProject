@@ -27,6 +27,9 @@ CONDA_INIT=$HOME/miniforge3/etc/profile.d/conda.sh
 # Input IC file (only used when USE_INTERNAL_ICS=false)
 IC_FILE=/capstor/scratch/cscs/damrein/outputs/ICs/cosmo_000001/run_0/CosmoML.00000
 
+# Path to the params.yml for the simulation cosmology (leave empty to use COSMO preset)
+PARAMS_YML=/capstor/scratch/cscs/damrein/cosmogridv1/cosmo_000001/run_0/params.yml
+
 # Use internal ngenic-like ICs instead of an external tipsy file
 USE_INTERNAL_ICS=false
 NGENIC_SEED=180723
@@ -34,7 +37,7 @@ NGENIC_SEED=180723
 # Output paths
 LOG_DIR=${SCRATCH_DIR}/outputs/logs
 SNAP_DIR=${SCRATCH_DIR}/outputs/snapshots
-SHELL_DIR=${SCRATCH_DIR}/outputs/shells_with_external_ics_multinode
+SHELL_DIR=${SCRATCH_DIR}/outputs/shells_with_external_ics_multinode_lax_scan
 PLOT_DIR=${SCRATCH_DIR}/outputs/plots/multigpu
 
 
@@ -46,7 +49,7 @@ MODE=gpu
 RES=832
 RES_PM=832
 BOXSIZE=900.0
-COSMO=Planck15
+COSMO=Planck15  # used only when PARAMS_YML is empty
 A_INI=0.01
 A_END=1.0
 N_STEPS=5 # if meta_info is given n_steps = 70 is used
@@ -141,6 +144,10 @@ if [[ "${USE_INTERNAL_ICS}" == "true" ]]; then
     PYTHON_ARGS+=(--ngenic-seed "${NGENIC_SEED}")
 else
     PYTHON_ARGS+=(--ic-file "${IC_FILE}")
+fi
+
+if [[ -n "${PARAMS_YML:-}" && -f "${PARAMS_YML}" ]]; then
+    PYTHON_ARGS+=(--params-yml "${PARAMS_YML}")
 fi
 
 if [[ "${LIGHTCONE}" == "true" ]]; then
