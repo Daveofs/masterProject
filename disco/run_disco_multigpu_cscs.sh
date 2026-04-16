@@ -10,7 +10,7 @@
 #SBATCH --partition=normal
 #SBATCH --nodes=4
 #SBATCH --ntasks-per-node=1         # one Python process per node
-#SBATCH --gpus-per-node=4           # 4 GH200 GPUs per node (8 total, 2x4); process owns all local GPUs
+#SBATCH --gpus-per-node=4           # 4 GH200 GPUs per node; process owns all local GPUs
 # NOTE: RES must be divisible by (nodes * gpus-per-node).
 #SBATCH --time=24:00:00
 #SBATCH --output=/capstor/scratch/cscs/damrein/outputs/logs/disco/disco_multigpu_%j.out
@@ -37,7 +37,7 @@ NGENIC_SEED=180723
 # Output paths
 LOG_DIR=${SCRATCH_DIR}/outputs/logs
 SNAP_DIR=${SCRATCH_DIR}/outputs/snapshots
-SHELL_DIR=${SCRATCH_DIR}/outputs/shells_with_external_ics_multinode_lax_scan
+SHELL_DIR=${SCRATCH_DIR}/outputs/shells_with_external_ics_multinode_shifted
 PLOT_DIR=${SCRATCH_DIR}/outputs/plots/multigpu
 
 
@@ -52,7 +52,8 @@ BOXSIZE=900.0
 COSMO=Planck15  # used only when PARAMS_YML is empty
 A_INI=0.01
 A_END=1.0
-N_STEPS=5 # if meta_info is given n_steps = 70 is used
+N_STEPS=5         # used only when SHELLS_METAINFO is empty
+N_PRESTEPS=30     # sub-steps from a_ini to first shell boundary (z=99→3.5); pkdgrav3 uses ~30
 STEPPER=bullfrog
 TIME_VAR=D
 METHOD=pm
@@ -156,7 +157,8 @@ fi
 
 if [[ "${BUILD_SHELLS}" == "true" ]]; then
     PYTHON_ARGS+=(--build-shells)
-     if [[ -n "${SHELLS_METAINFO}" && -f "${SHELLS_METAINFO}" ]]; then
+    PYTHON_ARGS+=(--n-presteps "${N_PRESTEPS}")
+    if [[ -n "${SHELLS_METAINFO}" && -f "${SHELLS_METAINFO}" ]]; then
         PYTHON_ARGS+=(--shells-metainfo "${SHELLS_METAINFO}")
     fi
 fi

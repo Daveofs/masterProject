@@ -48,11 +48,11 @@ fi
 
 #FILENAME="CosmoML-shell_z-high=1.46305_z-low=0.980198.fits"
 
-SHELL=/capstor/scratch/cscs/damrein/outputs/shells_with_external_ics_multinode/shells_nside=2048.npz
+SHELL=/capstor/scratch/cscs/damrein/cosmogridv1/cosmo_000001/run_1/compressed_shells.npz
 # Configuration for the visualization (set to your desired z-bin and nside)
 ZBIN=10
 NSIDE=2048
-NAME_SUFFIX="disco_with_external_and_multinode_nside${NSIDE}_zbin${ZBIN}"
+NAME_SUFFIX="compressed_shell_cosmo_000001_run=1_nside=${NSIDE}_zbin${ZBIN}"
 
 mkdir -p "${OUTPUT_DIR}"
 cd "${PROJECT_DIR}"

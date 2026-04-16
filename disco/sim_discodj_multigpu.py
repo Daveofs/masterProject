@@ -100,6 +100,11 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--shells-cosmo-key",  type=str, default=None,
                    help="Which cosmology entry in the metainfo to use for z_bins "
                         "(e.g. 'cosmo_000001').  Defaults to the first key.")
+    p.add_argument("--n-presteps", type=int, default=30,
+                   help="Number of N-body sub-steps to insert between a_ini and the "
+                        "first shell boundary (default: 30).  Increasing this improves "
+                        "accuracy of the pre-shell evolution (pkdgrav3 uses ~30 steps "
+                        "over z=99→3.5 out of 140 total).")
 
     # --- ICs ---
     p.add_argument("--ic-file", type=Path, required=False,
@@ -287,6 +292,11 @@ def _load_external_ics(ic_path: Path) -> tuple[np.ndarray, np.ndarray]:
         p_init["vx"], p_init["vy"], p_init["vz"],
     ].astype(np.float32)
 
+    # Shift positions by +Lbox/2 (mod Lbox) so that pkdgrav3's lightcone
+    # origin (corner at physical 0,0,0) coincides with DISCO-DJ's observer
+    # at the box center (Lbox/2, Lbox/2, Lbox/2).
+    external_ics[:, :3] = (external_ics[:, :3] + Lbox / 2.0) % Lbox
+
     # Convert PKD comoving velocities → DISCO-DJ units
     v_factor = a_ini ** 2 / np.sqrt(8 * np.pi / 3) * Lbox
     external_ics[:, 3:] *= v_factor
@@ -392,11 +402,19 @@ if args.build_shells:
         # Without this, external ICs at a=0.01 would be used as if they were
         # already at z=z_max (e.g. a=0.2222), producing wrong structure.
         if _a_steps[0] > a_ini:
-            _a_steps = _np.concatenate([[a_ini], _a_steps])
-            print(f"[shells] Prepended a_ini={a_ini:.4f} to a_steps "
-                  f"(IC scale factor earlier than first shell boundary a={_a_steps[1]:.4f})")
+            _first_shell_a = _a_steps[0]
+            # Insert N_PRESTEPS uniformly-spaced sub-steps from a_ini up to
+            # (but not including) the first shell boundary.  This prevents
+            # DISCO-DJ from evolving z=99→3.5 in a single coarse step, which
+            # causes large structural errors vs. pkdgrav3's ~30 sub-steps.
+            _n_pre = max(1, args.n_presteps)
+            _pre_steps = _np.linspace(a_ini, _first_shell_a, _n_pre + 1,
+                                      dtype=_np.float64)[:-1]  # exclude endpoint (= _a_steps[0])
+            _a_steps = _np.concatenate([_pre_steps, _a_steps])
+            print(f"[shells] Inserted {_n_pre} pre-shell sub-steps "
+                  f"a=[{a_ini:.4f},{_first_shell_a:.4f}] before first shell boundary")
         print(f"[shells] a_steps derived from metainfo ({_mkey}): "
-              f"{len(_a_steps)-1} steps covering {len(_meta)} shells exactly")
+              f"{len(_a_steps)-1} steps ({args.n_presteps} pre-shell + {len(_meta)} shell steps)")
     else:
         # Fall back to uniform linspace
         _a_steps = _np.linspace(a_ini, args.a_end, args.n_steps + 1, dtype=_np.float64)
