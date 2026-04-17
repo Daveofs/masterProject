@@ -57,6 +57,62 @@ def compute_cl(count_map: np.ndarray, lmax: int) -> np.ndarray:
     return cl
 
 
+# Physical scale -> multipole (Limber flat-sky: ell ~ chi / r)
+_SCALE_LINES = [
+    (1.0,   "1 cMpc/h",    "#e07b39"),  # 1 comoving Mpc/h
+    (5.0,   "5 cMpc/h",    "#3a9e6f"),  # 5 comoving Mpc/h
+    (900.0, "900 cMpc/h\n(box size)", "#2979ff"),  # simulation box size
+]
+
+
+def ell_from_scale(r_cmpch: float, chi_cmpch: float) -> float:
+    """Multipole corresponding to comoving scale r [cMpc/h] at distance chi [cMpc/h].
+
+    Uses the Limber flat-sky approximation: ell ~ chi / r.
+    """
+    if chi_cmpch <= 0 or r_cmpch <= 0:
+        return np.nan
+    return chi_cmpch / r_cmpch
+
+
+def add_scale_vlines(ax, chi: float, nside: int, lmax: int,
+                     alpha: float = 0.8, label_ypos: float = 0.97,
+                     colors_override: dict | None = None):
+    """Draw vertical lines at 1 cMpc/h, 5 cMpc/h scales and at ell=2*nside.
+
+    Parameters
+    ----------
+    ax        : matplotlib Axes
+    chi       : comoving distance of shell [cMpc/h]
+    nside     : HEALPix nside
+    lmax      : maximum multipole plotted
+    alpha     : line opacity
+    label_ypos: y-position of text label in axes fraction
+    colors_override : optional dict {r_cmpch: color} to override default colours
+    """
+    trans = ax.get_xaxis_transform()  # x in data, y in axes fraction
+
+    # ---- comoving scale lines ----
+    for r, txt, col in _SCALE_LINES:
+        if colors_override and r in colors_override:
+            col = colors_override[r]
+        ell = ell_from_scale(r, chi)
+        if np.isnan(ell) or ell < 2 or ell > lmax:
+            continue
+        ax.axvline(ell, color=col, lw=0.9, linestyle=":", alpha=alpha)
+        ax.text(ell, label_ypos, txt, transform=trans,
+                fontsize=6.5, color=col, ha="center", va="top",
+                rotation=90, clip_on=True)
+
+    # ---- 2*nside line ----
+    ell_ns = 2 * nside
+    if 2 <= ell_ns <= lmax:
+        ax.axvline(ell_ns, color="#555555", lw=0.9, linestyle="-.", alpha=alpha)
+        ax.text(ell_ns, label_ypos, r"$2\times N_{{\rm side}}$", transform=trans,
+                fontsize=6.5, color="#555555", ha="center", va="top",
+                rotation=90, clip_on=True)
+
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -131,6 +187,24 @@ def main():
 
         ax_ratio.plot(ells, ratio, color=color, lw=1.0, label=label)
 
+        # Per-shell scale lines on summary plots (subtle dotted, shell colour)
+        chi = float(info_d[idx]["shell_com"])
+        for r, _, _ in _SCALE_LINES:
+            ell_s = ell_from_scale(r, chi)
+            if not np.isnan(ell_s) and 2 <= ell_s <= lmax:
+                for _ax in (ax_cl, ax_ratio):
+                    _ax.axvline(ell_s, color=color, lw=0.6, linestyle=":", alpha=0.5)
+
+    # ell = 2*nside line on summary plots (same for all shells)
+    ell_ns = 2 * nside
+    if 2 <= ell_ns <= lmax:
+        for _ax, _yp in ((ax_ratio, 0.97), (ax_cl, 0.97)):
+            _ax.axvline(ell_ns, color="#555555", lw=0.9, linestyle="-.", alpha=0.8)
+            _ax.text(ell_ns, _yp, r"$2\times N_{{\rm side}}$",
+                     transform=_ax.get_xaxis_transform(),
+                     fontsize=6.5, color="#555555", ha="center", va="top",
+                     rotation=90, clip_on=True)
+
     # Ratio plot formatting
     ax_ratio.axhline(1.0, color="k", lw=0.8, linestyle="--", label="ratio = 1")
     ax_ratio.set_xlabel(r"Multipole $\ell$", fontsize=13)
@@ -194,6 +268,11 @@ def main():
         axes[1].set_xlabel(r"Multipole $\ell$", fontsize=12)
         axes[1].set_ylabel(r"$C_\ell^{\rm DISCO}\,/\,C_\ell^{\rm CosmoGrid}$", fontsize=12)
         axes[1].grid(True, which="both", alpha=0.3)
+
+        # Scale vertical lines on both panels
+        chi = float(info_d[idx]["shell_com"])
+        for ax in axes:
+            add_scale_vlines(ax, chi, nside, lmax)
 
         for ax in axes:
             ax.set_xscale("log")
