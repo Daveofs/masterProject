@@ -10,6 +10,8 @@ def plot_shells(
     plot_logarithmic: bool = False,
     name: str | None = None,
     normalize: bool = True,
+    vmin: float | None = None,
+    vmax: float | None = None,
 ) -> Path:
     """Load a shell file (.npz or .fits) and plot it as a HEALPix map.
 
@@ -145,59 +147,24 @@ def plot_shells(
         raise ValueError("name must be a non-empty string when provided")
 
     if plot_logarithmic:
-        default_name = f"shell_mollview_symlog_zbin{z_bin}_nside{nside}.png"
+        default_name = f"shell_mollview_log_zbin{z_bin}_nside{nside}.png"
         file_name = name if name is not None else default_name
         if not file_name.lower().endswith(".png"):
             file_name = f"{file_name}.png"
         out_path = output_dir / file_name
-        projected = hp.mollview(
-            m,
-            nest=False,
-            cbar=False,
-            notext=True,
-            title="",
-            return_projected_map=True,
-            xsize=3000
-        )
+        log_m = np.log10(1.01 + m)
+        hp.mollview(log_m, nest=False, title=f"z-bin {z_bin}, nside {nside}, log10(1.01+δ)",
+                    xsize=3000, min=vmin, max=vmax)
+        plt.savefig(out_path, dpi=300, bbox_inches="tight")
         plt.close()
-
-        valid = np.isfinite(projected) & (projected > hp.UNSEEN / 10.0)
-        vals = projected[valid]
-        if vals.size == 0:
-            raise ValueError("Projected shell map has no valid pixels for SymLogNorm plot.")
-
-        linthresh = max(float(np.nanpercentile(np.abs(vals), 5)), 1e-8)
-        display = np.full_like(projected, np.nan, dtype=float)
-        display[valid] = projected[valid]
-
-        cmap = plt.get_cmap("magma").copy()
-        cmap.set_bad(color="white", alpha=1.0)
-
-        fig, ax = plt.subplots(figsize=(10, 5))
-        im = ax.imshow(
-            display,
-            origin="lower",
-            cmap=cmap,
-            norm=SymLogNorm(
-                linthresh=linthresh,
-                linscale=1.0,
-                vmin=np.nanmin(vals),
-                vmax=np.nanmax(vals),
-            ),
-        )
-        ax.set_axis_off()
-        ax.set_title(f"z-bin {z_bin}, nside {nside}, (SymLogNorm)")
-        fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
-        fig.tight_layout()
-        fig.savefig(out_path, dpi=300, bbox_inches="tight")
-        plt.close(fig)
     else:
         default_name = f"shell_mollview_zbin{z_bin}_nside{nside}.png"
         file_name = name if name is not None else default_name
         if not file_name.lower().endswith(".png"):
             file_name = f"{file_name}.png"
         out_path = output_dir / file_name
-        hp.mollview(m, nest=False, title=f"z-bin {z_bin}, nside {nside}", xsize=3000)
+        hp.mollview(m, nest=False, title=f"z-bin {z_bin}, nside {nside}", xsize=3000,
+                    min=vmin, max=vmax)
         plt.savefig(out_path, dpi=300, bbox_inches="tight")
         plt.close()
 

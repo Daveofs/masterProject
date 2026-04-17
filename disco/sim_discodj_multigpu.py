@@ -91,8 +91,6 @@ def parse_args() -> argparse.Namespace:
                    help="Filename prefix for shell FITS files / NPZ shell_name (default: CosmoML)")
     p.add_argument("--shells-no-interpolate", action="store_true",
                    help="Disable shell-crossing interpolation for faster shell building")
-    p.add_argument("--shells-chunk-size", type=int, default=2_000_000,
-                   help="Particles per chunk in shell builder (higher can be faster if memory allows)")
     p.add_argument("--shells-metainfo",   type=Path, default=None,
                    help="Path to CosmoGridV1_metainfo.h5.  If given, output a single "
                         "shells_nside=<N>.npz using the z_bins from the metainfo file "
@@ -142,23 +140,30 @@ def parse_args() -> argparse.Namespace:
 
 args = parse_args()
 
+# Before jax.distributed.initialize() every process sees jax.process_index()==0,
+# so use SLURM_PROCID to suppress duplicate output from non-rank-0 processes.
+_is_rank0 = int(os.environ.get("SLURM_PROCID", "0")) == 0
+
 # ---------------------------------------------------------------------------
 # DISCO-DJ/scripts/ must be on sys.path before ANY discodj import, because
 # the editable install maps discodj.core.multigpu_utils → scripts/utils.py,
 # which does bare `import utils_jens` (a peer module in the same directory).
 # ---------------------------------------------------------------------------
-print("Adding DISCO-DJ/scripts/ to sys.path for imports")
+if _is_rank0:
+    print("Adding DISCO-DJ/scripts/ to sys.path for imports")
 _discodj_scripts = Path("/users/damrein/DISCO-DJ/scripts")
 if str(_discodj_scripts) not in sys.path:
     sys.path.insert(0, str(_discodj_scripts))
 
-print("Finished adding DISCO-DJ/scripts/ to sys.path:", sys.path)
+if _is_rank0:
+    print("Finished adding DISCO-DJ/scripts/ to sys.path:", sys.path)
     
 # ---------------------------------------------------------------------------
 # Update DISCO-DJ global state BEFORE importing discodj (gs is read at import
 # time by scatter_and_gather.py: N = gs.N = gs.res, chunk_size = gs.chunk_size)
 # ---------------------------------------------------------------------------
-print("Update Disco-Dj global state BEFORE importing discodj")
+if _is_rank0:
+    print("Update Disco-Dj global state BEFORE importing discodj")
 from discodj.core.global_state import update_global_options
 update_global_options(
     res=args.res,
@@ -175,7 +180,8 @@ update_global_options(
 # ---------------------------------------------------------------------------
 # Env-vars for JAX / CUDA (must be set before JAX is imported)
 # ---------------------------------------------------------------------------
-print(f"Configuring JAX for mode={args.mode} …")
+if _is_rank0:
+    print(f"Configuring JAX for mode={args.mode} …")
 if args.mode == "gpu":
     os.environ.setdefault("JAX_PLATFORM_NAME", "gpu")
     os.environ.setdefault("XLA_PYTHON_CLIENT_PREALLOCATE", "false")
@@ -207,15 +213,17 @@ if args.mode == "gpu" and _slurm_nnodes > 1:
             _gpus_per_node = int(_sp.check_output(
                 ["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"],
                 text=True).strip().count("\n")) + 1
-    print(f"Multi-node run: {_slurm_nnodes} nodes × {_gpus_per_node} GPUs/node "
-          f"→ calling jax.distributed.initialize(local_device_ids=range({_gpus_per_node}))")
+    if _is_rank0:
+        print(f"Multi-node run: {_slurm_nnodes} nodes × {_gpus_per_node} GPUs/node "
+              f"→ calling jax.distributed.initialize(local_device_ids=range({_gpus_per_node}))")
     jax.distributed.initialize(
         local_device_ids=list(range(_gpus_per_node)),
         heartbeat_timeout_seconds=60,
         initialization_timeout=120,
     )
 else:
-    print("Single-node run: JAX sees all GPUs directly — no distributed init")
+    if _is_rank0:
+        print("Single-node run: JAX sees all GPUs directly — no distributed init")
 
 # After init we know the full device count
 _backend    = "gpu" if args.mode == "gpu" else "cpu"
@@ -223,7 +231,8 @@ num_devices = len(jax.devices(_backend))
 device      = args.mode  # string passed to DiscoDJ
 mode        = "gpu" if num_devices > 1 else ("singlegpu" if args.mode == "gpu" else "cpu")
 
-print(f"Devices: {jax.devices(_backend)}  (num_devices={num_devices}, mode={mode})")
+if jax.process_index() == 0:
+    print(f"Devices: {jax.devices(_backend)}  (num_devices={num_devices}, mode={mode})")
 
 # ---------------------------------------------------------------------------
 # Standard imports (after JAX is configured)
@@ -259,9 +268,10 @@ def _load_cosmo_from_params_yml(yml_path: Path) -> dict:
         w0=float(p.get("w0", -1.0)),
         wa=float(p.get("wa", 0.0)),
     )
-    print(f"[params_yml] Loaded cosmology from {yml_path}:")
-    for k, v in cosmo_dict.items():
-        print(f"  {k} = {v}")
+    if jax.process_index() == 0:
+        print(f"[params_yml] Loaded cosmology from {yml_path}:")
+        for k, v in cosmo_dict.items():
+            print(f"  {k} = {v}")
     return cosmo_dict
 
 # ---------------------------------------------------------------------------
@@ -284,7 +294,8 @@ def _sort_for_lagrangian_x(arr_pos: np.ndarray, arr_vel: np.ndarray, nx: int):
 
 def _load_external_ics(ic_path: Path) -> tuple[np.ndarray, np.ndarray]:
     """Load PKDGRAV tipsy ICs, convert velocities, sort for Lagrangian grid."""
-    print(f"Reading PKDGRAV ICs from {ic_path}")
+    if jax.process_index() == 0:
+        print(f"Reading PKDGRAV ICs from {ic_path}")
     p_init, _ = read_tipsy(ic_path, Lbox)
 
     external_ics = np.c_[
@@ -333,14 +344,15 @@ dj = DiscoDJ(
     multi_device=(num_devices > 1),
 ).with_timetables()
 
-
-print("DISCO-DJ initialised:", dj)
+if jax.process_index() == 0:
+    print("DISCO-DJ initialised:", dj)
 
 t1 = time()
 
 # ── Initial Conditions ────────────────────────────────────────────────────
 if args.use_internal_ics:
-    print("Using internal IC generator (LPT)")
+    if jax.process_index() == 0:
+        print("Using internal IC generator (LPT)")
 
     dj = dj.with_linear_ps(transfer_function="Eisenstein-Hu")
     sync_global_devices("sync_linear_ps")
@@ -362,7 +374,8 @@ if args.use_internal_ics:
 
 
 elif args.ic_file is not None:
-    print("Using external PKDGRAV ICs")
+    if jax.process_index() == 0:
+        print("Using external PKDGRAV ICs")
     pos_sorted, vel_sorted = _load_external_ics(args.ic_file)
     dj = dj.with_external_ics(pos=pos_sorted, vel=vel_sorted)
     del pos_sorted, vel_sorted
@@ -372,10 +385,12 @@ else:
     import sys as _sys; _sys.exit(2)
 
 t2 = time()
-print(f"IC setup took {t2 - t1:.2f} s")
+if jax.process_index() == 0:
+    print(f"IC setup took {t2 - t1:.2f} s")
 
 # ── N-body run ──────────────────────────────────────────────────────────────
-print("Running N-body simulation …")
+if jax.process_index() == 0:
+    print("Running N-body simulation …")
 
 # ── Snapshot-based HEALPix shell lightcone (high-z capable) ─────────────────
 if args.build_shells:
@@ -401,26 +416,24 @@ if args.build_shells:
         # evolves the particles to z_max before accumulating any shells.
         # Without this, external ICs at a=0.01 would be used as if they were
         # already at z=z_max (e.g. a=0.2222), producing wrong structure.
-        if _a_steps[0] > a_ini:
+        _n_pre = max(1, args.n_presteps) if _a_steps[0] > a_ini else 0
+        if _n_pre > 0:
             _first_shell_a = _a_steps[0]
-            # Insert N_PRESTEPS uniformly-spaced sub-steps from a_ini up to
-            # (but not including) the first shell boundary.  This prevents
-            # DISCO-DJ from evolving z=99→3.5 in a single coarse step, which
-            # causes large structural errors vs. pkdgrav3's ~30 sub-steps.
-            _n_pre = max(1, args.n_presteps)
-            _pre_steps = _np.linspace(a_ini, _first_shell_a, _n_pre + 1,
-                                      dtype=_np.float64)[:-1]  # exclude endpoint (= _a_steps[0])
-            _a_steps = _np.concatenate([_pre_steps, _a_steps])
-            print(f"[shells] Inserted {_n_pre} pre-shell sub-steps "
-                  f"a=[{a_ini:.4f},{_first_shell_a:.4f}] before first shell boundary")
-        print(f"[shells] a_steps derived from metainfo ({_mkey}): "
-              f"{len(_a_steps)-1} steps ({args.n_presteps} pre-shell + {len(_meta)} shell steps)")
+            if jax.process_index() == 0:
+                print(f"[shells] Pre-steps: {_n_pre} steps a=[{a_ini:.5f},{_first_shell_a:.5f}] "
+                      f"z=[{1.0/a_ini-1.0:.1f},{1.0/_first_shell_a-1.0:.2f}] "
+                      f"will run as a single run_nbody call (no shell accumulation)")
+        if jax.process_index() == 0:
+            print(f"[shells] a_steps derived from metainfo ({_mkey}): "
+                  f"{len(_a_steps)-1} shell steps")
     else:
         # Fall back to uniform linspace
         _a_steps = _np.linspace(a_ini, args.a_end, args.n_steps + 1, dtype=_np.float64)
+        _n_pre = 0
 
-    print(f"Shell lightcone: nside={args.shells_nside}  z_min={args.shells_z_min}  z_max={args.shells_z_max}  "
-          f"prefix={args.shells_prefix}  output={_shells_out}")
+    if jax.process_index() == 0:
+        print(f"Shell lightcone: nside={args.shells_nside}  z_min={args.shells_z_min}  z_max={args.shells_z_max}  "
+              f"prefix={args.shells_prefix}  output={_shells_out}")
 
     _n_shells = run_with_shells(
         dj=dj,
@@ -439,14 +452,16 @@ if args.build_shells:
         laplace_kernel_order=args.laplace_kernel_order,
         n_resample=args.n_resample,
         chunk_size=chunk_size,
-        shell_chunk_size=args.shells_chunk_size,
         interpolate=not args.shells_no_interpolate,
         streaming=True,
+        pre_steps=_n_pre if args.shells_metainfo is not None else None,
+        z_pre_ini=float(1.0 / a_ini - 1.0),
         deconvolve=args.deconvolve,
         metainfo_path=args.shells_metainfo,
         cosmo_key=args.shells_cosmo_key,
     )
-    print(f"Shell lightcone done: {_n_shells} shells → {_shells_out}")
+    if jax.process_index() == 0:
+        print(f"Shell lightcone done: {_n_shells} shells → {_shells_out}")
     sync_global_devices("shells_done")
     import sys as _sys; _sys.exit(0)
 
@@ -480,7 +495,8 @@ else:
 del run_nbody_result
 
 t3 = time()
-print(f"N-body run took {t3 - t2:.2f} s")
+if jax.process_index() == 0:
+    print(f"N-body run took {t3 - t2:.2f} s")
 
 # ── Density field extraction ────────────────────────────────────────────────
 # Match simple_example.py pattern: only constrain the small 2D SLICES to
@@ -505,7 +521,8 @@ _psi_final = psi_sim[-1] if psi_sim.ndim == 5 else psi_sim
 out = delta_subset(dj, _psi_final)
 delta_mean, delta_slice, delta_thin_slice = out
 
-print("delta_mean shape:", delta_mean.shape)
+if jax.process_index() == 0:
+    print("delta_mean shape:", delta_mean.shape)
 
 # ── Save final snapshot (rank 0 gathers all shards and saves one file) ───────
 if args.save_final is not None:
@@ -525,7 +542,8 @@ if args.save_final is not None:
     # Uncompressed NPZ: much faster to write and supports mmap_mode='r' on load.
     save_dict = {"pos": full_pos, "a_hist": np.asarray(a)}
     np.savez(args.save_final, **save_dict)
-    print(f"Saved final snapshot → {args.save_final}  pos={full_pos.shape}")
+    if jax.process_index() == 0:
+        print(f"Saved final snapshot → {args.save_final}  pos={full_pos.shape}")
 
     # ── Save lightcone S to a separate file ───────────────────────────────
     if args.lightcone and args.save_lightcone is not None:
@@ -562,7 +580,8 @@ if args.save_final is not None:
             boxsize=np.float32(args.boxsize),
             res=np.int32(args.res),
         )
-        print(f"Saved lightcone S → {args.save_lightcone}  S={full_S.shape}")
+        if jax.process_index() == 0:
+            print(f"Saved lightcone S → {args.save_lightcone}  S={full_S.shape}")
 
 # ── Optional density-slice plot (rank 0 only — slices are already gathered) ─
 if args.plot:
@@ -579,10 +598,12 @@ if args.plot:
         arr_np = np.asarray(arr)
         plt.imsave(output_dir / f"{name}_a{args.a_end:.3f}.png",
                    np.log10(1.01 + arr_np), cmap="inferno")
-    print(f"Density slices saved → {output_dir}")
+    if jax.process_index() == 0:
+        print(f"Density slices saved → {output_dir}")
 
 t4 = time()
 # Proper multi-GPU shutdown sync
 sync_global_devices("final_sync")
-print(f"Total wall time: {t4 - t0:.2f} s")
-print("Done.")
+if jax.process_index() == 0:
+    print(f"Total wall time: {t4 - t0:.2f} s")
+    print("Done.")

@@ -8,7 +8,7 @@
 #SBATCH --job-name=disco_multigpu
 #SBATCH --account=sk037
 #SBATCH --partition=normal
-#SBATCH --nodes=4
+#SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1         # one Python process per node
 #SBATCH --gpus-per-node=4           # 4 GH200 GPUs per node; process owns all local GPUs
 # NOTE: RES must be divisible by (nodes * gpus-per-node).
@@ -37,7 +37,7 @@ NGENIC_SEED=180723
 # Output paths
 LOG_DIR=${SCRATCH_DIR}/outputs/logs
 SNAP_DIR=${SCRATCH_DIR}/outputs/snapshots
-SHELL_DIR=${SCRATCH_DIR}/outputs/shells_with_external_ics_multinode_shifted
+SHELL_DIR=${SCRATCH_DIR}/outputs/shells_with_4gpu_spread_trash_multi_node
 PLOT_DIR=${SCRATCH_DIR}/outputs/plots/multigpu
 
 
@@ -59,7 +59,7 @@ TIME_VAR=D
 METHOD=pm
 GRAD_KERNEL_ORDER=4
 LAPLACE_KERNEL_ORDER=0
-NUM_CHUNKS=32
+NUM_CHUNKS=1
 LIGHTCONE=false
 BUILD_SHELLS=true
 SHELLS_METAINFO="/capstor/scratch/cscs/damrein/cosmogridv1/CosmoGridV1_metainfo.h5"

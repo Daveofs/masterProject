@@ -1,4 +1,5 @@
 import numpy as np
+import jax
 
 def read_tipsy(nBody_file_in, Lbox):
     try:
@@ -21,5 +22,6 @@ def read_tipsy(nBody_file_in, Lbox):
     p['y']=Lbox*(p['y']+0.5)
     p['z']=Lbox*(p['z']+0.5)
 
-    print('Reading tipsy-file done!')
+    if jax.process_index() == 0:
+        print('Reading tipsy-file done!')
     return p, p_header

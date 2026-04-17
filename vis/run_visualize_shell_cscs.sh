@@ -48,11 +48,15 @@ fi
 
 #FILENAME="CosmoML-shell_z-high=1.46305_z-low=0.980198.fits"
 
-SHELL=/capstor/scratch/cscs/damrein/cosmogridv1/cosmo_000001/run_1/compressed_shells.npz
+SHELL=/capstor/scratch/cscs/damrein/outputs/shells_with_4gpu_spread_trash_multi_node/shells_nside=2048.npz
 # Configuration for the visualization (set to your desired z-bin and nside)
-ZBIN=10
+ZBIN=60
 NSIDE=2048
-NAME_SUFFIX="compressed_shell_cosmo_000001_run=1_nside=${NSIDE}_zbin${ZBIN}"
+NAME_SUFFIX="disco_spread_trash_multi_node_nside=${NSIDE}_zbin=${ZBIN}"
+# Colorbar limits for log10(1.01 + delta) – set the same values in both
+# the DISCO run and the CosmoGrid run so the two plots are comparable.
+VMIN=-1.0
+VMAX=1.0
 
 mkdir -p "${OUTPUT_DIR}"
 cd "${PROJECT_DIR}"
@@ -79,6 +83,8 @@ plot_shells(
     plot_logarithmic=True,
     normalize=True,
     name=os.environ["NAME_SUFFIX"],
+    vmin=${VMIN},
+    vmax=${VMAX},
 )
 PY
 

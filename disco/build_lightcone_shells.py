@@ -274,6 +274,99 @@ def _get_jax_shell_kernel():
     return _JAX_SHELL_KERNEL
 
 
+# Module-level cache for the fori_loop-based GPU kernel (compiled once for all
+# replica counts, using a dynamic upper bound that XLA lowers to a while-loop).
+_JAX_SHELL_FORI_KERNEL = None
+
+
+def _get_jax_shell_fori_kernel():
+    """
+    Return (building once) a JIT-compiled kernel that processes ALL active
+    replicas inside a single ``jax.lax.fori_loop``.
+
+    Unlike ``_get_jax_shell_kernel`` (one XLA dispatch *per* replica in a
+    Python loop), this kernel submits a single XLA program that iterates over
+    all replicas internally.  This eliminates per-replica Python dispatch
+    overhead and the associated serialisation of XLA kernel launches that
+    dominates at high-z (many hundreds of replicas).
+
+    The compiled program is reused for every shell because n_active is a
+    *dynamic* JAX int32 scalar: XLA lowers fori_loop to a while-loop whose
+    trip count is determined at runtime, so the same compiled code handles
+    any number of active replicas.
+    """
+    global _JAX_SHELL_FORI_KERNEL
+    if _JAX_SHELL_FORI_KERNEL is not None:
+        return _JAX_SHELL_FORI_KERNEL
+
+    import jax
+    import jax.numpy as jnp
+
+    @partial(jax.jit, static_argnames=['nside', 'npix', 'interpolate'])
+    def _fori_kernel(X0, X1, rep_offsets, n_active, r_lo, r_hi,
+                     nside, npix, interpolate):
+        """
+        Accumulate shell contributions for ``n_active`` periodic replicas.
+
+        Parameters
+        ----------
+        X0, X1       : (N, 3) float32  positions relative to observer [Mpc/h]
+        rep_offsets  : (R, 3) float32  padded replica offset table;
+                       only the first ``n_active`` rows are processed.
+        n_active     : int32 scalar (dynamic) – replicas to process.
+        r_lo, r_hi   : float32  shell boundaries [Mpc/h]
+        nside, npix, interpolate : compile-time constants (static)
+        """
+        def body(i, shell):
+            d  = rep_offsets[i]
+            R0 = X0 + d
+            R1 = X1 + d
+            r0 = jnp.sqrt(jnp.sum(R0 * R0, axis=1))
+            r1 = jnp.sqrt(jnp.sum(R1 * R1, axis=1))
+            mask = (jnp.maximum(r0, r1) >= r_lo) & (jnp.minimum(r0, r1) < r_hi)
+
+            if interpolate:
+                denom      = r0 - r1
+                safe_denom = jnp.where(jnp.abs(denom) > 1e-10, denom,
+                                       jnp.float32(1e-10))
+                t_hi       = jnp.clip((r_hi - r0) / safe_denom, 0.0, 1.0)
+                direction  = (1.0 - t_hi[:, None]) * R0 + t_hi[:, None] * R1
+            else:
+                direction = 0.5 * (R0 + R1)
+
+            # For masked-out particles we still go through vec2pix (to avoid
+            # NaN), but we DISCARD their pixel and route to a unique trash
+            # address derived from the particle index.  Spreading the zero-
+            # weight adds over all pixels eliminates the catastrophic atomic
+            # serialisation that occurs when all 94 % of non-contributing
+            # particles are steered to the SAME pixel.
+            safe_dir = jnp.where(
+                mask[:, None],
+                direction,
+                jnp.broadcast_to(jnp.array([1., 0., 0.], dtype=jnp.float32),
+                                  direction.shape),
+            )
+            pix      = _vec2pix_ring_jax(nside, safe_dir[:, 0],
+                                         safe_dir[:, 1], safe_dir[:, 2])
+            pix      = jnp.clip(pix, 0, npix - 1)
+            # Unique trash pixel per particle: spreads zero-weight atomics
+            # uniformly over the map → no hot-address serialisation.
+            # X0.shape[0] and npix are compile-time constants inside JIT, so
+            # XLA materialises trash_pix once (not per iteration).
+            trash_pix = jnp.arange(X0.shape[0], dtype=jnp.int32) % jnp.int32(npix)
+            safe_pix  = jnp.where(mask, pix, trash_pix)
+            weights   = mask.astype(jnp.float32)
+            return shell.at[safe_pix].add(weights)
+
+        return jax.lax.fori_loop(
+            jnp.int32(0), n_active, body,
+            jnp.zeros(npix, dtype=jnp.float32),
+        )
+
+    _JAX_SHELL_FORI_KERNEL = _fori_kernel
+    return _JAX_SHELL_FORI_KERNEL
+
+
 # ---------------------------------------------------------------------------
 # Core shell accumulator
 # ---------------------------------------------------------------------------
@@ -459,20 +552,76 @@ class LightconeShellBuilder:
         return shell_map
 
     # ------------------------------------------------------------------
+    def prepare_device_maps(self, pos_prev_jax, pos_curr_jax,
+                            verbose: bool = True) -> tuple:
+        """
+        Transfer and centre particle positions onto every local GPU, sharding
+        particles across GPUs (each GPU gets N/n_devs particles).
+
+        This means each GPU processes N/n_devs particles across ALL replicas,
+        giving true N/n_devs speedup instead of duplicating all N particles on
+        every GPU.
+
+        Returns
+        -------
+        (X0_devs, X1_devs, n_part_total) : tuple
+            X0_devs, X1_devs – lists of per-device JAX arrays (N_local, 3)
+                               where N_local = ceil(N / n_devs)
+            n_part_total      – total particles across all shards
+        """
+        import jax
+        import jax.numpy as jnp
+
+        t_gather = time()
+        devs    = jax.local_devices()
+        n_devs  = len(devs)
+        obs_arr = np.array(self.obs, dtype=np.float32)
+        X0_flat = pos_prev_jax.reshape(-1, 3).astype(jnp.float32)
+        X1_flat = pos_curr_jax.reshape(-1, 3).astype(jnp.float32)
+        if jax.process_count() > 1:
+            X0_np = np.concatenate(
+                [np.asarray(s.data) for s in X0_flat.addressable_shards], axis=0)
+            X1_np = np.concatenate(
+                [np.asarray(s.data) for s in X1_flat.addressable_shards], axis=0)
+        else:
+            X0_np = np.asarray(X0_flat)
+            X1_np = np.asarray(X1_flat)
+        # Centre on observer
+        X0_np = X0_np - obs_arr
+        X1_np = X1_np - obs_arr
+        n_part_total = X0_np.shape[0]
+        # Shard particles among devices: GPU k processes particles [k*chunk:(k+1)*chunk]
+        chunk = int(np.ceil(n_part_total / n_devs))
+        X0_devs = []
+        X1_devs = []
+        for k, d in enumerate(devs):
+            lo = k * chunk
+            hi = min(lo + chunk, n_part_total)
+            X0_devs.append(jax.device_put(X0_np[lo:hi], d))
+            X1_devs.append(jax.device_put(X1_np[lo:hi], d))
+        if verbose:
+            print(f"    [jax_shell] gather/cast {time()-t_gather:.2f}s  "
+                  f"n_part={n_part_total:,}  n_devs={n_devs}  "
+                  f"part/dev={chunk:,}")
+        return X0_devs, X1_devs, n_part_total
+
+    # ------------------------------------------------------------------
     def accumulate_shell_jax(self,
                              pos_prev_jax,
                              pos_curr_jax,
                              a_prev: float,
                              a_curr: float,
                              r_lo_override: float | None = None,
-                             r_hi_override: float | None = None) -> np.ndarray:
+                             r_hi_override: float | None = None,
+                             _precast: tuple | None = None) -> np.ndarray:
         """
         GPU-accelerated shell accumulation from JAX float32 position arrays.
 
         Equivalent to ``accumulate_shell()`` but runs entirely on GPU:
         distances, masking, quadratic interpolation, HEALPix indexing, and
-        scatter-add are all performed as a single JIT-compiled JAX kernel per
-        replica.  Avoids the CPU round-trip and float64 cast.
+        scatter-add are all performed inside a single ``jax.lax.fori_loop``
+        that iterates over all active periodic replicas without returning to
+        Python between iterations.
 
         Parameters
         ----------
@@ -481,6 +630,12 @@ class LightconeShellBuilder:
             Will be reshaped to (N, 3) and broadcast to all available GPUs.
         a_prev, a_curr : float
         r_lo_override, r_hi_override : optional boundary overrides [Mpc/h]
+        _precast : tuple or None
+            Pre-computed ``(X0_devs, X1_devs, n_part)`` from
+            ``prepare_device_maps()``.  When provided, the gather/cast step
+            is skipped (positions are already on device).  Pass this when
+            processing multiple overlapping shells for the same step to
+            avoid repeating the expensive GPU→CPU→GPU round-trip.
 
         Returns
         -------
@@ -499,71 +654,82 @@ class LightconeShellBuilder:
 
         from concurrent.futures import ThreadPoolExecutor
 
-        kernel = _get_jax_shell_kernel()
+        fori_kernel = _get_jax_shell_fori_kernel()
 
-        # Broadcast positions to ALL GPUs so replicas can be processed in
-        # parallel (round-robin GPU assignment).  NVLink device-to-device
-        # transfers are fast; each GH200 has 96 GB so duplicating 6.5 GB of
-        # positions across 4 devices is well within budget.
-        t_gather = time()
-        # Use only this process's local devices.  In multi-node distributed
-        # runs jax.devices() returns all global GPUs, but device_put requires
-        # a fully-addressable (local) array — use jax.local_devices() instead.
-        devs   = jax.local_devices()
-        n_devs = len(devs)
-        obs_arr = np.array(self.obs, dtype=np.float32)
-        # Flatten to (N, 3).  In a multi-process run pos_prev_jax is a
-        # globally-sharded array; we must extract only the locally-addressable
-        # shards before calling device_put on a single local device.
-        X0_flat = pos_prev_jax.reshape(-1, 3).astype(jnp.float32)
-        X1_flat = pos_curr_jax.reshape(-1, 3).astype(jnp.float32)
-        if jax.process_count() > 1:
-            # Each process holds a partition of particles on its local GPUs.
-            # Concatenate local shards → (N_local, 3) numpy array.
-            X0_np = np.concatenate(
-                [np.asarray(s.data) for s in X0_flat.addressable_shards], axis=0)
-            X1_np = np.concatenate(
-                [np.asarray(s.data) for s in X1_flat.addressable_shards], axis=0)
+        # ---- gather/cast: bring positions to each local device -----------
+        if _precast is not None:
+            # Reuse pre-computed device arrays (same pos_prev/pos_curr pair).
+            X0_devs, X1_devs, n_part = _precast
+            devs   = jax.local_devices()
+            n_devs = len(devs)
         else:
-            X0_np = np.asarray(X0_flat)
-            X1_np = np.asarray(X1_flat)
-        # One copy per local device, centred on observer.
-        X0_devs = [jax.device_put(X0_np - obs_arr, d) for d in devs]
-        X1_devs = [jax.device_put(X1_np - obs_arr, d) for d in devs]
-        n_part = X0_devs[0].shape[0]
-        print(f"    [jax_shell] gather/cast {time()-t_gather:.2f}s  "
-              f"r=[{r_lo:.1f},{r_hi:.1f}] Mpc/h  n_part={n_part:,}  n_devs={n_devs}")
+            t_gather = time()
+            devs   = jax.local_devices()
+            n_devs = len(devs)
+            obs_arr = np.array(self.obs, dtype=np.float32)
+            X0_flat = pos_prev_jax.reshape(-1, 3).astype(jnp.float32)
+            X1_flat = pos_curr_jax.reshape(-1, 3).astype(jnp.float32)
+            if jax.process_count() > 1:
+                X0_np = np.concatenate(
+                    [np.asarray(s.data) for s in X0_flat.addressable_shards], axis=0)
+                X1_np = np.concatenate(
+                    [np.asarray(s.data) for s in X1_flat.addressable_shards], axis=0)
+            else:
+                X0_np = np.asarray(X0_flat)
+                X1_np = np.asarray(X1_flat)
+            # Centre + shard particles across GPUs
+            X0_np -= np.array(self.obs, dtype=np.float32)
+            X1_np -= np.array(self.obs, dtype=np.float32)
+            n_part   = X0_np.shape[0]
+            chunk    = int(np.ceil(n_part / n_devs))
+            X0_devs  = []
+            X1_devs  = []
+            for k, dev in enumerate(devs):
+                lo = k * chunk
+                hi = min(lo + chunk, n_part)
+                X0_devs.append(jax.device_put(X0_np[lo:hi], dev))
+                X1_devs.append(jax.device_put(X1_np[lo:hi], dev))
+            print(f"    [jax_shell] gather/cast {time()-t_gather:.2f}s  "
+                  f"r=[{r_lo:.1f},{r_hi:.1f}] Mpc/h  n_part={n_part:,}  "
+                  f"n_devs={n_devs}  part/dev={chunk:,}")
 
-        # ---- pre-collect kept replica offsets, grouped by device (round-robin)
-        # This must happen before threading so we can split work without a lock.
+        # ---- pre-collect kept replica offsets ----------------------------
+        # All devices process ALL replicas, but each device only handles its
+        # particle shard → true N/n_devs speedup per device.
         n_rep_total = len(self._rep_offsets)
-        device_reps: list[list[np.ndarray]] = [[] for _ in range(n_devs)]
-        n_rep_kept = 0
+        kept_reps = []
         for rep_idx, d in enumerate(self._rep_offsets):
             if r_hi < self._rep_rmin[rep_idx] or r_lo > self._rep_rmax[rep_idx]:
                 continue
-            device_reps[n_rep_kept % n_devs].append(d)
-            n_rep_kept += 1
+            kept_reps.append(d)
+        n_rep_kept = len(kept_reps)
 
-        # ---- dispatch per-device work in parallel threads so all GPUs run
-        # concurrently.  A single-threaded round-robin loop serialises dispatch
-        # even though JAX is async; threads give each GPU its own dispatch path.
-        r_lo_f32 = np.float32(r_lo)
-        r_hi_f32 = np.float32(r_hi)
+        # ---- dispatch per-device fori_loop in parallel threads -----------
+        # Each GPU processes its own particle shard across ALL n_rep_kept
+        # replicas inside a single fori_loop → results are partial shell maps
+        # that are summed at the end.
+        r_lo_f32  = np.float32(r_lo)
+        r_hi_f32  = np.float32(r_hi)
         nside_    = self.nside
         npix_     = self.npix
         interp_   = self.interpolate
 
+        # Build padded replica array once (fixed shape for XLA reuse)
+        rep_np = np.zeros((n_rep_total, 3), dtype=np.float32)
+        if n_rep_kept > 0:
+            rep_np[:n_rep_kept] = np.stack(kept_reps, axis=0)
+        n_active_val = np.int32(n_rep_kept)
+
         def _run_device(dev_i: int) -> np.ndarray:
-            pm = jax.device_put(jnp.zeros(npix_, dtype=jnp.float32), devs[dev_i])
-            for d in device_reps[dev_i]:
-                d_jax = jax.device_put(np.array(d, dtype=np.float32), devs[dev_i])
-                contrib = kernel(
-                    X0_devs[dev_i], X1_devs[dev_i], d_jax,
-                    r_lo_f32, r_hi_f32, nside_, npix_, interp_,
-                )
-                pm = pm + contrib
-            return np.asarray(pm)   # block until this device finishes
+            if X0_devs[dev_i].shape[0] == 0 or n_rep_kept == 0:
+                return np.zeros(npix_, dtype=np.float32)
+            rep_jax  = jax.device_put(rep_np, devs[dev_i])
+            n_active = jnp.int32(n_active_val)
+            return np.asarray(fori_kernel(
+                X0_devs[dev_i], X1_devs[dev_i],
+                rep_jax, n_active,
+                r_lo_f32, r_hi_f32, nside_, npix_, interp_,
+            ))
 
         t0 = time()
         with ThreadPoolExecutor(max_workers=n_devs) as pool:
@@ -580,7 +746,7 @@ class LightconeShellBuilder:
             gathered = np.asarray(_pag(shell_map))  # (n_procs, npix)
             shell_map = gathered.sum(axis=0).astype(np.float32)
 
-        print(f"    [jax_shell] gpu={t_gpu:.2f}s  "
+        print(f"    [jax_shell] r=[{r_lo:.1f},{r_hi:.1f}] Mpc/h  gpu={t_gpu:.2f}s  "
               f"replicas={n_rep_kept}/{n_rep_total}  "
               f"placed={int(shell_map.sum()):,}")
         return shell_map
@@ -810,6 +976,8 @@ def run_with_shells(
     streaming: bool = True,
     shell_chunk_size: int = 2_000_000,
     use_gpu: bool = True,
+    pre_steps: int | None = None,
+    z_pre_ini: float = 99.0,
     **nbody_kwargs,
 ):
     """
@@ -840,6 +1008,13 @@ def run_with_shells(
         Defaults to the first key alphabetically.
     output_npz : output path for the NPZ file when metainfo_path is given.
         Defaults to ``output_dir / f"shells_nside={nside}.npz"``.
+    pre_steps  : if given, run this many N-body steps from z=z_pre_ini to
+        a_steps[0] *before* the main lightcone run (no shells accumulated).
+        The evolved positions/velocities are then used as ICs for both the
+        streaming and collect_all paths via ``with_external_ics``.
+        Useful when the LPT ICs are seeded at high redshift (z=99) but the
+        lightcone only starts at z_max (e.g. z=3.5).
+    z_pre_ini  : starting redshift for the pre-step phase (default 99).
     """
 
     import jax  # needed here for process_index() / process_count() guards
@@ -871,11 +1046,17 @@ def run_with_shells(
             metainfo_path, cosmo_key)
         n_meta_shells = len(shell_info_meta)
         shells_array = np.zeros((n_meta_shells, npix), dtype=np.int32)
-        meta_lower = shell_info_meta['lower_com'].astype(np.float64)
-        meta_upper = shell_info_meta['upper_com'].astype(np.float64)
+        # Recompute comoving boundaries using DISCO-DJ's own chi_of_a so that
+        # the shell overlap test is consistent with r_step_hi/r_step_lo.
+        # The stored lower_com/upper_com come from a different integration and
+        # are ~7 Mpc/h off, causing each step to overlap 2 shells (2× counts).
+        _a_lower = 1.0 / (1.0 + shell_info_meta['lower_z'].astype(np.float64))
+        _a_upper = 1.0 / (1.0 + shell_info_meta['upper_z'].astype(np.float64))
+        meta_lower = chi_of_a(_a_lower).astype(np.float64)
+        meta_upper = chi_of_a(_a_upper).astype(np.float64)
         meta_ids   = shell_info_meta['shell_id'].astype(int)
         print(f"[run_with_shells] NPZ mode: {n_meta_shells} shells from "
-              f"metainfo key={cosmo_key}")
+              f"metainfo key={cosmo_key}  (chi recomputed with DISCO-DJ chi_of_a)")
         if output_npz is None:
             output_npz = output_dir / f"shells_nside={nside}.npz"
         else:
@@ -891,6 +1072,38 @@ def run_with_shells(
     t0 = time()
     t_nbody_total = 0.0
     t_shell_total = 0.0
+
+    # ── Optional pre-step burn-in: z_pre_ini → a_steps[0], no shells ─────
+    # Evolves the LPT/BullFrog ICs to the start of the lightcone window so
+    # the main run (streaming or collect_all) begins with realistic positions.
+    if pre_steps is not None and pre_steps > 0:
+        import jax.numpy as jnp
+        a_pre_ini = 1.0 / (1.0 + float(z_pre_ini))
+        print(f"[run_with_shells] Pre-steps: {pre_steps} steps  "
+              f"a=[{a_pre_ini:.5f}→{a_ini:.5f}]  "
+              f"z=[{z_pre_ini:.1f}→{1.0/a_ini-1.0:.2f}]  (no shell accumulation)")
+        t_pre = time()
+        X_pre, P_pre, _ = dj.run_nbody(
+            a_ini=a_pre_ini,
+            a_end=a_ini,
+            n_steps=pre_steps,
+            res_pm=res_pm,
+            stepper=stepper,
+            method=method,
+            collect_all=False,
+            return_displacement=False,
+            light_cone=False,
+            chunk_size=chunk_size,
+            **nbody_kwargs,
+        )
+        n_part_pre = int(X_pre.reshape(-1, 3).shape[0])
+        print(f"[run_with_shells] Pre-steps done in {time()-t_pre:.1f}s  "
+              f"n_part={n_part_pre:,}")
+        dj = dj.with_external_ics(
+            pos=X_pre.reshape(-1, 3).astype(jnp.float32),
+            vel=P_pre.reshape(-1, 3).astype(jnp.float32),
+        )
+        del X_pre, P_pre
 
     # ── Choose step data source ───────────────────────────────────────────
     if streaming:
@@ -974,6 +1187,11 @@ def run_with_shells(
                       f"r=[{r_step_lo:.1f},{r_step_hi:.1f}] Mpc/h  "
                       f"overlapping_shells={len(overlap)}  "
                       f"wall={t_step_wall:.1f}s")
+            # Prepare device arrays once for all overlapping shells in this
+            # step — avoids repeating the GPU→CPU→GPU gather/cast per shell.
+            _precast = None
+            if use_gpu and len(overlap) > 0:
+                _precast = builder.prepare_device_maps(pos_prev, pos_curr)
             for idx in overlap:
                 sid = int(meta_ids[idx])
                 if use_gpu:
@@ -981,6 +1199,7 @@ def run_with_shells(
                         pos_prev, pos_curr, a_prev, a_curr,
                         r_lo_override=float(meta_lower[idx]),
                         r_hi_override=float(meta_upper[idx]),
+                        _precast=_precast,
                     )
                 else:
                     shell_map = builder.accumulate_shell(
