@@ -60,9 +60,9 @@ def plot_shell_histogram(
     hi = max(np.percentile(counts_d, 99.5), np.percentile(counts_c, 99.5))
     bins = np.linspace(lo, hi, nbins + 1)
 
-    ax.hist(counts_d, bins=bins, density=True, histtype="step",
+    ax.hist(counts_d, bins=bins, density=False, histtype="step",
             lw=1.8, color="#2979ff", label=fr"DISCO-DJ  ($\bar{{n}}$={nbar_d:.2f})")
-    ax.hist(counts_c, bins=bins, density=True, histtype="step",
+    ax.hist(counts_c, bins=bins, density=False, histtype="step",
             lw=1.8, color="#e53935", linestyle="--",
             label=fr"CosmoGridV1  ($\bar{{n}}$={nbar_c:.2f})")
 
@@ -71,7 +71,7 @@ def plot_shell_histogram(
     ax.axvline(nbar_c, color="#e53935", lw=1.0, linestyle=":", alpha=0.8)
 
     ax.set_xlabel("Pixel particle count $n$", fontsize=10)
-    ax.set_ylabel("Probability density", fontsize=10)
+    ax.set_ylabel("Pixel count", fontsize=10)
     ax.set_title(label, fontsize=9)
     ax.legend(fontsize=8)
     ax.grid(True, alpha=0.3)
@@ -181,14 +181,14 @@ def main():
         hi = max(np.percentile(counts_d, 99.5), np.percentile(counts_c, 99.5))
         bins = np.linspace(lo, hi, args.nbins + 1)
 
-        ax_d.hist(counts_d, bins=bins, density=True, histtype="step",
+        ax_d.hist(counts_d, bins=bins, density=False, histtype="step",
                   lw=1.2, color=color, label=lbl)
-        ax_c.hist(counts_c, bins=bins, density=True, histtype="step",
+        ax_c.hist(counts_c, bins=bins, density=False, histtype="step",
                   lw=1.2, color=color, label=lbl)
 
     for ax, title in ((ax_d, "DISCO-DJ"), (ax_c, "CosmoGridV1")):
         ax.set_xlabel("Pixel particle count $n$", fontsize=12)
-        ax.set_ylabel("Probability density", fontsize=12)
+        ax.set_ylabel("Pixel count", fontsize=12)
         ax.set_title(title, fontsize=12)
         ax.legend(fontsize=7, loc="upper right")
         ax.grid(True, alpha=0.3)
