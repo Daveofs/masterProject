@@ -37,9 +37,9 @@ NGENIC_SEED=180723
 # Output paths
 LOG_DIR=${SCRATCH_DIR}/outputs/logs
 SNAP_DIR=${SCRATCH_DIR}/outputs/snapshots
-SHELL_DIR=${SCRATCH_DIR}/outputs/shells_with_4gpu_spread_trash_multi_node
+DISCO_LC_DIR=${SCRATCH_DIR}/outputs/disco_lc
+SHELL_DIR=${SCRATCH_DIR}/outputs/shells_with_new_faster_external_ics_loading
 PLOT_DIR=${SCRATCH_DIR}/outputs/plots/multigpu
-
 
 # ── Multi-node settings ──────────────────────────────────────────────────
 GPUS_PER_NODE=4              # must match --gpus-per-node above
@@ -52,7 +52,7 @@ BOXSIZE=900.0
 COSMO=Planck15  # used only when PARAMS_YML is empty
 A_INI=0.01
 A_END=1.0
-N_STEPS=5         # used only when SHELLS_METAINFO is empty
+N_STEPS=20         # used only when SHELLS_METAINFO is empty
 N_PRESTEPS=30     # sub-steps from a_ini to first shell boundary (z=99→3.5); pkdgrav3 uses ~30
 STEPPER=bullfrog
 TIME_VAR=D
@@ -115,6 +115,7 @@ fi
 mkdir -p "${LOG_DIR}" "${SNAP_DIR}" "${PLOT_DIR}" "${SHELL_DIR}" "${PROJECT_DIR}/data"
 
 SAVE_FINAL="${SNAP_DIR}/final_multigpu_${SLURM_JOB_ID}.npz"
+SAVE_LIGHTCONE="${DISCO_LC_DIR}/lightcone_multigpu_${SLURM_JOB_ID}.npz"
 
 # ── Build srun command ─────────────────────────────────────────────────────
 PYTHON_ARGS=(
@@ -153,6 +154,7 @@ fi
 
 if [[ "${LIGHTCONE}" == "true" ]]; then
     PYTHON_ARGS+=(--lightcone)
+    PYTHON_ARGS+=(--save-lightcone "${SAVE_LIGHTCONE}")
 fi
 
 if [[ "${BUILD_SHELLS}" == "true" ]]; then

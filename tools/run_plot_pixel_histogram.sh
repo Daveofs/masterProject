@@ -6,8 +6,8 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=32G
-#SBATCH --output=/capstor/scratch/cscs/damrein/outputs/logs/cl/pix_hist_%j.out
-#SBATCH --error=/capstor/scratch/cscs/damrein/outputs/logs/cl/pix_hist_%j.err
+#SBATCH --output=/capstor/scratch/cscs/damrein/outputs/logs/hist/pix_hist_%j.out
+#SBATCH --error=/capstor/scratch/cscs/damrein/outputs/logs/hist/pix_hist_%j.err
 
 set -euo pipefail
 
@@ -33,7 +33,7 @@ PY_SCRIPT=/users/damrein/masterProject/tools/plot_pixel_histogram.py
 SHELL_INDICES="0 17 34 51 68"
 
 # Number of histogram bins
-NBINS=1000
+NBINS=3000
 
 # ---------------------------------------------------------------------------
 # Environment

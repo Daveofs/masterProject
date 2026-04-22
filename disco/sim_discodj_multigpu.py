@@ -199,6 +199,7 @@ else:
 _slurm_nnodes = int(os.environ.get("SLURM_NNODES", "1"))
 
 import jax
+import jax.numpy as jnp
 
 if args.mode == "gpu" and _slurm_nnodes > 1:
     # Resolve how many GPUs this process owns locally.
@@ -285,36 +286,41 @@ Npart = args.res
 # so compute it here directly.
 chunk_size = Npart ** 3 // args.num_chunks
 
-
-def _sort_for_lagrangian_x(arr_pos: np.ndarray, arr_vel: np.ndarray, nx: int):
-    """Sort particles by x-coordinate so axis-0 slices are monotone in x."""
-    idx = np.argsort(arr_pos[:, 0])
-    return arr_pos[idx], arr_vel[idx]
-
-
 def _load_external_ics(ic_path: Path) -> tuple[np.ndarray, np.ndarray]:
     """Load PKDGRAV tipsy ICs, convert velocities, sort for Lagrangian grid."""
     if jax.process_index() == 0:
         print(f"Reading PKDGRAV ICs from {ic_path}")
     p_init, _ = read_tipsy(ic_path, Lbox)
 
-    external_ics = np.c_[
-        p_init["x"],  p_init["y"],  p_init["z"],
-        p_init["vx"], p_init["vy"], p_init["vz"],
-    ].astype(np.float32)
+    # Stack all 6 fields and move to GPU in one transfer; astype handles
+    # big-endian → native conversion for each structured-array field.
+    gpu_devs = [d for d in jax.local_devices() if d.platform == 'gpu']
+    dev = gpu_devs[0] if gpu_devs else jax.local_devices()[0]
+
+    pos = jax.device_put(
+        np.stack([p_init["x"].astype(np.float32),
+                  p_init["y"].astype(np.float32),
+                  p_init["z"].astype(np.float32)], axis=1), dev)
+    vel = jax.device_put(
+        np.stack([p_init["vx"].astype(np.float32),
+                  p_init["vy"].astype(np.float32),
+                  p_init["vz"].astype(np.float32)], axis=1), dev)
+    del p_init
 
     # Shift positions by +Lbox/2 (mod Lbox) so that pkdgrav3's lightcone
     # origin (corner at physical 0,0,0) coincides with DISCO-DJ's observer
     # at the box center (Lbox/2, Lbox/2, Lbox/2).
-    external_ics[:, :3] = (external_ics[:, :3] + Lbox / 2.0) % Lbox
+    pos = (pos + jnp.float32(Lbox / 2.0)) % jnp.float32(Lbox)
 
     # Convert PKD comoving velocities → DISCO-DJ units
-    v_factor = a_ini ** 2 / np.sqrt(8 * np.pi / 3) * Lbox
-    external_ics[:, 3:] *= v_factor
+    v_factor = jnp.float32(a_ini ** 2 / np.sqrt(8 * np.pi / 3) * Lbox)
+    vel = vel * v_factor
 
-    pos_sorted, vel_sorted = _sort_for_lagrangian_x(
-        external_ics[:, :3], external_ics[:, 3:], nx=Npart
-    )
+    # Sort by x on GPU (jnp.argsort is far faster than np.argsort for large N), analogous to sort_for_langrianian_x
+    idx = jnp.argsort(pos[:, 0])
+    pos_sorted = np.asarray(pos[idx])
+    vel_sorted = np.asarray(vel[idx])
+
     return pos_sorted, vel_sorted
 
 
@@ -482,7 +488,7 @@ run_nbody_result = dj.run_nbody(
     n_resample=args.n_resample,
     chunk_size=chunk_size,
     deconvolve=args.deconvolve,
-    collect_all=True,
+    collect_all=False,
     return_displacement=True,
     convert_to_numpy=False,
 )

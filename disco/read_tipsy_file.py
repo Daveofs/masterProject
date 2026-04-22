@@ -10,8 +10,10 @@ def read_tipsy(nBody_file_in, Lbox):
         exit()
 
     #header
+    print("Reading tipsy-file...")
     p_header_dt = np.dtype([('a','>d'),('npart','>i'),('ndim','>i'),('ng','>i'),('nd','>i'),('ns','>i'),('buffer','>i')])
     p_header = np.fromfile(f, dtype=p_header_dt, count=1, sep='')
+    print("File contains %d particles." % p_header['npart'])
 
     #particles
     p_dt = np.dtype([('mass','>f'),("x",'>f'),("y",'>f'),("z",'>f'),("vx",'>f'),("vy",'>f'),("vz",'>f'),("eps",'>f'),("phi",'>f')])
