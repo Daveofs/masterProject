@@ -2,9 +2,9 @@
 #SBATCH --job-name=pkdgrav
 #SBATCH --partition=normal.24h
 #SBATCH --time=24:00:00
-#SBATCH --nodes=1
+#SBATCH --nodes=30
 #SBATCH --ntasks-per-node=1
-#SBATCH --cpus-per-task=20
+#SBATCH --cpus-per-task=30
 #SBATCH --mem-per-cpu=4G
 #SBATCH --array=1
 #SBATCH --output=/cluster/scratch/damrein/outputs/logs/pkdgrav_%A_%a.out
@@ -28,7 +28,7 @@ module load hdf5/1.14.3
 
 # Map array task ID to zero-padded 6-digit cosmology index (1 -> 000001, 2 -> 000002, ...)
 COSMO_ID=$(printf '%06d' "${SLURM_ARRAY_TASK_ID}")
-OUTPUT_DIR=${SCRATCH_DIR}/outputs/ICs/cosmo*_${COSMO_ID}
+OUTPUT_DIR=${SCRATCH_DIR}/outputs/ICs/cosmo_${COSMO_ID}
 PARAM_FILE=/cluster/work/refregier/damrein/cosmogridv1/cosmo_000001/param_files/cosmology.par
 
 mkdir -p "${OUTPUT_DIR}"
