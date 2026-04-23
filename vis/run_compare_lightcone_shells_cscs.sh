@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=compare_lc_shells
 #SBATCH --account=sk037
-#SBATCH --partition=debug
+#SBATCH --partition=normal
 #SBATCH --time=00:30:00
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=16
@@ -20,7 +20,7 @@ CONDA_ROOT=/users/damrein/miniforge3
 OUTPUT_DIR=${SCRATCH}/outputs/plots/shells/compare
 
 # ── Input files ─────────────────────────────────────────────────────────────
-LIGHTCONE=${SCRATCH}/outputs/snapshots/lightcone_multigpu_3257610.npz
+LIGHTCONE=/capstor/scratch/cscs/damrein/outputs/snapshots/lightcone_multigpu_3257586.npz
 DISCO_SHELLS=${SCRATCH}/outputs/shells_with_4gpu_spread_trash_multi_node/shells_nside=2048.npz
 COSMO_SHELLS=${SCRATCH}/cosmogridv1/cosmo_000001/run_0/compressed_shells.npz
 
@@ -28,10 +28,10 @@ COSMO_SHELLS=${SCRATCH}/cosmogridv1/cosmo_000001/run_0/compressed_shells.npz
 # z-bin index (0-based) – must be in range [0, N_shells-1].
 # The lightcone covers z~0-0.197, so valid bins are 0-13.
 # Set ALL_BINS=1 to render all shells that overlap the lightcone instead.
-ZBIN=0
-ALL_BINS=1
+ZBIN=2
+ALL_BINS=0
 
-NSIDE=256
+NSIDE=2048
 # Color scale for log10(1.01+delta); use empty string to use auto scaling
 VMIN=-1.0
 VMAX=1.0
@@ -101,6 +101,7 @@ cd "${PROJECT_DIR}"
   --nside       "${NSIDE}" \
   --output-dir  "${OUTPUT_DIR}" \
   --plot-logarithmic \
+  --separate \
   ${EXTRA_ARGS}
 
 echo "Done."

@@ -38,7 +38,7 @@ NGENIC_SEED=180723
 LOG_DIR=${SCRATCH_DIR}/outputs/logs
 SNAP_DIR=${SCRATCH_DIR}/outputs/snapshots
 DISCO_LC_DIR=${SCRATCH_DIR}/outputs/disco_lc
-SHELL_DIR=${SCRATCH_DIR}/outputs/shells_with_new_faster_external_ics_loading
+SHELL_DIR=${SCRATCH_DIR}/outputs/shells_new_new
 PLOT_DIR=${SCRATCH_DIR}/outputs/plots/multigpu
 
 # ── Multi-node settings ──────────────────────────────────────────────────

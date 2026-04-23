@@ -469,6 +469,9 @@ if args.build_shells:
     if jax.process_index() == 0:
         print(f"Shell lightcone done: {_n_shells} shells → {_shells_out}")
     sync_global_devices("shells_done")
+    t4 = time()
+    if jax.process_index() == 0:
+        print(f"Total wall time: {t4 - t0:.2f} s")
     import sys as _sys; _sys.exit(0)
 
 # ── Standard N-body run (no shell accumulation) ──────────────────────────────

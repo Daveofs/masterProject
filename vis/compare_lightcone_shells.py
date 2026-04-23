@@ -134,6 +134,68 @@ def plot_comparison(
     return out_path
 
 
+def plot_separate(
+    m_disco_lc: np.ndarray | None,
+    m_disco_shells: np.ndarray | None,
+    m_cosmo: np.ndarray | None,
+    nside: int,
+    lower_z: float,
+    upper_z: float,
+    z_bin: int,
+    output_dir: Path,
+    plot_logarithmic: bool = False,
+    vmin: float | None = None,
+    vmax: float | None = None,
+) -> list[Path]:
+    """Save each map as a separate PNG file."""
+    import healpy as hp
+    import matplotlib.pyplot as plt
+
+    def prepare(m: np.ndarray) -> np.ndarray:
+        m = to_overdensity(m)
+        if plot_logarithmic:
+            m = np.log10(1.01 + m)
+        return m
+
+    panels = []
+    if m_disco_lc is not None:
+        panels.append((prepare(m_disco_lc), "disco_lc", "DISCO-DJ lightcone (particles)"))
+    if m_disco_shells is not None:
+        panels.append((prepare(m_disco_shells), "disco_shells", "DISCO-DJ shells"))
+    if m_cosmo is not None:
+        panels.append((prepare(m_cosmo), "cosmo_shells", "CosmoGrid compressed_shells"))
+
+    if not panels:
+        raise ValueError("No maps to plot.")
+
+    title_suffix = f"z=[{lower_z:.4f},{upper_z:.4f}]  (bin {z_bin})"
+    scale_label = "log₁₀(1.01+δ)" if plot_logarithmic else "δ"
+    tag = "log" if plot_logarithmic else "lin"
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    out_paths = []
+    for m, slug, label in panels:
+        fig = plt.figure(figsize=(9, 6))
+        hp.mollview(
+            m,
+            fig=fig,
+            nest=False,
+            title=f"{label}\n{title_suffix}",
+            xsize=2000,
+            min=vmin,
+            max=vmax,
+            unit=scale_label,
+            notext=False,
+        )
+        fname = f"{slug}_zbin{z_bin}_nside{nside}_{tag}.png"
+        out_path = output_dir / fname
+        plt.savefig(out_path, dpi=200, bbox_inches="tight")
+        plt.close(fig)
+        print(f"Saved separate plot → {out_path}")
+        out_paths.append(out_path)
+    return out_paths
+
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -234,7 +296,8 @@ def run(args: argparse.Namespace) -> None:
             continue
 
         # ── Plot ─────────────────────────────────────────────────────────────
-        plot_comparison(
+        plot_fn = plot_separate if args.separate else plot_comparison
+        plot_fn(
             m_disco_lc=m_disco_lc,
             m_disco_shells=m_disco_shells,
             m_cosmo=m_cosmo,
@@ -276,6 +339,8 @@ def _build_parser() -> argparse.ArgumentParser:
                    help="Colorbar minimum")
     p.add_argument("--vmax", type=float, default=None,
                    help="Colorbar maximum")
+    p.add_argument("--separate", action="store_true",
+                   help="Save each map as a separate PNG instead of a single side-by-side panel")
     return p
 
 
