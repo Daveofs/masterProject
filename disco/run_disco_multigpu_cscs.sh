@@ -38,7 +38,7 @@ NGENIC_SEED=180723
 LOG_DIR=${SCRATCH_DIR}/outputs/logs
 SNAP_DIR=${SCRATCH_DIR}/outputs/snapshots
 DISCO_LC_DIR=${SCRATCH_DIR}/outputs/disco_lc
-SHELL_DIR=${SCRATCH_DIR}/outputs/shells_new_new
+SHELL_DIR=${SCRATCH_DIR}/outputs/shells_no_xla_flags
 PLOT_DIR=${SCRATCH_DIR}/outputs/plots/multigpu
 
 # ── Multi-node settings ──────────────────────────────────────────────────
@@ -65,11 +65,11 @@ BUILD_SHELLS=true
 SHELLS_METAINFO="/capstor/scratch/cscs/damrein/cosmogridv1/CosmoGridV1_metainfo.h5"
 #SHELLS_METAINFO=""
 
-# ── JAX compilation cache (avoids 20-sec first-run JIT overhead on re-runs) ──
-JAX_CACHE_DIR=${SCRATCH_DIR}/jax_cache
-export JAX_COMPILATION_CACHE_DIR=${JAX_CACHE_DIR}
-export JAX_PERSISTENT_CACHE_MIN_COMPILE_TIME_SECS=1
-mkdir -p "${JAX_CACHE_DIR}"
+# # ── JAX compilation cache (avoids 20-sec first-run JIT overhead on re-runs) ──
+# JAX_CACHE_DIR=${SCRATCH_DIR}/jax_cache
+# export JAX_COMPILATION_CACHE_DIR=${JAX_CACHE_DIR}
+# export JAX_PERSISTENT_CACHE_MIN_COMPILE_TIME_SECS=1
+# mkdir -p "${JAX_CACHE_DIR}"
 
 # ── JAX / XLA memory settings ─────────────────────────────────────────────
 export JAX_PLATFORM_NAME=gpu
