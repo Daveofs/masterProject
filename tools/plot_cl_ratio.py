@@ -77,8 +77,10 @@ def ell_from_scale(r_cmpch: float, chi_cmpch: float) -> float:
 
 def add_scale_vlines(ax, chi: float, nside: int, lmax: int,
                      alpha: float = 0.8, label_ypos: float = 0.97,
-                     colors_override: dict | None = None):
-    """Draw vertical lines at 1 cMpc/h, 5 cMpc/h scales and at ell=2*nside.
+                     colors_override: dict | None = None,
+                     grid_size: float | None = None):
+    """Draw vertical lines at 1 cMpc/h, 5 cMpc/h scales, at ell=2*nside,
+    and optionally at the PM grid cell size Lbox/res_pm.
 
     Parameters
     ----------
@@ -89,6 +91,7 @@ def add_scale_vlines(ax, chi: float, nside: int, lmax: int,
     alpha     : line opacity
     label_ypos: y-position of text label in axes fraction
     colors_override : optional dict {r_cmpch: color} to override default colours
+    grid_size : Lbox/res_pm in cMpc/h; draws an extra vline when provided
     """
     trans = ax.get_xaxis_transform()  # x in data, y in axes fraction
 
@@ -103,6 +106,17 @@ def add_scale_vlines(ax, chi: float, nside: int, lmax: int,
         ax.text(ell, label_ypos, txt, transform=trans,
                 fontsize=6.5, color=col, ha="center", va="top",
                 rotation=90, clip_on=True)
+
+    # ---- PM grid cell size line ----
+    if grid_size is not None and grid_size > 0:
+        ell_grid = ell_from_scale(grid_size, chi)
+        if not np.isnan(ell_grid) and 2 <= ell_grid <= lmax:
+            _col_grid = "#c62828"
+            ax.axvline(ell_grid, color=_col_grid, lw=0.9, linestyle="--", alpha=alpha)
+            ax.text(ell_grid, label_ypos,
+                    f"$L_{{\\rm box}}/N_{{\\rm pm}}$\n({grid_size:.2f} cMpc/h)",
+                    transform=trans, fontsize=6.5, color=_col_grid,
+                    ha="center", va="top", rotation=90, clip_on=True)
 
     # ---- 2*nside line ----
     ell_ns = 2 * nside
@@ -126,6 +140,11 @@ def main():
                         help="Shell indices to plot (0-based). Default: 5 evenly spaced.")
     parser.add_argument("--lmax",      type=int, default=None,
                         help="Maximum multipole. Default: 3*nside-1.")
+    parser.add_argument("--lbox",      type=float, default=900.0,
+                        help="Simulation box size in cMpc/h (default: 900).")
+    parser.add_argument("--res-pm",    type=int, default=None,
+                        help="PM grid resolution (number of cells per side). "
+                             "Grid cell size = Lbox/res_pm is shown on Cl plots.")
     args = parser.parse_args()
 
     os.makedirs(args.out_dir, exist_ok=True)
@@ -139,6 +158,11 @@ def main():
     npix     = shells_d.shape[1]
     nside    = hp.npix2nside(npix)
     lmax     = args.lmax if args.lmax is not None else 3 * nside - 1
+
+    grid_size: float | None = None
+    if args.res_pm is not None:
+        grid_size = args.lbox / args.res_pm
+        print(f"Grid cell size: {args.lbox:.1f} / {args.res_pm} = {grid_size:.4f} cMpc/h")
 
     print(f"nside={nside}, npix={npix}, lmax={lmax}, n_shells={n_shells}")
 
@@ -189,7 +213,10 @@ def main():
 
         # Per-shell scale lines on summary plots (subtle dotted, shell colour)
         chi = float(info_d[idx]["shell_com"])
-        for r, _, _ in _SCALE_LINES:
+        scale_vals = [r for r, _, _ in _SCALE_LINES]
+        if grid_size is not None:
+            scale_vals.append(grid_size)
+        for r in scale_vals:
             ell_s = ell_from_scale(r, chi)
             if not np.isnan(ell_s) and 2 <= ell_s <= lmax:
                 for _ax in (ax_cl, ax_ratio):
@@ -257,8 +284,10 @@ def main():
         axes[0].plot(ells, cl_c, label="CosmoGridV1",  lw=1.2, color="tomato", linestyle="--")
         axes[0].set_ylabel(r"$C_\ell$", fontsize=12)
         axes[0].set_yscale("log")
+        _grid_str = f"  |  grid={grid_size:.3f} cMpc/h" if grid_size is not None else ""
         axes[0].set_title(
-            f"Shell {idx}  |  z = [{z_lo:.4f}, {z_hi:.4f}]  |  nside={nside}", fontsize=12
+            f"Shell {idx}  |  z = [{z_lo:.4f}, {z_hi:.4f}]  |  nside={nside}{_grid_str}",
+            fontsize=12
         )
         axes[0].legend(fontsize=10)
         axes[0].grid(True, which="both", alpha=0.3)
@@ -272,7 +301,7 @@ def main():
         # Scale vertical lines on both panels
         chi = float(info_d[idx]["shell_com"])
         for ax in axes:
-            add_scale_vlines(ax, chi, nside, lmax)
+            add_scale_vlines(ax, chi, nside, lmax, grid_size=grid_size)
 
         for ax in axes:
             ax.set_xscale("log")

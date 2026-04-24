@@ -18,7 +18,7 @@ SCRATCH_DIR=/capstor/scratch/cscs/damrein
 CONDA_ROOT=/users/damrein/miniforge3
 CONDA_ENV=disco-dj
 
-DISCO_FILE="${SCRATCH_DIR}/outputs/shells_with_4gpu_spread_trash_multi_node/shells_nside=2048.npz"
+DISCO_FILE="/capstor/scratch/cscs/damrein/outputs/shells_res_pm_1664/shells_nside=2048.npz"
 COSMOGRID_FILE="${SCRATCH_DIR}/cosmogridv1/cosmo_000001/run_0/compressed_shells.npz"
 OUT_DIR="${SCRATCH_DIR}/outputs/cl_ratio"
 
@@ -71,6 +71,8 @@ python "${PY_SCRIPT}" \
     --cosmogrid  "${COSMOGRID_FILE}" \
     --out-dir    "${OUT_DIR}" \
     --shells     ${SHELL_INDICES} \
-    --lmax       "${LMAX}"
+    --lmax       "${LMAX}" \
+    --lbox       900 \
+    --res-pm     1664
 
 echo "[$(date --iso-8601=seconds)] Done. Plots written to ${OUT_DIR}"
