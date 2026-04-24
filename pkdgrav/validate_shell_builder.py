@@ -49,14 +49,39 @@ from pathlib import Path
 from time import time
 
 import numpy as np
+import shutil
+import healpy as hp
 
 # ---------------------------------------------------------------------------
-# Add DISCO-DJ scripts to sys.path (LightconeShellBuilder lives there)
+# Add local `masterProject/disco` and try to autodetect a sibling
+# `DISCO-DJ` checkout. We need `DISCO-DJ/src` (package) and
+# `DISCO-DJ/scripts` (helper modules like `utils_jens`) on sys.path so
+# imports such as `from discodj import DiscoDJ` and `import utils_jens`
+# work when running locally.
 # ---------------------------------------------------------------------------
 _script_dir = Path(__file__).resolve().parent
-_disco_dir  = _script_dir.parent / "disco"
-if str(_disco_dir) not in sys.path:
-    sys.path.insert(0, str(_disco_dir))
+# local copy used by this repo (contains build_lightcone_shells, etc.)
+_local_disco = _script_dir.parent / "disco"
+if str(_local_disco) not in sys.path:
+    sys.path.insert(0, str(_local_disco))
+
+# Try to find a workspace DISCO-DJ checkout by walking ancestors and add
+# its `scripts/` and `src/` folders to sys.path so helper modules are
+# available (e.g. `utils_jens`). Searching ancestors is more robust
+# than assuming a fixed number of parents.
+_disco_dj_root = None
+for _ancestor in _script_dir.resolve().parents:
+    _candidate = _ancestor / "DISCO-DJ"
+    if _candidate.exists():
+        _disco_dj_root = _candidate
+        break
+
+if _disco_dj_root is not None:
+    _disco_dj_scripts = _disco_dj_root / "scripts"
+    _disco_dj_src = _disco_dj_root / "src"
+    for _p in (_disco_dj_scripts, _disco_dj_src):
+        if _p.exists() and str(_p) not in sys.path:
+            sys.path.insert(0, str(_p))
 
 
 # ---------------------------------------------------------------------------
@@ -88,6 +113,11 @@ def _build_parser() -> argparse.ArgumentParser:
                    help="Maximum lightcone redshift (default: 3.5)")
     p.add_argument("--no-gpu",      action="store_true",
                    help="Use CPU accumulate_shell() instead of GPU accumulate_shell_jax()")
+    p.add_argument("--no-save-built", dest="save_built", action="store_false",
+                   help="Do not save built shell FITS files and diffs (default: save built)")
+    p.add_argument("--save-plots", action="store_true",
+                   help="Save per-step comparison PNGs (built / ref / diff) for eye-check")
+    p.set_defaults(save_built=True)
     return p
 
 
@@ -175,11 +205,20 @@ def main() -> None:
           f"(steps {min(snap_files)}–{max(snap_files)})\n")
 
     # Build FITS index: (z_hi_str, z_lo_str) → Path
+    # Filenames often have a trailing '.' before the extension (e.g. "..._z-low=0.0.fits").
+    # Extract numeric substrings robustly so float conversion later never fails.
+    def _extract_num(token: str) -> str:
+        m = re.search(r"[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?", token)
+        return m.group(0) if m else token.strip("., ")
+
     fits_index: dict[tuple[str, str], Path] = {}
     for fp in fits_dir.glob(f"{args.snap_prefix}-shell_z-high=*_z-low=*.fits"):
         m = re.search(r"z-high=([0-9.e+\-]+)_z-low=([0-9.e+\-]+)", fp.name)
         if m:
-            fits_index[(m.group(1), m.group(2))] = fp
+            zh_raw, zl_raw = m.group(1), m.group(2)
+            zh = _extract_num(zh_raw)
+            zl = _extract_num(zl_raw)
+            fits_index[(zh, zl)] = fp
     print(f"FITS reference shells found: {len(fits_index)}\n")
 
     # ── Main loop: stream through snapshot pairs ───────────────────────────
@@ -234,13 +273,41 @@ def main() -> None:
             a_prev   = a_curr
             continue
 
-        # Load and optionally degrade the reference map
+        # Load the reference map (may be high-res). We'll detect if the
+        # reference encodes binary occupancy (0/1) at high resolution and
+        # handle comparisons appropriately.
         m_ref_raw = hp.read_map(str(fits_path), field=0, dtype=np.float32, verbose=False)
         nside_ref = hp.npix2nside(len(m_ref_raw))
+
+        # Cheap sampling test to decide if reference is binary (occupancy)
+        is_ref_binary = False
+        try:
+            L = len(m_ref_raw)
+            # sample up to 100k pixels evenly to avoid expensive full scans
+            nsample = min(100000, L)
+            idx = np.linspace(0, L - 1, num=nsample, dtype=int)
+            sample = m_ref_raw[idx]
+            if sample.max() <= 1.0 and sample.min() >= 0.0 and np.allclose(sample, np.rint(sample)):
+                is_ref_binary = True
+        except Exception:
+            # If sampling fails, assume non-binary and continue
+            is_ref_binary = False
+
+        # Produce a coarse (args.nside) representation of the reference.
         if nside_ref != args.nside:
-            m_ref = hp.ud_grade(m_ref_raw, nside_out=args.nside, order_in='RING')
+            m_ref_coarse = hp.ud_grade(m_ref_raw, nside_out=args.nside, order_in='RING')
         else:
-            m_ref = m_ref_raw
+            m_ref_coarse = m_ref_raw
+
+        # If the reference is binary occupancy at high-res, convert the
+        # coarse-averaged map into a per-coarse-pixel count of occupied
+        # high-res pixels. This is not identical to per-particle counts,
+        # but gives a comparable integer-like quantity.
+        if is_ref_binary:
+            scale = (nside_ref // args.nside) ** 2 if nside_ref >= args.nside else 1
+            m_ref = (m_ref_coarse * float(scale)).astype(np.float32)
+        else:
+            m_ref = m_ref_coarse.astype(np.float32)
 
         # ── Run LightconeShellBuilder (unchanged from production) ─────────
         t_build = time()
@@ -270,6 +337,93 @@ def main() -> None:
 
         print(f"  built={b_mean:.4f}  ref={r_mean:.4f}  "
               f"ratio={ratio:.4f}  xcorr={xcorr:.4f}  build={t_build:.1f}s")
+
+        # If the reference was detected as binary occupancy at high-res,
+        # also report occupancy-based metrics (coarse occupancy vs built)
+        if 'is_ref_binary' in locals() and is_ref_binary:
+            try:
+                ref_occ = (m_ref_coarse > 0.5)
+                built_occ = (m_built > 0)
+                ref_occ_count = int(np.count_nonzero(ref_occ))
+                built_occ_count = int(np.count_nonzero(built_occ))
+                occ_ratio = float(built_occ_count) / float(ref_occ_count) if ref_occ_count > 0 else float('nan')
+                occ_xcorr = float(np.corrcoef(built_occ.ravel().astype(np.float32), ref_occ.ravel().astype(np.float32))[0, 1]) \
+                    if (built_occ_count > 0 and ref_occ_count > 0) else float('nan')
+                print(f"  [note] reference appears binary occupancy (nside={nside_ref})  "
+                      f"occ_built={built_occ_count} occ_ref={ref_occ_count} "
+                      f"occ_ratio={occ_ratio:.3f} occ_xcorr={occ_xcorr:.3f}")
+            except Exception:
+                pass
+
+        # Save built / reference / diff maps and optional PNG for eye-check
+        if args.save_built:
+            built_dir = args.output_dir / "built_maps"
+            ref_dir = args.output_dir / "ref_maps"
+            diff_dir = args.output_dir / "diff_maps"
+            built_dir.mkdir(parents=True, exist_ok=True)
+            ref_dir.mkdir(parents=True, exist_ok=True)
+            diff_dir.mkdir(parents=True, exist_ok=True)
+
+            # Prefer the reference FITS' z-range tokens when naming saved files
+            m_z = re.search(r"z-high=([0-9.eE+\-]+)_z-low=([0-9.eE+\-]+)", fits_path.name)
+            if m_z:
+                zh_raw, zl_raw = m_z.group(1), m_z.group(2)
+                zh_str = _extract_num(zh_raw)
+                zl_str = _extract_num(zl_raw)
+            else:
+                zh_str = f"{z_hi:.6f}".rstrip('0').rstrip('.')
+                zl_str = f"{z_lo:.6f}".rstrip('0').rstrip('.')
+
+            # Normalize negative-zero strings (keep positive 0.0)
+            def _norm_zero(s: str) -> str:
+                try:
+                    v = float(s)
+                except Exception:
+                    return s
+                return "0.0" if v == 0.0 else s
+
+            zh_str = _norm_zero(zh_str)
+            zl_str = _norm_zero(zl_str)
+
+            # Write built map using the reference's z tokens for consistent labels
+            built_fname = f"{args.snap_prefix}-built-shell_step={step_i:05d}_z-high={zh_str}_z-low={zl_str}.fits"
+            built_path = built_dir / built_fname
+            try:
+                _safe_write_map(built_path, m_built)
+            except Exception as e:
+                print(f"  [warning] failed to save built FITS: {e}")
+
+            # Copy reference FITS into output folder using a sanitized name
+            # Always (re)write the sanitized copy so names remain consistent
+            ref_copy_name = f"{args.snap_prefix}-ref-shell_step={step_i:05d}_z-high={zh_str}_z-low={zl_str}.fits"
+            ref_copy = ref_dir / ref_copy_name
+            try:
+                shutil.copy(str(fits_path), str(ref_copy))
+            except Exception as e:
+                print(f"  [warning] failed to copy reference FITS: {e}")
+
+            # Save diff map (built - ref) using the same z tokens
+            try:
+                diff = m_built.astype(np.float32) - m_ref.astype(np.float32)
+                diff_fname = f"{args.snap_prefix}-diff-shell_step={step_i:05d}_z-high={zh_str}_z-low={zl_str}.fits"
+                diff_path = diff_dir / diff_fname
+                _safe_write_map(diff_path, diff)
+            except Exception as e:
+                print(f"  [warning] failed to save diff FITS: {e}")
+
+            # Optional PNG side-by-side for quick visual inspection
+            if args.save_plots:
+                try:
+                    fig = plt.figure(figsize=(12, 4))
+                    hp.mollview(m_built, title=f"Built step {step_i}", sub=(1, 3, 1), min=None, max=None)
+                    hp.mollview(m_ref,   title=f"Reference",      sub=(1, 3, 2), min=None, max=None)
+                    hvmax = max(abs(diff).max(), 1e-9)
+                    hp.mollview(diff,    title="Diff (built - ref)", sub=(1, 3, 3), min=-hvmax, max=hvmax, cmap='seismic')
+                    outpng = args.output_dir / f"comparison_step_{step_i:05d}.png"
+                    plt.savefig(str(outpng), dpi=150, bbox_inches='tight')
+                    plt.close(fig)
+                except Exception as e:
+                    print(f"  [warning] failed to write comparison PNG: {e}")
 
         results.append({
             "step":       step_i,
@@ -360,29 +514,65 @@ def _find_fits(
     fits_dir: Path,
 ) -> Path | None:
     """Return the FITS file whose z boundaries match (z_hi, z_lo) best."""
-    # Try exact string match first (shell_collector formats floats as-is)
+    # Parse available FITS z-bounds into floats
+    entries: list[tuple[float, float, Path]] = []
     for (zh_str, zl_str), fp in fits_index.items():
         try:
-            if abs(float(zh_str) - z_hi) < 1e-4 and abs(float(zl_str) - z_lo) < 1e-4:
-                return fp
+            zh = float(zh_str); zl = float(zl_str)
         except ValueError:
-            pass
+            continue
+        entries.append((zh, zl, fp))
 
-    # Fallback: closest match
+    # 1) Exact float match within tol
+    tol_exact = 1e-4
+    for zh, zl, fp in entries:
+        if abs(zh - z_hi) < tol_exact and abs(zl - z_lo) < tol_exact:
+            return fp
+
+    # 2) FITS interval contained inside the snapshot pair interval
+    #    (common case when shell_collector used different bin edges)
+    for zh, zl, fp in entries:
+        if zl >= z_lo - 1e-6 and zh <= z_hi + 1e-6:
+            return fp
+
+    # 3) Choose the FITS file with the largest overlap with [z_lo, z_hi]
+    best_fp = None
+    best_overlap = 0.0
+    for zh, zl, fp in entries:
+        overlap = min(zh, z_hi) - max(zl, z_lo)
+        if overlap > best_overlap:
+            best_overlap = overlap
+            best_fp = fp
+    if best_overlap > 0.0:
+        return best_fp
+
+    # 4) Fallback: closest (sum of absolute differences) within a small error
     best_path = None
-    best_err  = 1.0      # reject if error > 0.01 in z
-    for (zh_str, zl_str), fp in fits_index.items():
-        try:
-            err = abs(float(zh_str) - z_hi) + abs(float(zl_str) - z_lo)
-            if err < best_err:
-                best_err  = err
-                best_path = fp
-        except ValueError:
-            pass
-
+    best_err = 1.0
+    for zh, zl, fp in entries:
+        err = abs(zh - z_hi) + abs(zl - z_lo)
+        if err < best_err:
+            best_err = err
+            best_path = fp
     if best_err < 1e-3:
         return best_path
+
     return None
+
+
+def _safe_write_map(path: Path, m: np.ndarray) -> None:
+    """Write a HEALPix map to `path` handling older healpy APIs.
+
+    Accepts `m` as a numpy array; ensures the file is written and
+    overwrites existing files if necessary.
+    """
+    try:
+        hp.write_map(str(path), m.astype(np.float32), overwrite=True)
+    except TypeError:
+        # Older healpy versions may not support `overwrite` kwarg
+        if path.exists():
+            path.unlink()
+        hp.write_map(str(path), m.astype(np.float32))
 
 
 if __name__ == "__main__":
