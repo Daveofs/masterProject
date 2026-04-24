@@ -4,7 +4,7 @@
 #SBATCH --partition=normal
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
-#SBATCH --cpus-per-task=288
+#SBATCH --cpus-per-task=200
 #SBATCH --array=1
 #SBATCH --time=12:00:00
 #SBATCH --output=/capstor/scratch/cscs/damrein/outputs/logs/pkdgrav/pkdgrav_%A_%a.out
@@ -47,8 +47,7 @@ MPI_RANKS="${SLURM_NTASKS:-1}"
 
 start_time=$(date +%s)
 echo "[$(date +'%Y-%m-%dT%H:%M:%S%z')] Starting srun (cosmo=${COSMO_ID}, run=${RUN_ID}, mpiranks=${MPI_RANKS}, cpus/task=${SLURM_CPUS_PER_TASK:-1})"
-# Use --mpi=pmi2 because pkdgrav3 is built against PMI1/2, not PMIx.
-#srun --mpi=pmi2 -n "${MPI_RANKS}" --cpu_bind=cores "${PKDGRAV_BIN}" "${PARAM_FILE}"
+#srun --mpi=pmix -n "${MPI_RANKS}" --cpu_bind=cores "${PKDGRAV_BIN}" "${PARAM_FILE}"
 srun "${PKDGRAV_BIN}" "${PARAM_FILE}"
 rc=$?
 end_time=$(date +%s)

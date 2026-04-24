@@ -216,7 +216,10 @@ def _get_jax_shell_kernel():
 
     import jax
     import jax.numpy as jnp
-
+    """
+    jax.jit compiles a Python function into an XLA (accelerated linear algebra) executable producing optimized device code.
+    Optimal for GPU usage.
+    """
     @partial(jax.jit, static_argnames=['nside', 'npix', 'interpolate'])
     def _kernel(X0, X1, d, r_lo, r_hi, nside, npix, interpolate):
         """
@@ -343,6 +346,7 @@ def _get_jax_shell_fori_kernel():
             weights   = mask.astype(jnp.float32)
             return shell.at[safe_pix].add(weights)
 
+        # Will execute the body in a single XLA kernel that iterates over replicas
         return jax.lax.fori_loop(
             jnp.int32(0), n_active, body,
             jnp.zeros(npix, dtype=jnp.float32),
