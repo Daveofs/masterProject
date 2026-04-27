@@ -30,10 +30,29 @@ PY_SCRIPT=/users/damrein/masterProject/tools/plot_pixel_histogram.py
 # shell 34 z~[0.720, 0.780]
 # shell 51 z~[1.540, 1.650]
 # shell 68 z~[3.351, 3.500]
-SHELL_INDICES="0 17 34 51 68"
+SHELL_INDICES="60 61 62 63 64 65 66 67 68"
 
 # Number of histogram bins
 NBINS=3000
+
+# Cosmology (units: Omega_m, h). Particle masses are inferred per-shell from NPZ.
+# Edit these values to match the simulation cosmology.
+OMEGA_M=0.3
+H0_H=0.73
+FSKY=1.0
+
+# Optional box parameters (set these to enable M_box calculation)
+# Lbox in comoving Mpc, res is particles per axis (res^3 = total particles)
+LBOX_DISCO="900"      # e.g. 1000.0
+RES_DISCO="832"       # e.g. 1024
+LBOX_COSMOGRID="900"  # e.g. 1000.0
+RES_COSMOGRID="832"   # e.g. 1024
+
+# Require box parameters to be set by the user; these are needed to compute per-particle mass
+if [[ -z "${LBOX_DISCO}" || -z "${RES_DISCO}" || -z "${LBOX_COSMOGRID}" || -z "${RES_COSMOGRID}" ]]; then
+    echo "[ERROR] Please set LBOX_DISCO, RES_DISCO, LBOX_COSMOGRID, and RES_COSMOGRID at the top of this script before running." >&2
+    exit 2
+fi
 
 # ---------------------------------------------------------------------------
 # Environment
@@ -66,11 +85,29 @@ echo "  Shells:      ${SHELL_INDICES}"
 echo "  Bins:        ${NBINS}"
 
 # shellcheck disable=SC2086
-python "${PY_SCRIPT}" \
+PY_CMD=("${PY_SCRIPT}" \
     --disco      "${DISCO_FILE}" \
     --cosmogrid  "${COSMOGRID_FILE}" \
     --out-dir    "${OUT_DIR}" \
     --shells     ${SHELL_INDICES} \
-    --nbins      "${NBINS}"
+    --nbins      "${NBINS}" \
+    --omega-m    "${OMEGA_M}" \
+    --h          "${H0_H}" \
+    --fsky       "${FSKY}")
+
+if [[ -n "${LBOX_DISCO}" ]]; then
+    PY_CMD+=(--lbox-disco "${LBOX_DISCO}")
+fi
+if [[ -n "${RES_DISCO}" ]]; then
+    PY_CMD+=(--res-disco "${RES_DISCO}")
+fi
+if [[ -n "${LBOX_COSMOGRID}" ]]; then
+    PY_CMD+=(--lbox-cosmogrid "${LBOX_COSMOGRID}")
+fi
+if [[ -n "${RES_COSMOGRID}" ]]; then
+    PY_CMD+=(--res-cosmogrid "${RES_COSMOGRID}")
+fi
+
+python "${PY_CMD[@]}"
 
 echo "[$(date --iso-8601=seconds)] Done. Plots written to ${OUT_DIR}"
