@@ -13,7 +13,7 @@ PROJECT_DIR="${SCRIPT_DIR}"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 
 PYTHON_BIN_DEFAULT="${REPO_ROOT}/vir_env/bin/python"
-INPUT_FILE_DEFAULT="/Users/david/projects/outputs/shells/CosmoML-shell_z-high=0.109878_z-low=0.fits"
+INPUT_FILE_DEFAULT="/Users/david/projects/outputs/pkdgrav_local/CosmoML-shell_z-high=0.6426387_z-low=0.6148941.fits"
 #INPUT_FILE_DEFAULT="/Users/david/projects/outputs/pkdgrav_local/CosmoML-shell_z-high=0.1358373_z-low=0.1211429.fits"
 OUTPUT_DIR_DEFAULT="${REPO_ROOT}/outputs/plots/shells"
 
@@ -22,8 +22,8 @@ INPUT_FILE="${INPUT_FILE:-${INPUT_FILE_DEFAULT}}"
 OUTPUT_DIR="${OUTPUT_DIR:-${OUTPUT_DIR_DEFAULT}}"
 
 ZBIN="${ZBIN:-10}"
-NSIDE="${NSIDE:-512}"
-NAME_SUFFIX="${NAME_SUFFIX:-cosmoml_fits_0.109-0.0}"
+NSIDE="${NSIDE:-128}"
+NAME_SUFFIX="${NAME_SUFFIX:-pkdgrav_shell}"
 PLOT_LOG="${PLOT_LOG:-true}"
 
 if [[ ! -x "${PYTHON_BIN}" ]]; then
