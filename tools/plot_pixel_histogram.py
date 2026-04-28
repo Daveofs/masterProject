@@ -80,23 +80,11 @@ def plot_shell_histogram(
 # Cosmology & mass helpers
 # ---------------------------------------------------------------------------
 def comoving_distance_mpc(z, omega_m: float, h: float, n_samples: int = 2000) -> float:
-    """Return comoving radial distance in Mpc for redshift z (scalar) assuming flat LCDM.
-    Prefer astropy if available, otherwise do a numeric integral."""
-    try:
-        from astropy.cosmology import FlatLambdaCDM
-        cosmo = FlatLambdaCDM(H0=100.0 * h, Om0=omega_m)
-        # astropy handles array/scalar cases; ensure scalar out
-        return float(cosmo.comoving_distance(z).value)
-    except Exception:
-        z = float(z)
-        if z == 0.0:
-            return 0.0
-        zgrid = np.linspace(0.0, z, max(3, n_samples))
-        Ez = np.sqrt(omega_m * (1.0 + zgrid) ** 3 + (1.0 - omega_m))
-        integral = np.trapz(1.0 / Ez, zgrid)
-        c_km_s = 299792.458
-        H0_km_s_Mpc = 100.0 * h
-        return float(c_km_s / H0_km_s_Mpc * integral)
+    """Return comoving radial distance in Mpc for redshift z (scalar) assuming flat LCDM."""
+    from astropy.cosmology import FlatLambdaCDM
+    cosmo = FlatLambdaCDM(H0=100.0 * h, Om0=omega_m)
+    # astropy handles array/scalar cases; ensure scalar out
+    return float(cosmo.comoving_distance(z).value)
 
 
 def rho_crit0_msun_per_mpc3(h: float) -> float:
@@ -116,7 +104,6 @@ def rho_crit0_msun_per_mpc3(h: float) -> float:
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
-
 def main():
     parser = argparse.ArgumentParser(
         description="Plot pixel count histograms: DISCO vs CosmoGridV1"
@@ -140,6 +127,8 @@ def main():
                         help="Box side length for CosmoGridV1 (comoving), in Mpc. REQUIRED.")
     parser.add_argument("--res-cosmogrid", dest="res_cosmogrid", type=int, required=True,
                         help="Particle resolution per axis for CosmoGridV1 (i.e. res^3 = total number of particles). REQUIRED.")
+    parser.add_argument("--lbox-units", dest="lbox_units", choices=["Mpc","Mpc/h"], default="Mpc/h",
+                        help="Units for --lbox-* (default: 'Mpc/h' = comoving h^-1 Mpc).")
     parser.add_argument("--fsky",     type=float, default=1.0,
                         help="Sky fraction (0-1) for computing comoving shell volume (default: 1.0)")
     args = parser.parse_args()
@@ -165,11 +154,19 @@ def main():
             "per-particle mass is computed as Omega_m * rho_crit0 * (Lbox^3/res^3)."
         )
 
-    cell_vol_d = float(args.lbox_disco) ** 3 / float(args.res_disco) ** 3
-    cell_vol_c = float(args.lbox_cosmogrid) ** 3 / float(args.res_cosmogrid) ** 3
+    # Convert Lbox to physical Mpc if necessary. Default input units are 'Mpc/h'.
+    if args.lbox_units == "Mpc/h":
+        Lbox_d_mpc = float(args.lbox_disco) / h
+        Lbox_c_mpc = float(args.lbox_cosmogrid) / h
+    else:
+        Lbox_d_mpc = float(args.lbox_disco)
+        Lbox_c_mpc = float(args.lbox_cosmogrid)
+
+    cell_vol_d = (Lbox_d_mpc ** 3) / float(args.res_disco) ** 3
+    cell_vol_c = (Lbox_c_mpc ** 3) / float(args.res_cosmogrid) ** 3
     mpart_d = omega_m * rho_crit0 * cell_vol_d
     mpart_c = omega_m * rho_crit0 * cell_vol_c
-    print(f"  Computed per-particle mass (Msun): DISCO={mpart_d:.6g}  CosmoGridV1={mpart_c:.6g}")
+    print(f"  Computed per-particle mass (Msun): DISCO={mpart_d:.6g}  CosmoGridV1={mpart_c:.6g}  (Lbox units: {args.lbox_units})")
 
     n_shells = shells_d.shape[0]
     npix     = shells_d.shape[1]
@@ -240,11 +237,22 @@ def main():
             note_d = "(from Lbox/res)"
             note_c = "(from Lbox/res)"
             mass_line = (
-                f"\nTheory: M={M_theory:.3e}; "
-                f"DISCO M={Mpart_d:.3e} (ratio={Mpart_d/M_theory:.3f}); "
-                f"CosmoGrid M={Mpart_c:.3e} (ratio={Mpart_c/M_theory:.3f})"
+                f"\nTheory: M={M_theory:.3e} Msun; "
+                f"DISCO M={Mpart_d:.3e} Msun (ratio={Mpart_d/M_theory:.3f}); "
+                f"CosmoGrid M={Mpart_c:.3e} Msun (ratio={Mpart_c/M_theory:.3f})"
             )
             print(f"  Shell {idx}: M_theory={M_theory:.6g} Msun  DISCO M={Mpart_d:.6g} Msun  CosmoGrid M={Mpart_c:.6g} Msun")
+            # Expected particle counts from uniform sampling of box
+            if cell_vol_d > 0:
+                expected_N_d = V_shell / cell_vol_d
+            else:
+                expected_N_d = float('nan')
+            if cell_vol_c > 0:
+                expected_N_c = V_shell / cell_vol_c
+            else:
+                expected_N_c = float('nan')
+            print(f"    Expected N (DISCO) = {expected_N_d:.0f}, observed N = {Ntot_d:.0f}, obs/exp = {Ntot_d/expected_N_d if expected_N_d>0 else float('nan'):.6g}")
+            print(f"    Expected N (CosmoGrid) = {expected_N_c:.0f}, observed N = {Ntot_c:.0f}, obs/exp = {Ntot_c/expected_N_c if expected_N_c>0 else float('nan'):.6g}")
         else:
             print(f"  Shell {idx}: Mass comparison skipped (no particle mass available and zero counts)")
 

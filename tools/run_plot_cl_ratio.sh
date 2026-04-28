@@ -30,7 +30,7 @@ PY_SCRIPT=/users/damrein/masterProject/tools/plot_cl_ratio.py
 # shell 34 z~[0.720, 0.780]
 # shell 51 z~[1.540, 1.650]
 # shell 68 z~[3.351, 3.500]
-SHELL_INDICES="0 17 34 51 68"
+SHELL_INDICES="10 11 12 13 14 15 16 17 18 19 20"
 
 # Maximum multipole (default: 3*2048-1 = 6143, can reduce for speed)
 LMAX=3000

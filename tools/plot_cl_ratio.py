@@ -296,6 +296,7 @@ def main():
         axes[1].axhline(1.0, color="k", lw=0.8, linestyle="--")
         axes[1].set_xlabel(r"Multipole $\ell$", fontsize=12)
         axes[1].set_ylabel(r"$C_\ell^{\rm DISCO}\,/\,C_\ell^{\rm CosmoGrid}$", fontsize=12)
+        axes[1].set_ylim(0.0, 2.0) # fixed y-limits for ratio plot
         axes[1].grid(True, which="both", alpha=0.3)
 
         # Scale vertical lines on both panels

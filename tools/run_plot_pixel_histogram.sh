@@ -30,19 +30,20 @@ PY_SCRIPT=/users/damrein/masterProject/tools/plot_pixel_histogram.py
 # shell 34 z~[0.720, 0.780]
 # shell 51 z~[1.540, 1.650]
 # shell 68 z~[3.351, 3.500]
-SHELL_INDICES="60 61 62 63 64 65 66 67 68"
+SHELL_INDICES="10 11 12 13 14 15 16 17 18 19 20"
 
 # Number of histogram bins
-NBINS=3000
+NBINS=100
 
-# Cosmology (units: Omega_m, h). Particle masses are inferred per-shell from NPZ.
+# Cosmology (units: Omega_m, h). Particle masses are computed from Lbox/res.
 # Edit these values to match the simulation cosmology.
 OMEGA_M=0.3
 H0_H=0.73
 FSKY=1.0
 
 # Optional box parameters (set these to enable M_box calculation)
-# Lbox in comoving Mpc, res is particles per axis (res^3 = total particles)
+# Lbox in comoving Mpc/h (h^-1 Mpc). The Python script assumes these units by default.
+# res is particles per axis (res^3 = total particles)
 LBOX_DISCO="900"      # e.g. 1000.0
 RES_DISCO="832"       # e.g. 1024
 LBOX_COSMOGRID="900"  # e.g. 1000.0
