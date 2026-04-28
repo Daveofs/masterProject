@@ -145,6 +145,8 @@ def main():
     parser.add_argument("--res-pm",    type=int, default=None,
                         help="PM grid resolution (number of cells per side). "
                              "Grid cell size = Lbox/res_pm is shown on Cl plots.")
+    parser.add_argument("--disco-1664", dest="disco_1664", default=None,
+                        help="Optional second DISCO shells NPZ to compare against (default: None).")
     args = parser.parse_args()
 
     os.makedirs(args.out_dir, exist_ok=True)
@@ -153,6 +155,8 @@ def main():
     shells_d, info_d = load_shells(args.disco)
     print(f"Loading CosmoGridV1 shells from: {args.cosmogrid}")
     shells_c, info_c = load_shells(args.cosmogrid)
+    print(f"Loading DISCO 1664 shells from:  {args.disco_1664}")
+    shells_d1664, info_d1664 = load_shells(args.disco_1664)
 
     n_shells = shells_d.shape[0]
     npix     = shells_d.shape[1]
@@ -201,15 +205,20 @@ def main():
 
         cl_d = compute_cl(shells_d[idx], lmax)
         cl_c = compute_cl(shells_c[idx], lmax)
+        cl_d1664 = compute_cl(shells_d1664[idx], lmax)
 
-        # Avoid division by zero
+        # Avoid division by zero and plot DISCO, DISCO_1664 (if present), and CosmoGrid
         with np.errstate(divide="ignore", invalid="ignore"):
             ratio = np.where(cl_c != 0, cl_d / cl_c, np.nan)
+            ratio1664 = np.where(cl_c != 0, cl_d1664 / cl_c, np.nan)
 
         ax_cl.plot(ells, cl_d, color=color, lw=1.0, label=f"DISCO  {label}")
+        ax_cl.plot(ells, cl_d1664, color=color, lw=1.0, linestyle=":", alpha=0.9,
+                   label=f"DISCO_1664 {label}")
         ax_cl.plot(ells, cl_c, color=color, lw=1.0, linestyle="--", alpha=0.6)
 
         ax_ratio.plot(ells, ratio, color=color, lw=1.0, label=label)
+        ax_ratio.plot(ells, ratio1664, color=color, lw=1.0, linestyle=":" , label=f"{label} (1664)")
 
         # Per-shell scale lines on summary plots (subtle dotted, shell colour)
         chi = float(info_d[idx]["shell_com"])
@@ -274,14 +283,17 @@ def main():
 
         cl_d = compute_cl(shells_d[idx], lmax)
         cl_c = compute_cl(shells_c[idx], lmax)
+        cl_d1664 = compute_cl(shells_d1664[idx], lmax)
 
         with np.errstate(divide="ignore", invalid="ignore"):
             ratio = np.where(cl_c != 0, cl_d / cl_c, np.nan)
+            ratio1664 = np.where(cl_c != 0, cl_d1664 / cl_c, np.nan) if cl_d1664 is not None else None
 
         fig, axes = plt.subplots(2, 1, figsize=(10, 8), sharex=True)
 
-        axes[0].plot(ells, cl_d, label="DISCO",        lw=1.2, color="steelblue")
-        axes[0].plot(ells, cl_c, label="CosmoGridV1",  lw=1.2, color="tomato", linestyle="--")
+        axes[0].plot(ells, cl_d, label="DISCO", lw=1.2, color="steelblue")
+        axes[0].plot(ells, cl_d1664, label="DISCO_1664", lw=1.2, color="seagreen", linestyle=":")
+        axes[0].plot(ells, cl_c, label="CosmoGridV1", lw=1.2, color="tomato", linestyle="--")
         axes[0].set_ylabel(r"$C_\ell$", fontsize=12)
         axes[0].set_yscale("log")
         _grid_str = f"  |  grid={grid_size:.3f} cMpc/h" if grid_size is not None else ""
@@ -289,10 +301,12 @@ def main():
             f"Shell {idx}  |  z = [{z_lo:.4f}, {z_hi:.4f}]  |  nside={nside}{_grid_str}",
             fontsize=12
         )
-        axes[0].legend(fontsize=10)
+        axes[0].legend(fontsize=9)
         axes[0].grid(True, which="both", alpha=0.3)
 
-        axes[1].plot(ells, ratio, lw=1.2, color="darkorchid")
+        # Ratio panel: show DISCO / CosmoGrid (and DISCO_1664 / CosmoGrid if present)
+        axes[1].plot(ells, ratio, lw=1.2, color="darkorchid", label="DISCO / CosmoGrid")
+        axes[1].plot(ells, ratio1664, lw=1.2, color="midnightblue", linestyle=":", label="DISCO_1664 / CosmoGrid")
         axes[1].axhline(1.0, color="k", lw=0.8, linestyle="--")
         axes[1].set_xlabel(r"Multipole $\ell$", fontsize=12)
         axes[1].set_ylabel(r"$C_\ell^{\rm DISCO}\,/\,C_\ell^{\rm CosmoGrid}$", fontsize=12)
