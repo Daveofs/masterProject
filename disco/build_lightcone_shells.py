@@ -417,9 +417,11 @@ class LightconeShellBuilder:
                          pos_curr: np.ndarray,
                          a_prev: float,
                          a_curr: float,
-                         r_lo_override: float | None = None,
-                         r_hi_override: float | None = None,
-                         verbose: bool = True) -> np.ndarray:
+                        r_lo_override: float | None = None,
+                        r_hi_override: float | None = None,
+                        verbose: bool = True,
+                        vel_prev: np.ndarray | None = None,
+                        vel_curr: np.ndarray | None = None) -> np.ndarray:
         """
         Compute a single HEALPix shell map from two consecutive snapshots.
 
@@ -458,6 +460,12 @@ class LightconeShellBuilder:
         t_cast = time()
         X0 = pos_prev.astype(np.float32, copy=False) - obs.astype(np.float32)
         X1 = pos_curr.astype(np.float32, copy=False) - obs.astype(np.float32)
+        # Optional snapshot velocities (CPU path only)
+        if vel_prev is not None and vel_curr is not None:
+            V0 = vel_prev.astype(np.float32, copy=False)
+            V1 = vel_curr.astype(np.float32, copy=False)
+        else:
+            V0 = V1 = None
         n_part = X0.shape[0]
         csize = max(1, self.particle_chunk_size)
         n_chunks = int(np.ceil(n_part / csize))
@@ -524,7 +532,14 @@ class LightconeShellBuilder:
                         p_prev = s0
 
                         seg_r0 = X0_i + delta * s0
-                        seg_r1 = X0_i + delta * s1
+                        # If velocities supplied, use average velocity to predict segment endpoint
+                        if V0 is not None and V1 is not None:
+                            v0 = V0[i]
+                            v1 = V1[i]
+                            v_avg = 0.5 * (v0 + v1)
+                            seg_r1 = seg_r0 + v_avg * seg_frac
+                        else:
+                            seg_r1 = X0_i + delta * s1
 
                         R0_rep = seg_r0 + d_vec
                         R1_rep = seg_r1 + d_vec

@@ -23,7 +23,7 @@ OUTPUT_DIR="${OUTPUT_DIR:-${OUTPUT_DIR_DEFAULT}}"
 
 ZBIN="${ZBIN:-10}"
 NSIDE="${NSIDE:-128}"
-NAME_SUFFIX="${NAME_SUFFIX:-own_pkdgrav_best_interpolation_old_cosmo}"
+NAME_SUFFIX="${NAME_SUFFIX:-own_pkdgrav_vel}"
 PLOT_LOG="${PLOT_LOG:-true}"
 
 if [[ ! -x "${PYTHON_BIN}" ]]; then

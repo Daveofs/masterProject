@@ -163,9 +163,44 @@ def main() -> None:
     )
     print(f"Cosmology: {cosmo_dict}")
 
-    # Minimal DiscoDJ (res=2 → 8 particles, only used to get cosmo object)
-    dj_tmp = DiscoDJ(dim=3, res=2, boxsize=args.boxsize, cosmo=cosmo_dict)
-    chi_of_a, _ = make_chi_of_a(dj_tmp.cosmo)
+    # Build a lightweight chi(a) interpolant directly from cosmological parameters.
+    # This avoids importing/instantiating DiscoDJ and its heavy timetables.
+    def _make_chi_of_a_from_params(cosmo_params, n_table: int = 1000):
+        Om_c = float(cosmo_params["Omega_c"])
+        Om_b = float(cosmo_params["Omega_b"])
+        h = float(cosmo_params["h"])
+        Omega_k = float(cosmo_params.get("Omega_k", 0.0))
+        w0 = float(cosmo_params.get("w0", -1.0))
+        wa = float(cosmo_params.get("wa", 0.0))
+        Om_m = Om_c + Om_b
+        Om_de = 1.0 - Om_m - Omega_k
+
+        def E(a):
+            return np.sqrt(Om_m * a ** -3 + Omega_k * a ** -2 +
+                           Om_de * a ** (-3 * (1 + w0 + wa)) * np.exp(-3 * wa * (1 - a)))
+
+        a_table = np.linspace(1e-6, 1.0, n_table)
+        f = 1.0 / (E(a_table) * a_table ** 2)
+        da = np.diff(a_table)
+        mid = 0.5 * (f[:-1] + f[1:])
+        # cumulative integral from a -> 1 using trapezoids (matches compute_conformalt)
+        rev = np.concatenate(([0.0], (da * mid)[::-1]))
+        conformal = -np.cumsum(rev)[::-1]
+        chi_table = 2997.92458 * np.abs(conformal)
+
+        def chi_of_a(a):
+            a_arr = np.atleast_1d(a)
+            chi_arr = np.interp(a_arr, a_table, chi_table, left=chi_table[0], right=0.0)
+            return float(chi_arr) if np.isscalar(a) else chi_arr
+
+        def a_of_chi(chi):
+            chi_arr = np.atleast_1d(chi)
+            a_arr = np.interp(chi_arr, chi_table[::-1], a_table[::-1], left=a_table[0], right=1.0)
+            return float(a_arr) if np.isscalar(chi) else a_arr
+
+        return chi_of_a, a_of_chi
+
+    chi_of_a, _ = _make_chi_of_a_from_params(cosmo_dict, n_table=2000)
 
     chi_max_lc = float(chi_of_a(1.0 / (1.0 + args.z_max)))
     print(f"chi(z_max={args.z_max}) = {chi_max_lc:.1f} Mpc/h\n")
@@ -237,6 +272,8 @@ def main() -> None:
         p_data, hdr = read_tipsy(str(snap_files[step_i]), args.boxsize)
         a_curr = float(hdr['a'])
         pos_curr = np.stack([p_data['x'], p_data['y'], p_data['z']], axis=1)
+        # also read snapshot velocities (tipsy fields 'vx','vy','vz')
+        vel_curr = np.stack([p_data['vx'], p_data['vy'], p_data['vz']], axis=1).astype(np.float32)
         del p_data
 
         # pkdgrav3 corner-origin → DISCO box-centre-origin (same as _load_external_ics)
@@ -247,6 +284,8 @@ def main() -> None:
             print(f"Step {step_i:3d}: a={a_curr:.6f}  z={1/a_curr-1:.4f}  "
                   f"read in {t_read:.1f}s  [IC / no comparison]")
             pos_prev = pos_curr
+            # initialize previous velocities for the sliding window
+            vel_prev = vel_curr
             a_prev   = a_curr
             continue
 
@@ -262,6 +301,7 @@ def main() -> None:
         if r_lo >= chi_max_lc:
             print("  [pre-lightcone]")
             pos_prev = pos_curr
+            vel_prev = vel_curr
             a_prev   = a_curr
             continue
 
@@ -270,6 +310,7 @@ def main() -> None:
         if fits_path is None:
             print("  [no FITS match — skipping comparison]")
             pos_prev = pos_curr
+            vel_prev = vel_curr
             a_prev   = a_curr
             continue
 
@@ -312,9 +353,17 @@ def main() -> None:
         # ── Run LightconeShellBuilder (unchanged from production) ─────────
         t_build = time()
         if args.no_gpu:
+            # Convert snapshot velocities to builder units (match sim loader conversion)
+            # Use a_prev/a_curr for prev/curr velocities respectively
+            vfac_prev = (a_prev ** 2 / np.sqrt(8 * np.pi / 3.0)) * args.boxsize
+            vfac_curr = (a_curr ** 2 / np.sqrt(8 * np.pi / 3.0)) * args.boxsize
+            vel_prev_conv = vel_prev.astype(np.float32) * vfac_prev
+            vel_curr_conv = vel_curr.astype(np.float32) * vfac_curr
+
             m_built = builder.accumulate_shell(
                 pos_prev, pos_curr, a_prev, a_curr,
                 r_lo_override=r_lo, r_hi_override=r_hi,
+                vel_prev=vel_prev_conv, vel_curr=vel_curr_conv,
             )
         else:
             # Pass numpy arrays directly — accumulate_shell_jax handles the
@@ -435,6 +484,7 @@ def main() -> None:
 
         # Slide window: release prev, promote curr to prev
         pos_prev = pos_curr
+        vel_prev = vel_curr
         a_prev   = a_curr
 
     # ── Summary ───────────────────────────────────────────────────────────
