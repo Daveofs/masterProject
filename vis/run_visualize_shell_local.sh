@@ -13,7 +13,7 @@ PROJECT_DIR="${SCRIPT_DIR}"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 
 PYTHON_BIN_DEFAULT="${REPO_ROOT}/vir_env/bin/python"
-INPUT_FILE_DEFAULT="/Users/david/projects/outputs/pkdgrav_local/CosmoML-shell_z-high=0.6426387_z-low=0.6148941.fits"
+INPUT_FILE_DEFAULT="/Users/david/projects/outputs/plots/shell_builder_validation/built_maps/CosmoML-built-shell_step=00104_z-high=0.7010866_z-low=0.6713487.fits"
 #INPUT_FILE_DEFAULT="/Users/david/projects/outputs/pkdgrav_local/CosmoML-shell_z-high=0.1358373_z-low=0.1211429.fits"
 OUTPUT_DIR_DEFAULT="${REPO_ROOT}/outputs/plots/shells"
 
@@ -23,7 +23,7 @@ OUTPUT_DIR="${OUTPUT_DIR:-${OUTPUT_DIR_DEFAULT}}"
 
 ZBIN="${ZBIN:-10}"
 NSIDE="${NSIDE:-128}"
-NAME_SUFFIX="${NAME_SUFFIX:-pkdgrav_shell}"
+NAME_SUFFIX="${NAME_SUFFIX:-own_pkdgrav_best_interpolation_old_cosmo}"
 PLOT_LOG="${PLOT_LOG:-true}"
 
 if [[ ! -x "${PYTHON_BIN}" ]]; then

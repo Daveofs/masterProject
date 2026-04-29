@@ -24,7 +24,7 @@ OUTPUT_DIR="${OUTPUT_DIR:-${REPO_ROOT}/outputs/plots/shell_builder_validation}"
 VENV_DIR="${VENV_DIR:-${REPO_ROOT}/vir_env}"
 
 SNAP_PREFIX="${SNAP_PREFIX:-CosmoML}"
-NSIDE="${NSIDE:-512}"        # 512 for speed; 2048 for full-resolution check
+NSIDE="${NSIDE:-2048}"        # 512 for speed; 2048 for full-resolution check
 Z_MAX="${Z_MAX:-3.5}"
 BOXSIZE="${BOXSIZE:-900.0}"
 
@@ -93,6 +93,7 @@ echo ""
     --nside       "${NSIDE}"       \
     --output-dir  "${OUTPUT_DIR}"  \
     --z-max       "${Z_MAX}"       \
+    --no-gpu
     ${GPU_FLAG}   "$@"
 
 echo ""

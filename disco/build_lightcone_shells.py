@@ -46,6 +46,7 @@ from time import time
 
 import numpy as np
 import healpy as hp
+import math
 
 
 # ---------------------------------------------------------------------------
@@ -472,58 +473,90 @@ class LightconeShellBuilder:
         t_healpix = 0.0
         n_particles_placed = 0
 
+         # Reproduce PKDGRAV behaviour: split each particle's drift at
+        # periodic-cell boundary crossings (up to 4 segments) and apply
+        # the same scalar-magnitude interpolation per-segment. This
+        # avoids subtle errors when a particle crosses boundaries.
+        box_half = self.L / 2.0
+        eps = 1e-12
+
         for rep_idx, d in enumerate(self._rep_offsets):
             # Fast reject using replica radial bounds.
             if r_hi < self._rep_rmin[rep_idx] or r_lo > self._rep_rmax[rep_idx]:
                 continue
             n_rep_kept += 1
-
+            
+            d_vec = d.astype(np.float64)
             for i0 in range(0, n_part, csize):
                 i1 = min(i0 + csize, n_part)
-                R0 = X0[i0:i1] + d
-                R1 = X1[i0:i1] + d
+                
+                for i in range(i0, i1):
+                    X0_i = X0[i]
+                    X1_i = X1[i]
+                    # minimal-image displacement for this particle
+                    delta = X1_i - X0_i
+                    for jj in range(3):
+                        if delta[jj] > box_half:
+                            delta[jj] -= self.L
+                        elif delta[jj] < -box_half:
+                            delta[jj] += self.L
 
-                _t = time()
-                r0 = np.sqrt(np.sum(R0 * R0, axis=1, dtype=np.float32))
-                r1 = np.sqrt(np.sum(R1 * R1, axis=1, dtype=np.float32))
-                t_r_sq += time() - _t
+                    # split at boundary-crossing fractions
+                    s_points = [0.0, 1.0]
+                    for jj in range(3):
+                        if abs(delta[jj]) <= eps:
+                            continue
+                        if delta[jj] > 0.0:
+                            s_cross = (box_half - X0_i[jj]) / delta[jj]
+                        else:
+                            s_cross = (-box_half - X0_i[jj]) / delta[jj]
+                        if s_cross > eps and s_cross < 1.0 - eps:
+                            s_points.append(s_cross)
+                    s_points = sorted(set(s_points))
 
-                # A trajectory contributes if its radius interval overlaps shell.
-                _t = time()
-                r_min = np.minimum(r0, r1)
-                r_max = np.maximum(r0, r1)
-                mask = (r_max >= r_lo) & (r_min < r_hi)
-                t_mask += time() - _t
-                if not np.any(mask):
-                    continue
+                    # process each sub-segment exactly like PKDGRAV
+                    for si in range(len(s_points) - 1):
+                        s0 = s_points[si]
+                        s1 = s_points[si + 1]
+                        seg_frac = s1 - s0
+                        if seg_frac <= 0.0:
+                            continue
+                        p_prev = s0
 
-                _t = time()
-                if self.interpolate:
-                    r0_m = r0[mask]
-                    r1_m = r1[mask]
-                    R0_m = R0[mask]
-                    R1_m = R1[mask]
+                        seg_r0 = X0_i + delta * s0
+                        seg_r1 = X0_i + delta * s1
 
-                    denom = r0_m - r1_m
-                    safe_denom = np.where(np.abs(denom) > 1e-10, denom, 1e-10)
-                    t_hi = np.clip((r_hi - r0_m) / safe_denom, 0.0, 1.0).astype(np.float32)
-                    direction = (1.0 - t_hi[:, None]) * R0_m + t_hi[:, None] * R1_m
-                else:
-                    direction = 0.5 * (R0[mask] + R1[mask])
-                t_interp += time() - _t
+                        R0_rep = seg_r0 + d_vec
+                        R1_rep = seg_r1 + d_vec
 
-                # healpy's vector form is generally faster than angle conversion.
-                _t = time()
-                pix = hp.vec2pix(
-                    self.nside,
-                    direction[:, 0],
-                    direction[:, 1],
-                    direction[:, 2],
-                    nest=False,
-                )
-                shell_map += np.bincount(pix, minlength=self.npix).astype(np.float32, copy=False)
-                t_healpix += time() - _t
-                n_particles_placed += int(np.sum(mask))
+                        mr0_sq = float(R0_rep[0] * R0_rep[0] + R0_rep[1] * R0_rep[1] + R0_rep[2] * R0_rep[2])
+                        mr1_sq = float(R1_rep[0] * R1_rep[0] + R1_rep[1] * R1_rep[1] + R1_rep[2] * R1_rep[2])
+
+                        # squared light-front radii at segment start/end
+                        t0_seg = (r_hi - (r_hi - r_lo) * p_prev) ** 2
+                        t1_seg = (r_hi - (r_hi - r_lo) * (p_prev + seg_frac)) ** 2
+
+                        # overlap test (same as PKDGRAV's t1 <= max(mr0,mr1) && t0 >= min(mr0,mr1))
+                        if not (t1_seg <= max(mr0_sq, mr1_sq) and t0_seg >= min(mr0_sq, mr1_sq)):
+                            continue
+
+                        # distances
+                        r0_seg = math.sqrt(mr0_sq)
+                        r1_seg = math.sqrt(mr1_sq)
+
+                        # PKDGRAV interpolation fraction (scalar-magnitude linearisation)
+                        denom = (r1_seg - r0_seg) + (r_hi - r_lo) * seg_frac
+                        if abs(denom) <= eps:
+                            denom = eps
+                        vx = (r_hi - (r_hi - r_lo) * p_prev - r0_seg) / denom
+
+                        if vx >= 0.0 and vx < 1.0:
+                            vrx = (1.0 - vx) * R0_rep[0] + vx * R1_rep[0]
+                            vry = (1.0 - vx) * R0_rep[1] + vx * R1_rep[1]
+                            vrz = (1.0 - vx) * R0_rep[2] + vx * R1_rep[2]
+                            pix = hp.vec2pix(self.nside, vrx, vry, vrz, nest=False)
+                            shell_map[pix] += 1.0
+                            n_particles_placed += 1
 
         t_total = time() - t_acc_start
         if verbose:
