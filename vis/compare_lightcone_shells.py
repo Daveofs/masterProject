@@ -77,6 +77,7 @@ def plot_comparison(
     z_bin: int,
     output_dir: Path,
     plot_logarithmic: bool = False,
+    plot_counts: bool = False,
     vmin: float | None = None,
     vmax: float | None = None,
     name: str | None = None,
@@ -85,25 +86,45 @@ def plot_comparison(
     import matplotlib.pyplot as plt
 
     def prepare(m: np.ndarray) -> np.ndarray:
+        m = m.astype(np.float32)
+        if plot_counts:
+            if plot_logarithmic:
+                return np.log10(m)
+            return m
         m = to_overdensity(m)
         if plot_logarithmic:
             m = np.log10(1.01 + m)
         return m
 
     panels = []
+    disco_prep = None
+    cosmo_prep = None
     if m_disco_lc is not None:
         panels.append((prepare(m_disco_lc), "DISCO-DJ lightcone (particles)"))
     if m_disco_shells is not None:
-        panels.append((prepare(m_disco_shells), "DISCO-DJ shells"))
+        disco_prep = prepare(m_disco_shells)
+        panels.append((disco_prep, "DISCO-DJ shells"))
     if m_cosmo is not None:
-        panels.append((prepare(m_cosmo), "CosmoGrid compressed_shells"))
+        cosmo_prep = prepare(m_cosmo)
+        panels.append((cosmo_prep, "CosmoGrid compressed_shells"))
+
+    # If no lightcone is provided, also show the difference between DISCO and Cosmo
+    if m_disco_lc is None and disco_prep is not None and cosmo_prep is not None:
+        panels.append((disco_prep - cosmo_prep, "DISCO - Cosmo (disco - cosmo)"))
 
     n_panels = len(panels)
     if n_panels == 0:
         raise ValueError("No maps to plot.")
 
     title_suffix = f"z=[{lower_z:.4f},{upper_z:.4f}]  (bin {z_bin})"
-    scale_label = "log₁₀(1.01+δ)" if plot_logarithmic else "δ"
+    if plot_counts and plot_logarithmic:
+        scale_label = "log₁₀(counts)"
+    elif plot_counts:
+        scale_label = "counts"
+    elif plot_logarithmic:
+        scale_label = "log₁₀(1.01+δ)"
+    else:
+        scale_label = "δ"
 
     fig = plt.figure(figsize=(9 * n_panels, 6))
 
@@ -122,7 +143,14 @@ def plot_comparison(
         )
 
     output_dir.mkdir(parents=True, exist_ok=True)
-    tag = "log" if plot_logarithmic else "lin"
+    if plot_counts and plot_logarithmic:
+        tag = "counts_log"
+    elif plot_counts:
+        tag = "counts"
+    elif plot_logarithmic:
+        tag = "log"
+    else:
+        tag = "lin"
     default_name = f"compare_zbin{z_bin}_nside{nside}_{tag}.png"
     fname = (name if name else default_name)
     if not fname.lower().endswith(".png"):
@@ -144,6 +172,7 @@ def plot_separate(
     z_bin: int,
     output_dir: Path,
     plot_logarithmic: bool = False,
+    plot_counts: bool = False,
     vmin: float | None = None,
     vmax: float | None = None,
 ) -> list[Path]:
@@ -152,25 +181,52 @@ def plot_separate(
     import matplotlib.pyplot as plt
 
     def prepare(m: np.ndarray) -> np.ndarray:
+        m = m.astype(np.float32)
+        if plot_counts:
+            if plot_logarithmic:
+                return np.log10(m)
+            return m
         m = to_overdensity(m)
         if plot_logarithmic:
             m = np.log10(1.01 + m)
         return m
 
     panels = []
+    disco_prep = None
+    cosmo_prep = None
     if m_disco_lc is not None:
         panels.append((prepare(m_disco_lc), "disco_lc", "DISCO-DJ lightcone (particles)"))
     if m_disco_shells is not None:
-        panels.append((prepare(m_disco_shells), "disco_shells", "DISCO-DJ shells"))
+        disco_prep = prepare(m_disco_shells)
+        panels.append((disco_prep, "disco_shells", "DISCO-DJ shells"))
     if m_cosmo is not None:
-        panels.append((prepare(m_cosmo), "cosmo_shells", "CosmoGrid compressed_shells"))
+        cosmo_prep = prepare(m_cosmo)
+        panels.append((cosmo_prep, "cosmo_shells", "CosmoGrid compressed_shells"))
+
+    # If no lightcone is provided, also save the difference between DISCO and Cosmo
+    if m_disco_lc is None and disco_prep is not None and cosmo_prep is not None:
+        panels.append((disco_prep - cosmo_prep, "disco_minus_cosmo", "DISCO-DJ - CosmoGrid (disco - cosmo)"))
 
     if not panels:
         raise ValueError("No maps to plot.")
 
     title_suffix = f"z=[{lower_z:.4f},{upper_z:.4f}]  (bin {z_bin})"
-    scale_label = "log₁₀(1.01+δ)" if plot_logarithmic else "δ"
-    tag = "log" if plot_logarithmic else "lin"
+    if plot_counts and plot_logarithmic:
+        scale_label = "log₁₀(counts)"
+    elif plot_counts:
+        scale_label = "counts"
+    elif plot_logarithmic:
+        scale_label = "log₁₀(1.01+δ)"
+    else:
+        scale_label = "δ"
+    if plot_counts and plot_logarithmic:
+        tag = "counts_log"
+    elif plot_counts:
+        tag = "counts"
+    elif plot_logarithmic:
+        tag = "log"
+    else:
+        tag = "lin"
     output_dir.mkdir(parents=True, exist_ok=True)
 
     out_paths = []
@@ -307,8 +363,9 @@ def run(args: argparse.Namespace) -> None:
             z_bin=zb,
             output_dir=output_dir,
             plot_logarithmic=args.plot_logarithmic,
-            vmin=args.vmin if args.vmin is not None else None,
-            vmax=args.vmax if args.vmax is not None else None,
+            plot_counts=args.plot_counts,
+            vmin=args.vmin,
+            vmax=args.vmax,
         )
 
     print("\nDone.")
@@ -335,6 +392,8 @@ def _build_parser() -> argparse.ArgumentParser:
                    help="Directory to write comparison plots")
     p.add_argument("--plot-logarithmic", action="store_true",
                    help="Plot log10(1.01 + delta) instead of delta")
+    p.add_argument("--plot-counts", action="store_true",
+                   help="Plot raw counts instead of overdensity (1+δ)")
     p.add_argument("--vmin", type=float, default=None,
                    help="Colorbar minimum")
     p.add_argument("--vmax", type=float, default=None,

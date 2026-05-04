@@ -21,6 +21,7 @@ CONDA_ENV=disco-dj
 DISCO_FILE="/capstor/scratch/cscs/damrein/outputs/shells_with_4gpu_spread_trash_multi_node/shells_nside=2048.npz"
 DISCO_FILE_1664="/capstor/scratch/cscs/damrein/outputs/shells_res_pm_1664/shells_nside=2048.npz"
 COSMOGRID_FILE="${SCRATCH_DIR}/cosmogridv1/cosmo_000001/run_0/compressed_shells.npz"
+PARAMS_YML="${SCRATCH_DIR}/cosmogridv1/cosmo_000001/run_0/params.yml"
 OUT_DIR="${SCRATCH_DIR}/outputs/cl_ratio"
 
 PY_SCRIPT=/users/damrein/masterProject/tools/plot_cl_ratio.py
@@ -31,7 +32,7 @@ PY_SCRIPT=/users/damrein/masterProject/tools/plot_cl_ratio.py
 # shell 34 z~[0.720, 0.780]
 # shell 51 z~[1.540, 1.650]
 # shell 68 z~[3.351, 3.500]
-SHELL_INDICES="68"
+SHELL_INDICES="10"
 
 # Maximum multipole (default: 3*2048-1 = 6143, can reduce for speed)
 LMAX=3000
@@ -49,7 +50,7 @@ conda activate "${CONDA_ENV}"
 # ---------------------------------------------------------------------------
 # Validate inputs
 # ---------------------------------------------------------------------------
-for f in "${DISCO_FILE}" "${DISCO_FILE_1664}" "${COSMOGRID_FILE}" "${PY_SCRIPT}"; do
+for f in "${DISCO_FILE}" "${DISCO_FILE_1664}" "${COSMOGRID_FILE}" "${PARAMS_YML}" "${PY_SCRIPT}"; do
     if [[ ! -f "${f}" ]]; then
         echo "[ERROR] File not found: ${f}" >&2
         exit 2
@@ -63,6 +64,7 @@ echo "[$(date --iso-8601=seconds)] Starting Cl ratio computation"
 echo "  DISCO:      ${DISCO_FILE}"
 echo "  DISCO_1664: ${DISCO_FILE_1664}"
 echo "  CosmoGridV1: ${COSMOGRID_FILE}"
+echo "  Params YML: ${PARAMS_YML}"
 echo "  Output dir: ${OUT_DIR}"
 echo "  Shells:     ${SHELL_INDICES}"
 echo "  lmax:       ${LMAX}"
@@ -76,6 +78,7 @@ python "${PY_SCRIPT}" \
     --shells     ${SHELL_INDICES} \
     --lmax       "${LMAX}" \
     --lbox       900 \
-    --res-pm     1664
+    --res-pm     1664 \
+    --params-yml "${PARAMS_YML}"
 
 echo "[$(date --iso-8601=seconds)] Done. Plots written to ${OUT_DIR}"
