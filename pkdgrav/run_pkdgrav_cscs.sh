@@ -4,7 +4,7 @@
 #SBATCH --partition=normal
 #SBATCH --nodes=5
 #SBATCH --ntasks-per-node=1
-#SBATCH --cpus-per-task=200
+#SBATCH --cpus-per-task=50
 #SBATCH --array=1
 #SBATCH --time=12:00:00
 #SBATCH --output=/capstor/scratch/cscs/damrein/outputs/logs/pkdgrav/pkdgrav_%A_%a.out
@@ -32,10 +32,8 @@ fi
 
 # Map array task ID to zero-padded 6-digit cosmology index (1 -> 000001, 2 -> 000002, ...)
 COSMO_ID=$(printf '%06d' "${SLURM_ARRAY_TASK_ID}")
-OUTPUT_DIR=${SCRATCH_DIR}/outputs/ICs/cosmo_res16_${COSMO_ID}/run_${RUN_ID}
+OUTPUT_DIR=${SCRATCH_DIR}/outputs/ICs/cosmo_test_${COSMO_ID}/run_${RUN_ID}
 PARAM_FILE=${SCRATCH_DIR}/cosmogridv1/cosmo_${COSMO_ID}/run_${RUN_ID}/cosmology.par
-#OUTPUT_DIR=${SCRATCH_DIR}/outputs/pkdgrav/cosmo_fiducial_${COSMO_ID}/run_${RUN_ID}
-#PARAM_FILE=/capstor/scratch/cscs/damrein/cosmogridv1_fiducial/run_0000/cosmology.par
 
 mkdir -p "${OUTPUT_DIR}"
 cd "${OUTPUT_DIR}" # PKDGRAV writes output to the current directory, so cd there first
@@ -49,7 +47,7 @@ MPI_RANKS="${SLURM_NTASKS:-1}"
 
 start_time=$(date +%s)
 echo "[$(date +'%Y-%m-%dT%H:%M:%S%z')] Starting srun (cosmo=${COSMO_ID}, run=${RUN_ID}, mpiranks=${MPI_RANKS}, cpus/task=${SLURM_CPUS_PER_TASK:-1})"
-# Fast IC generation with mpi enabled and more nodes
+# Fast IC generation with mpi enabled and more nodes, also ensure that bParaWrite = 1 (parallel write)
 srun --mpi=pmix -n "${MPI_RANKS}" --cpu_bind=cores "${PKDGRAV_BIN}" "${PARAM_FILE}"
 #srun "${PKDGRAV_BIN}" "${PARAM_FILE}"
 rc=$?

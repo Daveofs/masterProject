@@ -25,7 +25,7 @@ CONDA_ENV=disco-dj
 CONDA_INIT=$HOME/miniforge3/etc/profile.d/conda.sh
 
 # Input IC file (only used when USE_INTERNAL_ICS=false)
-IC_FILE=/capstor/scratch/cscs/damrein/outputs/ICs/cosmo_000001/run_0/CosmoML.00000
+IC_FILE=/capstor/scratch/cscs/damrein/outputs/ICs/cosmo_gpu_000001/run_0/CosmoML_gpu.00000
 
 # Path to the params.yml for the simulation cosmology (leave empty to use COSMO preset)
 PARAMS_YML=/capstor/scratch/cscs/damrein/cosmogridv1/cosmo_000001/run_0/params.yml
@@ -38,7 +38,7 @@ NGENIC_SEED=180723
 LOG_DIR=${SCRATCH_DIR}/outputs/logs
 SNAP_DIR=${SCRATCH_DIR}/outputs/snapshots
 DISCO_LC_DIR=${SCRATCH_DIR}/outputs/disco_lc
-SHELL_DIR=${SCRATCH_DIR}/outputs/shells_100_presteps
+SHELL_DIR=${SCRATCH_DIR}/outputs/shells_gpu_ICs
 PLOT_DIR=${SCRATCH_DIR}/outputs/plots/multigpu
 
 # ── Multi-node settings ──────────────────────────────────────────────────

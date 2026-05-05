@@ -254,8 +254,8 @@ sys.path.insert(0, str(_script_dir))
 from read_tipsy_file import read_tipsy
 
 
-def _load_cosmo_from_params_yml(yml_path: Path) -> dict:
-    """Read a CosmoGridV1 params.yml and return a DiscoDJ cosmology dict."""
+def _load_cosmo_from_params_yml(yml_path: Path) -> tuple[dict, int | None]:
+    """Read a CosmoGridV1 params.yml and return (cosmo_dict, pkd_seed)."""
     import yaml
     with yml_path.open() as f:
         p = yaml.safe_load(f)
@@ -269,11 +269,16 @@ def _load_cosmo_from_params_yml(yml_path: Path) -> dict:
         w0=float(p.get("w0", -1.0)),
         wa=float(p.get("wa", 0.0)),
     )
+    pkd_seed = int(p["pkd_seed"]) if "pkd_seed" in p else None
     if jax.process_index() == 0:
         print(f"[params_yml] Loaded cosmology from {yml_path}:")
         for k, v in cosmo_dict.items():
             print(f"  {k} = {v}")
-    return cosmo_dict
+        if pkd_seed is not None:
+            print(f"  pkd_seed = {pkd_seed}  (will be used as ngenic-seed)")
+        else:
+            print(f"  pkd_seed not found in params.yml — keeping ngenic-seed={args.ngenic_seed}")
+    return cosmo_dict, pkd_seed
 
 # ---------------------------------------------------------------------------
 # Helper utilities
@@ -339,7 +344,12 @@ def _field_slices(field):
 t0 = time()
 
 # ── Build DiscoDJ object ────────────────────────────────────────────────────
-_cosmo_arg = _load_cosmo_from_params_yml(args.params_yml) if args.params_yml is not None else args.cosmo
+if args.params_yml is not None:
+    _cosmo_arg, _pkd_seed = _load_cosmo_from_params_yml(args.params_yml)
+    if _pkd_seed is not None:
+        args.ngenic_seed = _pkd_seed
+else:
+    _cosmo_arg = args.cosmo
 dj = DiscoDJ(
     dim=3,
     res=Npart,
