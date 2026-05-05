@@ -221,7 +221,8 @@ def _get_jax_shell_kernel():
     Optimal for GPU usage.
     """
     @partial(jax.jit, static_argnames=['nside', 'npix', 'interpolate'])
-    def _kernel(X0, X1, d, r_lo, r_hi, nside, npix, interpolate):
+    def _kernel(X0, X1, d, r_lo, r_hi, r_lo_meta, r_hi_meta,
+                nside, npix, interpolate):
         """
         GPU kernel: contribution of ONE periodic replica to a HEALPix shell.
 
@@ -229,21 +230,27 @@ def _get_jax_shell_kernel():
         ----------
         X0, X1     : (N, 3) float32  positions relative to observer [Mpc/h]
         d          : (3,)   float32  replica offset [Mpc/h]
-        r_lo, r_hi : float32         shell boundaries [Mpc/h]
+        r_lo, r_hi : float32         **step** lightcone boundaries [Mpc/h]
+        r_lo_meta, r_hi_meta : float32  metainfo shell filter boundaries
         nside, npix, interpolate : static compile-time constants
         """
         R0 = X0 + d
         R1 = X1 + d
         r0 = jnp.sqrt(jnp.sum(R0 * R0, axis=1))
         r1 = jnp.sqrt(jnp.sum(R1 * R1, axis=1))
-        mask = (jnp.maximum(r0, r1) >= r_lo) & (jnp.minimum(r0, r1) < r_hi)
 
         if interpolate:
-            denom      = r0 - r1
-            safe_denom = jnp.where(jnp.abs(denom) > 1e-10, denom, jnp.float32(1e-10))
-            t_hi       = jnp.clip((r_hi - r0) / safe_denom, 0.0, 1.0)
-            direction  = (1.0 - t_hi[:, None]) * R0 + t_hi[:, None] * R1
+            # pkdgrav moving-lightcone crossing (see fori kernel for derivation)
+            denom_lc   = (r_hi - r_lo) + (r1 - r0)
+            safe_denom = jnp.where(jnp.abs(denom_lc) > 1e-10, denom_lc,
+                                   jnp.float32(1e-10))
+            vx        = (r_hi - r0) / safe_denom
+            direction = (1.0 - vx[:, None]) * R0 + vx[:, None] * R1
+            r_cross   = jnp.sqrt(jnp.sum(direction * direction, axis=1))
+            mask = ((vx >= 0.0) & (vx < 1.0) &
+                    (r_cross >= r_lo_meta) & (r_cross < r_hi_meta))
         else:
+            mask = (jnp.maximum(r0, r1) >= r_lo_meta) & (jnp.minimum(r0, r1) < r_hi_meta)
             direction = 0.5 * (R0 + R1)
 
         # Steer masked-out particles to a safe sky direction so they don't NaN.
@@ -292,9 +299,22 @@ def _get_jax_shell_fori_kernel():
 
     @partial(jax.jit, static_argnames=['nside', 'npix', 'interpolate'])
     def _fori_kernel(X0, X1, rep_offsets, n_active, r_lo, r_hi,
+                     r_lo_meta, r_hi_meta,
                      nside, npix, interpolate):
         """
         Accumulate shell contributions for ``n_active`` periodic replicas.
+
+        Implements pkdgrav3's exact moving-lightcone crossing condition (see
+        lightcone.cxx ``pkdProcessLightCone`` line ~240): the lightcone surface shrinks
+        from ``r_hi`` to ``r_lo`` during the step while the particle moves from
+        ``R0`` to ``R1``.  The crossing fraction
+
+            "particle radius" = "lightcone radius" 
+            r0 + vx*(r1-r0)  =  r_hi - vx*(r_hi-r_lo)
+            => vx = (r_hi - r0) / ((r_hi - r_lo) + (r1 - r0))
+
+        satisfies ``vx ∈ [0, 1)`` for exactly ONE step per particle, matching
+        pkdgrav's ``msk = (vx >= xStart) & (vx < 1.0)`` — no double-counting.
 
         Parameters
         ----------
@@ -302,7 +322,13 @@ def _get_jax_shell_fori_kernel():
         rep_offsets  : (R, 3) float32  padded replica offset table;
                        only the first ``n_active`` rows are processed.
         n_active     : int32 scalar (dynamic) – replicas to process.
-        r_lo, r_hi   : float32  shell boundaries [Mpc/h]
+        r_lo, r_hi   : float32  **step** lightcone boundaries [Mpc/h]
+                       (chi(a_curr) and chi(a_prev)).  Always the N-body step
+                       boundaries, NOT the metainfo shell boundaries.
+        r_lo_meta, r_hi_meta : float32  metainfo shell filter boundaries.
+                       Caught particles (vx ∈ [0,1)) are only counted when
+                       their crossing radius r_cross ∈ [r_lo_meta, r_hi_meta).
+                       For FITS mode set r_lo_meta=r_lo, r_hi_meta=r_hi.
         nside, npix, interpolate : compile-time constants (static)
         """
         def body(i, shell):
@@ -311,15 +337,25 @@ def _get_jax_shell_fori_kernel():
             R1 = X1 + d
             r0 = jnp.sqrt(jnp.sum(R0 * R0, axis=1))
             r1 = jnp.sqrt(jnp.sum(R1 * R1, axis=1))
-            mask = (jnp.maximum(r0, r1) >= r_lo) & (jnp.minimum(r0, r1) < r_hi)
 
             if interpolate:
-                denom      = r0 - r1
-                safe_denom = jnp.where(jnp.abs(denom) > 1e-10, denom,
+                denom_lc   = (r_hi - r_lo) + (r1 - r0)
+                safe_denom = jnp.where(jnp.abs(denom_lc) > 1e-10, denom_lc,
                                        jnp.float32(1e-10))
-                t_hi       = jnp.clip((r_hi - r0) / safe_denom, 0.0, 1.0)
-                direction  = (1.0 - t_hi[:, None]) * R0 + t_hi[:, None] * R1
+                vx        = (r_hi - r0) / safe_denom
+                direction = (1.0 - vx[:, None]) * R0 + vx[:, None] * R1
+
+                # r_cross: comoving distance of the crossing position — used to
+                # assign particle to the correct metainfo shell (NPZ mode).
+                r_cross = jnp.sqrt(jnp.sum(direction * direction, axis=1))
+
+                # Accept iff the lightcone surface swept through this replica
+                # during this step AND the crossing falls in the metainfo shell.
+                mask = ((vx >= 0.0) & (vx < 1.0) &
+                        (r_cross >= r_lo_meta) & (r_cross < r_hi_meta))
             else:
+                # Non-interpolate: keep broad-phase mask, midpoint direction.
+                mask = (jnp.maximum(r0, r1) >= r_lo_meta) & (jnp.minimum(r0, r1) < r_hi_meta)
                 direction = 0.5 * (R0 + R1)
 
             # For masked-out particles we still go through vec2pix (to avoid
@@ -437,10 +473,23 @@ class LightconeShellBuilder:
         shell_map : (npix,) float32  particle count per HEALPix pixel
         """
         t_acc_start = time()
-        r_hi = r_hi_override if r_hi_override is not None else float(self.chi_of_a(a_prev))
-        r_lo = r_lo_override if r_lo_override is not None else float(self.chi_of_a(a_curr))
+        # Step boundaries used for the pkdgrav vx crossing formula.
+        # These MUST be the DISCO N-body step boundaries (chi(a_prev/a_curr)),
+        # NOT the per-shell metainfo boundaries.  The vx ∈ [0,1) condition is
+        # a partition over the full step interval: each particle is caught in
+        # exactly ONE step.  If we substituted per-shell meta boundaries here,
+        # an outward-moving particle near a shell boundary could satisfy
+        # vx ∈ [0,1) for two consecutive shells in the same step → double count.
+        r_step_hi = float(self.chi_of_a(a_prev))
+        r_step_lo = float(self.chi_of_a(a_curr))
 
-        if r_hi > self.chi_max:
+        # Metainfo shell filter (NPZ mode): overrides only used for r_cross check.
+        # After the vx crossing is confirmed, r_cross selects which shell to
+        # assign the particle to (pkdgrav's addToLightCone shell-assignment).
+        r_hi_meta = r_hi_override if r_hi_override is not None else r_step_hi
+        r_lo_meta = r_lo_override if r_lo_override is not None else r_step_lo
+
+        if r_step_hi > self.chi_max:
             # Entire shell is beyond the requested z_max; skip
             return np.zeros(self.npix, dtype=np.float32)
 
@@ -468,13 +517,12 @@ class LightconeShellBuilder:
         t_loop_start = time()
         t_r_sq = 0.0
         t_mask = 0.0
-        t_interp = 0.0
         t_healpix = 0.0
         n_particles_placed = 0
 
         for rep_idx, d in enumerate(self._rep_offsets):
-            # Fast reject using replica radial bounds.
-            if r_hi < self._rep_rmin[rep_idx] or r_lo > self._rep_rmax[rep_idx]:
+            # Fast reject using step-boundary replica radial bounds.
+            if r_step_hi < self._rep_rmin[rep_idx] or r_step_lo > self._rep_rmax[rep_idx]:
                 continue
             n_rep_kept += 1
 
@@ -488,29 +536,29 @@ class LightconeShellBuilder:
                 r1 = np.sqrt(np.sum(R1 * R1, axis=1, dtype=np.float32))
                 t_r_sq += time() - _t
 
-                # A trajectory contributes if its radius interval overlaps shell.
+                # pkdgrav moving-lightcone crossing (lightcone.cxx):
+                # vx = (r_step_hi - r0) / ((r_step_hi - r_step_lo) + (r1 - r0))
+                # Accept iff vx ∈ [0, 1): each particle caught in exactly one step.
                 _t = time()
-                r_min = np.minimum(r0, r1)
-                r_max = np.maximum(r0, r1)
-                mask = (r_max >= r_lo) & (r_min < r_hi)
+                if self.interpolate:
+                    denom_lc   = (r_step_hi - r_step_lo) + (r1 - r0)
+                    safe_denom = np.where(np.abs(denom_lc) > 1e-10, denom_lc, 1e-10)
+                    vx         = (r_step_hi - r0) / safe_denom
+                    direction  = (1.0 - vx[:, None]) * R0 + vx[:, None] * R1
+                    r_cross    = np.sqrt(np.sum(direction * direction, axis=1,
+                                                dtype=np.float32))
+                    # Accept: lightcone-crossing within this step AND
+                    # crossing radius within the metainfo shell (NPZ mode filter)
+                    mask = ((vx >= 0.0) & (vx < 1.0) &
+                            (r_cross >= r_lo_meta) & (r_cross < r_hi_meta))
+                    direction = direction[mask]
+                else:
+                    mask = ((np.maximum(r0, r1) >= r_lo_meta) &
+                            (np.minimum(r0, r1) < r_hi_meta))
+                    direction = 0.5 * (R0[mask] + R1[mask])
                 t_mask += time() - _t
                 if not np.any(mask):
                     continue
-
-                _t = time()
-                if self.interpolate:
-                    r0_m = r0[mask]
-                    r1_m = r1[mask]
-                    R0_m = R0[mask]
-                    R1_m = R1[mask]
-
-                    denom = r0_m - r1_m
-                    safe_denom = np.where(np.abs(denom) > 1e-10, denom, 1e-10)
-                    t_hi = np.clip((r_hi - r0_m) / safe_denom, 0.0, 1.0).astype(np.float32)
-                    direction = (1.0 - t_hi[:, None]) * R0_m + t_hi[:, None] * R1_m
-                else:
-                    direction = 0.5 * (R0[mask] + R1[mask])
-                t_interp += time() - _t
 
                 # healpy's vector form is generally faster than angle conversion.
                 _t = time()
@@ -528,13 +576,14 @@ class LightconeShellBuilder:
         t_total = time() - t_acc_start
         if verbose:
             print(
-                f"    [accumulate_shell] r=[{r_lo:.1f},{r_hi:.1f}] Mpc/h  "
+                f"    [accumulate_shell] r_step=[{r_step_lo:.1f},{r_step_hi:.1f}]  "
+                f"r_meta=[{r_lo_meta:.1f},{r_hi_meta:.1f}] Mpc/h  "
                 f"n_part={n_part:,}  chunks={n_chunks}  "
                 f"replicas={n_rep_kept}/{n_rep_total}  "
                 f"placed={n_particles_placed:,}  "
                 f"| cast={t_cast_done-t_cast:.2f}s  "
-                f"rsq={t_r_sq:.2f}s  mask={t_mask:.2f}s  "
-                f"interp={t_interp:.2f}s  healpix={t_healpix:.2f}s  "
+                f"rsq={t_r_sq:.2f}s  mask+interp={t_mask:.2f}s  "
+                f"healpix={t_healpix:.2f}s  "
                 f"total={t_total:.2f}s"
             )
 
@@ -633,10 +682,25 @@ class LightconeShellBuilder:
         import jax
         import jax.numpy as jnp
 
-        r_hi = r_hi_override if r_hi_override is not None else float(self.chi_of_a(a_prev))
-        r_lo = r_lo_override if r_lo_override is not None else float(self.chi_of_a(a_curr))
+        # ── Step boundaries used for the pkdgrav vx crossing formula ─────────
+        # These MUST be the DISCO N-body step boundaries (chi(a_prev/a_curr)),
+        # NOT the per-shell metainfo boundaries.  The vx ∈ [0,1) condition is
+        # a partition over the full step interval: each particle is caught in
+        # exactly ONE step.  If we substituted per-shell meta boundaries here,
+        # an outward-moving particle near a shell boundary could satisfy
+        # vx ∈ [0,1) for two consecutive shells in the same step → double count.
+        r_step_hi = float(self.chi_of_a(a_prev))
+        r_step_lo = float(self.chi_of_a(a_curr))
 
-        if r_hi > self.chi_max:
+        # ── Metainfo shell filter boundaries ─────────────────────────────────
+        # For FITS mode: r_lo/r_hi_override are None → same as step boundaries.
+        # For NPZ mode:  r_lo/r_hi_override are the metainfo shell comoving
+        # limits; the kernel only counts particles whose crossing radius falls
+        # within this range (pkdgrav's addToLightCone shell-assignment step).
+        r_hi_meta = r_hi_override if r_hi_override is not None else r_step_hi
+        r_lo_meta = r_lo_override if r_lo_override is not None else r_step_lo
+
+        if r_step_hi > self.chi_max:
             return np.zeros(self.npix, dtype=np.float32)
         if 1.0 / a_prev - 1.0 < self.z_min:
             return np.zeros(self.npix, dtype=np.float32)
@@ -679,26 +743,28 @@ class LightconeShellBuilder:
                 X0_devs.append(jax.device_put(X0_np[lo:hi], dev))
                 X1_devs.append(jax.device_put(X1_np[lo:hi], dev))
             print(f"    [jax_shell] gather/cast {time()-t_gather:.2f}s  "
-                  f"r=[{r_lo:.1f},{r_hi:.1f}] Mpc/h  n_part={n_part:,}  "
+                  f"r_step=[{r_step_lo:.1f},{r_step_hi:.1f}]  "
+                  f"r_meta=[{r_lo_meta:.1f},{r_hi_meta:.1f}] Mpc/h  "
+                  f"n_part={n_part:,}  "
                   f"n_devs={n_devs}  part/dev={chunk:,}")
 
         # ---- pre-collect kept replica offsets ----------------------------
-        # All devices process ALL replicas, but each device only handles its
-        # particle shard → true N/n_devs speedup per device.
+        # Use STEP boundaries for replica culling: replicas whose nearest point
+        # is beyond r_step_hi (or closest point above r_step_lo) cannot have any
+        # particle caught by the lightcone during this step.
         n_rep_total = len(self._rep_offsets)
         kept_reps = []
         for rep_idx, d in enumerate(self._rep_offsets):
-            if r_hi < self._rep_rmin[rep_idx] or r_lo > self._rep_rmax[rep_idx]:
+            if r_step_hi < self._rep_rmin[rep_idx] or r_step_lo > self._rep_rmax[rep_idx]:
                 continue
             kept_reps.append(d)
         n_rep_kept = len(kept_reps)
 
         # ---- dispatch per-device fori_loop in parallel threads -----------
-        # Each GPU processes its own particle shard across ALL n_rep_kept
-        # replicas inside a single fori_loop → results are partial shell maps
-        # that are summed at the end.
-        r_lo_f32  = np.float32(r_lo)
-        r_hi_f32  = np.float32(r_hi)
+        r_lo_f32      = np.float32(r_step_lo)
+        r_hi_f32      = np.float32(r_step_hi)
+        r_lo_meta_f32 = np.float32(r_lo_meta)
+        r_hi_meta_f32 = np.float32(r_hi_meta)
         nside_    = self.nside
         npix_     = self.npix
         interp_   = self.interpolate
@@ -717,7 +783,9 @@ class LightconeShellBuilder:
             return np.asarray(fori_kernel(
                 X0_devs[dev_i], X1_devs[dev_i],
                 rep_jax, n_active,
-                r_lo_f32, r_hi_f32, nside_, npix_, interp_,
+                r_lo_f32, r_hi_f32,
+                r_lo_meta_f32, r_hi_meta_f32,
+                nside_, npix_, interp_,
             ))
 
         t0 = time()
@@ -735,7 +803,8 @@ class LightconeShellBuilder:
             gathered = np.asarray(_pag(shell_map))  # (n_procs, npix)
             shell_map = gathered.sum(axis=0).astype(np.float32)
 
-        print(f"    [jax_shell] r=[{r_lo:.1f},{r_hi:.1f}] Mpc/h  gpu={t_gpu:.2f}s  "
+        print(f"    [jax_shell] r_step=[{r_step_lo:.1f},{r_step_hi:.1f}]  "
+              f"r_meta=[{r_lo_meta:.1f},{r_hi_meta:.1f}] Mpc/h  gpu={t_gpu:.2f}s  "
               f"replicas={n_rep_kept}/{n_rep_total}  "
               f"placed={int(shell_map.sum()):,}")
         return shell_map
@@ -1035,17 +1104,20 @@ def run_with_shells(
             metainfo_path, cosmo_key)
         n_meta_shells = len(shell_info_meta)
         shells_array = np.zeros((n_meta_shells, npix), dtype=np.int32)
-        # Recompute comoving boundaries using DISCO-DJ's own chi_of_a so that
-        # the shell overlap test is consistent with r_step_hi/r_step_lo.
-        # The stored lower_com/upper_com come from a different integration and
-        # are ~7 Mpc/h off, causing each step to overlap 2 shells (2× counts).
-        _a_lower = 1.0 / (1.0 + shell_info_meta['lower_z'].astype(np.float64))
-        _a_upper = 1.0 / (1.0 + shell_info_meta['upper_z'].astype(np.float64))
-        meta_lower = chi_of_a(_a_lower).astype(np.float64)
-        meta_upper = chi_of_a(_a_upper).astype(np.float64)
+        # Use the stored pkdgrav-computed comoving boundaries directly so that
+        # our r_cross filter matches pkdgrav's shell assignment exactly.
+        # Previously these were recomputed with DISCO's chi_of_a (which is
+        # ~7 Mpc/h larger than pkdgrav's).  That shift added ~4-5% extra
+        # particles at the outer shell boundary (which has more solid angle)
+        # causing a flat ~5% excess in C_ℓ at all large scales.
+        # The old concern about "step overlapping 2 shells → 2× counts" no
+        # longer applies because we now use the pkdgrav vx<1 crossing
+        # condition which catches each particle in exactly ONE step.
+        meta_lower = shell_info_meta['lower_com'].astype(np.float64)
+        meta_upper = shell_info_meta['upper_com'].astype(np.float64)
         meta_ids   = shell_info_meta['shell_id'].astype(int)
         print(f"[run_with_shells] NPZ mode: {n_meta_shells} shells from "
-              f"metainfo key={cosmo_key}  (chi recomputed with DISCO-DJ chi_of_a)")
+              f"metainfo key={cosmo_key}  (using stored pkdgrav lower_com/upper_com)")
         if output_npz is None:
             output_npz = output_dir / f"shells_nside={nside}.npz"
         else:

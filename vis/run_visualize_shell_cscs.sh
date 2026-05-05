@@ -48,13 +48,13 @@ fi
 
 #FILENAME="CosmoML-shell_z-high=1.46305_z-low=0.980198.fits"
 
-SHELL=/capstor/scratch/cscs/damrein/outputs/shells_new_new/shells_nside=2048.npz
+SHELL=/capstor/scratch/cscs/damrein/outputs/shells_100_presteps/shells_nside=2048.npz
 # Configuration for the visualization (set to your desired z-bin and nside)
 VMIN=-1.0
 VMAX=1.0
 ZBIN=5
 NSIDE=2048
-NAME_SUFFIX="disco_new_new_nside=${NSIDE}_zbin=${ZBIN}"
+NAME_SUFFIX="disco_100_presteps_nside=${NSIDE}_zbin=${ZBIN}"
 # Colorbar limits for log10(1.01 + delta) – set the same values in both
 # the DISCO run and the CosmoGrid run so the two plots are comparable.
 

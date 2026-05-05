@@ -278,11 +278,10 @@ def main():
         cl_resid = hp.anafast(delta_d - delta_c, lmax=lmax)
         cl_resid1664 = hp.anafast(delta_d1664 - delta_c, lmax=lmax)
 
-        # Ratios against CCL theory
+        # Ratios against CosmoGridV1
         with np.errstate(divide="ignore", invalid="ignore"):
-            ratio_d   = np.where(cl_th != 0, cl_d    / cl_th, np.nan)
-            ratio_c   = np.where(cl_th != 0, cl_c    / cl_th, np.nan)
-            ratio1664 = np.where(cl_th != 0, cl_d1664 / cl_th, np.nan)
+            ratio     = np.where(cl_c != 0, cl_d    / cl_c, np.nan)
+            ratio1664 = np.where(cl_c != 0, cl_d1664 / cl_c, np.nan)
 
         ax_cl.plot(ells, cl_d, color=color, lw=1.0, label=f"DISCO  {label}")
         ax_cl.plot(ells, cl_d1664, color=color, lw=1.0, linestyle=":", alpha=0.9,
@@ -291,11 +290,9 @@ def main():
         ax_cl.plot(ells, cl_th, color=color, lw=1.2, linestyle="-.", alpha=0.8,
                    label=f"CCL theory {label}")
 
-        ax_ratio.plot(ells, ratio_d,   color=color, lw=1.0, label=f"DISCO / theory  {label}")
-        ax_ratio.plot(ells, ratio_c,   color=color, lw=1.0, linestyle="--", alpha=0.7,
-                      label=f"CosmoGrid / theory  {label}")
+        ax_ratio.plot(ells, ratio,     color=color, lw=1.0, label=f"DISCO / CosmoGrid  {label}")
         ax_ratio.plot(ells, ratio1664, color=color, lw=1.0, linestyle=":", alpha=0.9,
-                      label=f"DISCO_1664 / theory  {label}")
+                      label=f"DISCO_1664 / CosmoGrid  {label}")
 
         # Per-shell scale lines on summary plots (subtle dotted, shell colour)
         chi = float(info_d[idx]["shell_com"])
@@ -321,8 +318,8 @@ def main():
     # Ratio plot formatting
     ax_ratio.axhline(1.0, color="k", lw=0.8, linestyle="--", label="ratio = 1")
     ax_ratio.set_xlabel(r"Multipole $\ell$", fontsize=13)
-    ax_ratio.set_ylabel(r"$C_\ell\,/\,C_\ell^{\rm theory}$", fontsize=13)
-    ax_ratio.set_title("Angular power spectrum ratio vs CCL theory", fontsize=13)
+    ax_ratio.set_ylabel(r"$C_\ell^{\rm DISCO}\,/\,C_\ell^{\rm CosmoGrid}$", fontsize=13)
+    ax_ratio.set_title("Angular power spectrum ratio: DISCO / CosmoGridV1", fontsize=13)
     ax_ratio.set_xscale("log")
     ax_ratio.set_xlim(2, lmax)
     ax_ratio.legend(fontsize=8, loc="upper right")
@@ -364,9 +361,10 @@ def main():
         cl_th = compute_theory_cl(ccl_cosmo, z_lo, z_hi, ells)
 
         with np.errstate(divide="ignore", invalid="ignore"):
-            ratio_d   = np.where(cl_th != 0, cl_d    / cl_th, np.nan)
-            ratio_c   = np.where(cl_th != 0, cl_c    / cl_th, np.nan)
-            ratio1664 = np.where(cl_th != 0, cl_d1664 / cl_th, np.nan) if cl_d1664 is not None else None
+            ratio     = np.where(cl_c != 0, cl_d    / cl_c, np.nan)
+            ratio1664 = np.where(cl_c != 0, cl_d1664 / cl_c, np.nan) if cl_d1664 is not None else None
+            ratio_d_th = np.where(cl_th != 0, cl_d / cl_th, np.nan)
+            ratio_c_th = np.where(cl_th != 0, cl_c / cl_th, np.nan)
 
         fig, axes = plt.subplots(2, 1, figsize=(10, 8), sharex=True)
 
@@ -390,14 +388,16 @@ def main():
         axes[0].legend(fontsize=9)
         axes[0].grid(True, which="both", alpha=0.3)
 
-        # Ratio panel: show DISCO / theory, CosmoGrid / theory, DISCO_1664 / theory
-        axes[1].plot(ells, ratio_d, lw=1.2, color="steelblue",    label="DISCO / theory")
-        axes[1].plot(ells, ratio_c, lw=1.2, color="tomato",       linestyle="--", label="CosmoGridV1 / theory")
+        # Ratio panel: DISCO / CosmoGrid (and DISCO_1664 / CosmoGrid if present)
+        axes[1].plot(ells, ratio, lw=1.2, color="darkorchid", label="DISCO / CosmoGrid")
         if ratio1664 is not None:
-            axes[1].plot(ells, ratio1664, lw=1.2, color="seagreen", linestyle=":", label="DISCO_1664 / theory")
+            axes[1].plot(ells, ratio1664, lw=1.2, color="midnightblue", linestyle=":", label="DISCO_1664 / CosmoGrid")
+
+        axes[1].plot(ells, ratio_d_th, lw=1.0, color="orange", linestyle="--", label="DISCO / CCL theory")
+        axes[1].plot(ells, ratio_c_th, lw=1.0, color="red", linestyle="--", label="CosmoGrid / CCL theory")
         axes[1].axhline(1.0, color="k", lw=0.8, linestyle="--")
         axes[1].set_xlabel(r"Multipole $\ell$", fontsize=12)
-        axes[1].set_ylabel(r"$C_\ell\,/\,C_\ell^{\rm theory}$", fontsize=12)
+        #axes[1].set_ylabel(r"$C_\ell^{\rm DISCO}\,/\,C_\ell^{\rm CosmoGrid}$", fontsize=12)
         axes[1].set_ylim(0.0, 2.0)  # fixed y-limits for ratio plot
         axes[1].legend(fontsize=9)
         axes[1].grid(True, which="both", alpha=0.3)

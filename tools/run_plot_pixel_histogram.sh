@@ -18,7 +18,7 @@ SCRATCH_DIR=/capstor/scratch/cscs/damrein
 CONDA_ROOT=/users/damrein/miniforge3
 CONDA_ENV=disco-dj
 
-DISCO_FILE="${SCRATCH_DIR}/outputs/shells_with_4gpu_spread_trash_multi_node/shells_nside=2048.npz"
+DISCO_FILE="/capstor/scratch/cscs/damrein/outputs/shells_100_presteps/shells_nside=2048.npz"
 COSMOGRID_FILE="${SCRATCH_DIR}/cosmogridv1/cosmo_000001/run_0/compressed_shells.npz"
 OUT_DIR="${SCRATCH_DIR}/outputs/pixel_histogram"
 
@@ -30,7 +30,7 @@ PY_SCRIPT=/users/damrein/masterProject/tools/plot_pixel_histogram.py
 # shell 34 z~[0.720, 0.780]
 # shell 51 z~[1.540, 1.650]
 # shell 68 z~[3.351, 3.500]
-SHELL_INDICES="10 11 12 13 14 15 16 17 18 19 20"
+SHELL_INDICES="10 20 30 40 50 60"
 
 # Number of histogram bins
 NBINS=100

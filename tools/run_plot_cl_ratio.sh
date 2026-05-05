@@ -18,10 +18,10 @@ SCRATCH_DIR=/capstor/scratch/cscs/damrein
 CONDA_ROOT=/users/damrein/miniforge3
 CONDA_ENV=disco-dj
 
-DISCO_FILE="/capstor/scratch/cscs/damrein/outputs/shells_with_4gpu_spread_trash_multi_node/shells_nside=2048.npz"
+DISCO_FILE="/capstor/scratch/cscs/damrein/outputs/shells_100_presteps/shells_nside=2048.npz"
 DISCO_FILE_1664="/capstor/scratch/cscs/damrein/outputs/shells_res_pm_1664/shells_nside=2048.npz"
-COSMOGRID_FILE="${SCRATCH_DIR}/cosmogridv1/cosmo_000001/run_0/compressed_shells.npz"
-PARAMS_YML="${SCRATCH_DIR}/cosmogridv1/cosmo_000001/run_0/params.yml"
+COSMOGRID_FILE="/capstor/scratch/cscs/damrein/cosmogridv1/cosmo_000001/run_0/compressed_shells.npz"
+PARAMS_YML="/capstor/scratch/cscs/damrein/cosmogridv1/cosmo_000001/run_0/params.yml"
 OUT_DIR="${SCRATCH_DIR}/outputs/cl_ratio"
 
 PY_SCRIPT=/users/damrein/masterProject/tools/plot_cl_ratio.py
