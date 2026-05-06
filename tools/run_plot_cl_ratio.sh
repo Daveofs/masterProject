@@ -18,7 +18,7 @@ SCRATCH_DIR=/capstor/scratch/cscs/damrein
 CONDA_ROOT=/users/damrein/miniforge3
 CONDA_ENV=disco-dj
 
-DISCO_FILE="/capstor/scratch/cscs/damrein/outputs/shells_100_presteps/shells_nside=2048.npz"
+DISCO_FILE="/capstor/scratch/cscs/damrein/outputs/shells_initial_pk_internal_ics/shells_nside=2048.npz"
 DISCO_FILE_1664="/capstor/scratch/cscs/damrein/outputs/shells_res_pm_1664/shells_nside=2048.npz"
 COSMOGRID_FILE="/capstor/scratch/cscs/damrein/cosmogridv1/cosmo_000001/run_0/compressed_shells.npz"
 PARAMS_YML="/capstor/scratch/cscs/damrein/cosmogridv1/cosmo_000001/run_0/params.yml"

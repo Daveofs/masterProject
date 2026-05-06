@@ -25,20 +25,25 @@ CONDA_ENV=disco-dj
 CONDA_INIT=$HOME/miniforge3/etc/profile.d/conda.sh
 
 # Input IC file (only used when USE_INTERNAL_ICS=false)
-IC_FILE=/capstor/scratch/cscs/damrein/outputs/ICs/cosmo_gpu_000001/run_0/CosmoML_gpu.00000
+IC_FILE=/capstor/scratch/cscs/damrein/cosmogridv1/cosmo_000001/run_0/CosmoML_000001_run_0.00000
 
 # Path to the params.yml for the simulation cosmology (leave empty to use COSMO preset)
 PARAMS_YML=/capstor/scratch/cscs/damrein/cosmogridv1/cosmo_000001/run_0/params.yml
 
 # Use internal ngenic-like ICs instead of an external tipsy file
-USE_INTERNAL_ICS=false
+USE_INTERNAL_ICS=true
 NGENIC_SEED=180723
+
+# Initial linear power spectrum file (optional, .pk format from PKDGRAV/nbodykit)
+# When set, overrides the Eisenstein-Hu transfer function for internal ICs.
+# Leave empty to use Eisenstein-Hu (default).
+LINEAR_PS_FILE=/capstor/scratch/cscs/damrein/cosmogridv1/cosmo_000001/run_0/CosmoML_000001_run_0.00000.pk
 
 # Output paths
 LOG_DIR=${SCRATCH_DIR}/outputs/logs
 SNAP_DIR=${SCRATCH_DIR}/outputs/snapshots
 DISCO_LC_DIR=${SCRATCH_DIR}/outputs/disco_lc
-SHELL_DIR=${SCRATCH_DIR}/outputs/shells_gpu_ICs
+SHELL_DIR=${SCRATCH_DIR}/outputs/shells_initial_pk_internal_ics
 PLOT_DIR=${SCRATCH_DIR}/outputs/plots/multigpu
 
 # ── Multi-node settings ──────────────────────────────────────────────────
@@ -53,7 +58,7 @@ COSMO=Planck15  # used only when PARAMS_YML is empty
 A_INI=0.01
 A_END=1.0
 N_STEPS=20         # used only when SHELLS_METAINFO is empty
-N_PRESTEPS=100    # sub-steps from a_ini to first shell boundary (z=99→3.5); pkdgrav3 uses ~30
+N_PRESTEPS=30    # sub-steps from a_ini to first shell boundary (z=99→3.5); pkdgrav3 uses ~30
 STEPPER=bullfrog
 TIME_VAR=D
 METHOD=pm
@@ -97,6 +102,10 @@ if [[ "${USE_INTERNAL_ICS}" != "true" ]]; then
         echo "IC file not found: ${IC_FILE}. Set USE_INTERNAL_ICS=true or fix IC_FILE." >&2
         exit 2
     fi
+fi
+
+if [[ -n "${LINEAR_PS_FILE}" && ! -f "${LINEAR_PS_FILE}" ]]; then
+    echo "Linear PS file not found: ${LINEAR_PS_FILE}" >&2; exit 5
 fi
 
 # ── Activate conda environment ────────────────────────────────────────────
@@ -146,6 +155,10 @@ if [[ "${USE_INTERNAL_ICS}" == "true" ]]; then
     PYTHON_ARGS+=(--ngenic-seed "${NGENIC_SEED}")
 else
     PYTHON_ARGS+=(--ic-file "${IC_FILE}")
+fi
+
+if [[ -n "${LINEAR_PS_FILE}" ]]; then
+    PYTHON_ARGS+=(--linear-ps-file "${LINEAR_PS_FILE}")
 fi
 
 if [[ -n "${PARAMS_YML:-}" && -f "${PARAMS_YML}" ]]; then

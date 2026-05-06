@@ -113,6 +113,10 @@ def parse_args() -> argparse.Namespace:
                    help="Seed for internal ngenic white-noise field (default: 180723)")
     p.add_argument("--n-order", type=int, default=3,
                    help="LPT order for internal IC generation (default: 3)")
+    p.add_argument("--linear-ps-file", type=Path, default=None,
+                   help="Path to a linear power spectrum file (.pk from PKDGRAV/nbodykit). "
+                        "When given, uses transfer_function='from_file' instead of Eisenstein-Hu "
+                        "for internal ICs.")
 
     # --- cosmology from params.yml ---
     p.add_argument("--params-yml", type=Path, default=None,
@@ -370,7 +374,12 @@ if args.use_internal_ics:
     if jax.process_index() == 0:
         print("Using internal IC generator (LPT)")
 
-    dj = dj.with_linear_ps(transfer_function="Eisenstein-Hu")
+    if args.linear_ps_file is not None:
+        if jax.process_index() == 0:
+            print(f"Loading linear PS from file: {args.linear_ps_file}")
+        dj = dj.with_linear_ps(transfer_function="from_file", filename=str(args.linear_ps_file))
+    else:
+        dj = dj.with_linear_ps(transfer_function="Eisenstein-Hu")
     sync_global_devices("sync_linear_ps")
 
     from multigpu_utils import get_white_noise_field

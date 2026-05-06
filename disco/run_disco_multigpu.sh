@@ -32,6 +32,11 @@ IC_FILE=/cluster/scratch/damrein/outputs/ICs/000001_copy6/CosmoML.00000
 USE_INTERNAL_ICS=false
 NGENIC_SEED=180723
 
+# Initial linear power spectrum file (optional, .pk format from PKDGRAV/nbodykit)
+# When set, overrides the Eisenstein-Hu transfer function for internal ICs.
+# Leave empty to use Eisenstein-Hu (default).
+LINEAR_PS_FILE=/capstor/scratch/cscs/damrein/cosmogridv1/cosmo_000001/run_0/CosmoML_000001_run_0.00000.pk
+
 # Output paths
 LOG_DIR=${SCRATCH_DIR}/outputs/logs
 SNAP_DIR=${SCRATCH_DIR}/outputs/snapshots
@@ -94,6 +99,10 @@ if [[ "${USE_INTERNAL_ICS}" != "true" ]]; then
     fi
 fi
 
+if [[ -n "${LINEAR_PS_FILE}" && ! -f "${LINEAR_PS_FILE}" ]]; then
+    echo "Linear PS file not found: ${LINEAR_PS_FILE}" >&2; exit 5
+fi
+
 # ── Activate virtual environment ──────────────────────────────────────────
 # Prevent any active conda / venv from shadowing the target venv
 unset CONDA_DEFAULT_ENV CONDA_PREFIX VIRTUAL_ENV PYTHONHOME PYTHONPATH
@@ -144,6 +153,10 @@ if [[ "${USE_INTERNAL_ICS}" == "true" ]]; then
     PYTHON_ARGS+=(--ngenic-seed "${NGENIC_SEED}")
 else
     PYTHON_ARGS+=(--ic-file "${IC_FILE}")
+fi
+
+if [[ -n "${LINEAR_PS_FILE}" ]]; then
+    PYTHON_ARGS+=(--linear-ps-file "${LINEAR_PS_FILE}")
 fi
 
 if [[ "${LIGHTCONE}" == "true" ]]; then
