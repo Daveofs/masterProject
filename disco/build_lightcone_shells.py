@@ -938,36 +938,56 @@ def _streaming_steps(dj, a_steps, res_pm, stepper, method, chunk_size, nbody_kwa
 
     n_steps = len(a_steps) - 1
 
-    # ── First call: collect_all=True with n_steps=1 ───────────────────────
-    # This gives us BOTH the IC positions X[0]  *and*  X[1] in one trace,
-    # using the full LPT / BullFrog IC initialisation that only runs once.
+    # ── Bootstrap first interval without collect_all=True ─────────────────
+    # Symplectic currently fails in DiscoDJ when collect_all=True and n_steps=1
+    # (broadcast mismatch in velocity_to_Pi).  Build the first slab by taking
+    # IC positions at a0 from dj._ics and evolving one step to a1 with
+    # collect_all=False.
     a0, a1 = float(a_steps[0]), float(a_steps[1])
+
+    t_ic = time()
+    if "pos" in dj._ics:
+        pos0_src = dj._ics["pos"]
+    else:
+        # Fallback for IC modes that do not store explicit positions.
+        if jax.process_index() == 0:
+            print("  [streaming] IC positions not found in dj._ics; "
+                  "materialising X(a_ini) via zero-span run_nbody call")
+        X0_tmp, _, _ = dj.run_nbody(
+            a_ini=a0, a_end=a0, n_steps=1,
+            time_var=np.array([a0, a0], dtype=np.float64),
+            collect_all=False, **_kw,
+        )
+        pos0_src = X0_tmp
+        del X0_tmp
+
+    if return_jax:
+        pos_prev = jnp.asarray(pos0_src).reshape(-1, 3).astype(jnp.float32)
+    else:
+        pos_prev = np.asarray(pos0_src).reshape(-1, 3).astype(np.float64)
+    print(f"  [streaming] step 1/{n_steps}  IC snapshot gather/cast took {time()-t_ic:.1f}s  "
+          f"n_part={pos_prev.shape[0]:,}")
+
     t_nbody = time()
-    result = dj.run_nbody(
+    X1, P1, _ = dj.run_nbody(
         a_ini=a0, a_end=a1, n_steps=1,
         time_var=np.array([a0, a1], dtype=np.float64),
-        collect_all=True, **_kw,
+        collect_all=False, **_kw,
     )
     print(f"  [streaming] step 1/{n_steps}  a=[{a0:.4f},{a1:.4f}]  "
-          f"nbody (2-snapshot init) took {time()-t_nbody:.1f}s")
-    X2, P2, a2 = result
+          f"nbody took {time()-t_nbody:.1f}s")
     t_gather = time()
     if return_jax:
-        # Keep native sharding (all 4 GPUs) so with_external_ics stays compatible
-        # with DiscoDJ's internal sharded grid self.q.  accumulate_shell_jax
-        # does its own device_put to GPU 0 independently.
-        pos_prev = X2[0].reshape(-1, 3).astype(jnp.float32)
-        pos_curr = X2[1].reshape(-1, 3).astype(jnp.float32)
-        vel_curr = P2[1].reshape(-1, 3).astype(jnp.float32)
+        pos_curr = X1.reshape(-1, 3).astype(jnp.float32)
+        vel_curr = P1.reshape(-1, 3).astype(jnp.float32)
     else:
-        pos_prev = np.asarray(X2[0]).reshape(-1, 3).astype(np.float64)
-        pos_curr = np.asarray(X2[1]).reshape(-1, 3).astype(np.float64)
-        vel_curr = np.asarray(P2[1]).reshape(-1, 3).astype(np.float32)
-    del X2, P2
+        pos_curr = np.asarray(X1).reshape(-1, 3).astype(np.float64)
+        vel_curr = np.asarray(P1).reshape(-1, 3).astype(np.float32)
+    del X1, P1
     print(f"  [streaming] step 1 gather/cast took {time()-t_gather:.1f}s  "
           f"n_part={pos_prev.shape[0]:,}")
 
-    yield pos_prev, pos_curr, float(a2[0]), float(a2[1])
+    yield pos_prev, pos_curr, a0, a1
     pos_prev = pos_curr
 
     # ── Subsequent steps: reseed from (pos, canonical_mom) ────────────────

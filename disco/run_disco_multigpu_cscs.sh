@@ -8,7 +8,7 @@
 #SBATCH --job-name=disco_multigpu
 #SBATCH --account=sk037
 #SBATCH --partition=normal
-#SBATCH --nodes=1
+#SBATCH --nodes=4
 #SBATCH --ntasks-per-node=1         # one Python process per node
 #SBATCH --gpus-per-node=4           # 4 GH200 GPUs per node; process owns all local GPUs
 # NOTE: RES must be divisible by (nodes * gpus-per-node).
@@ -31,7 +31,7 @@ IC_FILE=/capstor/scratch/cscs/damrein/cosmogridv1/cosmo_000001/run_0/CosmoML_000
 PARAMS_YML=/capstor/scratch/cscs/damrein/cosmogridv1/cosmo_000001/run_0/params.yml
 
 # Use internal ngenic-like ICs instead of an external tipsy file
-USE_INTERNAL_ICS=true
+USE_INTERNAL_ICS=false
 NGENIC_SEED=180723
 
 # Initial linear power spectrum file (optional, .pk format from PKDGRAV/nbodykit)
@@ -43,7 +43,7 @@ LINEAR_PS_FILE=/capstor/scratch/cscs/damrein/cosmogridv1/cosmo_000001/run_0/Cosm
 LOG_DIR=${SCRATCH_DIR}/outputs/logs
 SNAP_DIR=${SCRATCH_DIR}/outputs/snapshots
 DISCO_LC_DIR=${SCRATCH_DIR}/outputs/disco_lc
-SHELL_DIR=${SCRATCH_DIR}/outputs/shells_initial_pk_internal_ics
+SHELL_DIR=${SCRATCH_DIR}/outputs/shells_symplectic_1664
 PLOT_DIR=${SCRATCH_DIR}/outputs/plots/multigpu
 
 # ── Multi-node settings ──────────────────────────────────────────────────
@@ -52,7 +52,7 @@ GPUS_PER_NODE=4              # must match --gpus-per-node above
 # ── Simulation parameters ─────────────────────────────────────────────────
 MODE=gpu
 RES=832
-RES_PM=832
+RES_PM=1664
 BOXSIZE=900.0
 COSMO=Planck15  # used only when PARAMS_YML is empty
 A_INI=0.01
