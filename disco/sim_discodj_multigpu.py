@@ -89,8 +89,6 @@ def parse_args() -> argparse.Namespace:
                    help="Maximum redshift for lightcone shells (default: 3.5)")
     p.add_argument("--shells-prefix",     type=str, default="CosmoML",
                    help="Filename prefix for shell FITS files / NPZ shell_name (default: CosmoML)")
-    p.add_argument("--shells-no-interpolate", action="store_true",
-                   help="Disable shell-crossing interpolation for faster shell building")
     p.add_argument("--shells-metainfo",   type=Path, default=None,
                    help="Path to CosmoGridV1_metainfo.h5.  If given, output a single "
                         "shells_nside=<N>.npz using the z_bins from the metainfo file "
@@ -419,7 +417,7 @@ if jax.process_index() == 0:
 
 # ── Snapshot-based HEALPix shell lightcone (high-z capable) ─────────────────
 if args.build_shells:
-    from build_lightcone_shells import run_with_shells
+    from masterProject.disco.shell_builder.build_shells import build_shells
 
     _shells_out = args.shells_output_dir
     if _shells_out is None:
@@ -430,7 +428,7 @@ if args.build_shells:
     if args.shells_metainfo is not None:
         # Derive a_steps from the metainfo shell z-boundaries so each
         # simulation step covers exactly one shell (no overlaps).
-        from build_lightcone_shells import load_shell_info_from_metainfo as _lsi
+        from masterProject.disco.shell_builder.build_shells import load_metainfo_shell_bins as _lsi
         _meta, _mkey = _lsi(args.shells_metainfo, args.shells_cosmo_key)
         # Collect all unique z-boundaries sorted low→high, then convert to
         # scale factors high→low (simulation runs from high-z to low-z).
@@ -460,7 +458,7 @@ if args.build_shells:
         print(f"Shell lightcone: nside={args.shells_nside}  z_min={args.shells_z_min}  z_max={args.shells_z_max}  "
               f"prefix={args.shells_prefix}  output={_shells_out}")
 
-    _n_shells = run_with_shells(
+    _n_shells = build_shells(
         dj=dj,
         a_steps=_a_steps,
         res_pm=args.res_pm,
@@ -476,9 +474,7 @@ if args.build_shells:
         grad_kernel_order=args.grad_kernel_order,
         laplace_kernel_order=args.laplace_kernel_order,
         n_resample=args.n_resample,
-        chunk_size=chunk_size,
-        interpolate=not args.shells_no_interpolate,
-        streaming=True,
+        particle_chunk_size=2_000_000,
         pre_steps=_n_pre if args.shells_metainfo is not None else None,
         z_pre_ini=float(1.0 / a_ini - 1.0),
         deconvolve=args.deconvolve,
