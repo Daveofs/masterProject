@@ -1,7 +1,7 @@
 import numpy as np
 import healpy as hp
-import time
-from utils import compute_replica_offsets, vec2pix_ring_jax
+from time import time
+from shell_builder.utils import compute_replica_offsets, vec2pix_ring_jax
 
 
 # ---------------------------------------------------------------------------
@@ -348,8 +348,8 @@ class LightconeShellBuilder:
             X1_np = np.concatenate(
                 [np.asarray(s.data) for s in X1_flat.addressable_shards], axis=0)
         else:
-            X0_np = np.asarray(X0_flat)
-            X1_np = np.asarray(X1_flat)
+            X0_np = np.array(X0_flat)
+            X1_np = np.array(X1_flat)
         # Centre + shard particles across GPUs
         X0_np -= np.array(self.obs, dtype=np.float32)
         X1_np -= np.array(self.obs, dtype=np.float32)

@@ -4,8 +4,8 @@ import os
 from pathlib import Path
 from time import time
 
-from Shell_Builder import LightconeShellBuilder
-from utils import make_comoving_distance_fn
+from shell_builder.Shell_Builder import LightconeShellBuilder
+from shell_builder.utils import make_comoving_distance_fn
 
 import numpy as np
 import healpy as hp
@@ -42,7 +42,8 @@ def build_shells(
     ----------
     dj         : DiscoDJ object (already initialised with ICs)
     a_steps    : 1-D array of scale factors at each output step,
-                 e.g. np.linspace(a_ini, 1.0, n_steps+1)
+                 is set to 69 if metainfo_path is given (see also below)
+    res_pm     : PM grid resolution 
     output_dir : directory for output files (FITS or NPZ)
     snap_dir   : if given, also save intermediate snapshots as NPZ
     use_gpu    : if True (default) use the JAX GPU kernel for shell
@@ -51,7 +52,8 @@ def build_shells(
                  masking, interpolation, HEALPix indexing and scatter-add
                  entirely on the GPU.  Set False to fall back to the original
                  NumPy CPU path (useful for debugging or CPU-only machines).
-    metainfo_path : optional path to CosmoGridV1_metainfo.h5.
+    metainfo_path : optional path to CosmoGridV1_metainfo.h5 (required if you 
+        want to build shells matching the CosmoGridV1 z_bins)
         If provided, shell boundaries are taken from the metainfo z_bins
         and output is a single NPZ file matching CosmoGridV1 format.
         If None, falls back to individual FITS files per shell.

@@ -417,7 +417,7 @@ if jax.process_index() == 0:
 
 # ── Snapshot-based HEALPix shell lightcone (high-z capable) ─────────────────
 if args.build_shells:
-    from masterProject.disco.shell_builder.build_shells import build_shells
+    from shell_builder.build_shells import build_shells
 
     _shells_out = args.shells_output_dir
     if _shells_out is None:
@@ -428,7 +428,7 @@ if args.build_shells:
     if args.shells_metainfo is not None:
         # Derive a_steps from the metainfo shell z-boundaries so each
         # simulation step covers exactly one shell (no overlaps).
-        from masterProject.disco.shell_builder.build_shells import load_metainfo_shell_bins as _lsi
+        from shell_builder.build_shells import load_metainfo_shell_bins as _lsi
         _meta, _mkey = _lsi(args.shells_metainfo, args.shells_cosmo_key)
         # Collect all unique z-boundaries sorted low→high, then convert to
         # scale factors high→low (simulation runs from high-z to low-z).
