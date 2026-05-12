@@ -1,12 +1,12 @@
 """
-plot_pk_comparison.py
+plot_pk_theory_comparison.py
 =====================
 Compare the linear matter power spectrum P(k) at z=0 reconstructed from a
 CLASS HDF5 output file against the direct CLASS theory prediction.
 
 Usage
 -----
-python plot_pk_comparison.py \\
+python plot_pk_theory_comparison.py \\
     [--params   /path/to/params.yml] \\
     [--hdf5     /path/to/class_processed.hdf5] \\
     [--out-dir  /path/to/output_dir]

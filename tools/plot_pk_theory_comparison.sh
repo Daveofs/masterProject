@@ -1,13 +1,13 @@
 #!/bin/bash
-#SBATCH --job-name=pk_comparison
+#SBATCH --job-name=pk_theory_comparison
 #SBATCH --account=sk037
 #SBATCH --partition=normal
 #SBATCH --time=00:30:00
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=16G
-#SBATCH --output=/capstor/scratch/cscs/damrein/outputs/logs/pk_comparison_%j.out
-#SBATCH --error=/capstor/scratch/cscs/damrein/outputs/logs/pk_comparison_%j.err
+#SBATCH --output=/capstor/scratch/cscs/damrein/outputs/logs/pk_theory_comparison_%j.out
+#SBATCH --error=/capstor/scratch/cscs/damrein/outputs/logs/pk_theory_comparison_%j.err
 
 set -euo pipefail
 
@@ -22,7 +22,7 @@ PARAMS_YML="${SCRATCH_DIR}/cosmogridv1/cosmo_000001/run_0/params.yml"
 HDF5_FILE="${SCRATCH_DIR}/cosmogridv1/cosmo_000001/run_0/class_processed.hdf5"
 OUT_DIR="${SCRATCH_DIR}/outputs/plots"
 
-PY_SCRIPT=/users/damrein/masterProject/tools/plot_pk_comparison.py
+PY_SCRIPT=/users/damrein/masterProject/tools/plot_pk_theory_comparison.py
 
 # ---------------------------------------------------------------------------
 # Environment
