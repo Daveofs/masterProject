@@ -37,8 +37,10 @@ def _compile_accumulate_kernel():
 
         Implements pkdgrav3's exact moving-lightcone crossing condition
         (lightcone.cxx ``pkdProcessLightCone`` ~line 240):
-
-            vx = (r_hi - r0) / ((r_hi - r_lo) + (r1 - r0))
+            
+            "particle radius" = "lightcone radius" 
+            r0 + vx*(r1-r0)  =  r_hi - vx*(r_hi-r_lo)
+            => vx = (r_hi - r0) / ((r_hi - r_lo) + (r1 - r0))
 
         Accept iff vx ∈ [0, 1) — each particle is caught in exactly one step.
 
