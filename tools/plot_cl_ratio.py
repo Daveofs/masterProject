@@ -202,6 +202,25 @@ def main():
                         required=True,
                         help="Path to CosmoGridV1 params.yml used to build the CCL cosmology "
                              "for the theory Cl curve.")
+    parser.add_argument("--show-theory", dest="show_theory",
+                        action=argparse.BooleanOptionalAction, default=True,
+                        help="Show CCL theory curves in plots (default: true).")
+    parser.add_argument("--show-resid", dest="show_resid",
+                        action=argparse.BooleanOptionalAction, default=True,
+                        help="Show residual curves (DISCO - CosmoGrid) in plots (default: true).")
+    parser.add_argument("--label-disco", default="DISCO",
+                        help="Legend label base for DISCO curves.")
+    parser.add_argument("--label-disco-1664", dest="label_disco_1664", default="DISCO_1664",
+                        help="Legend label base for second DISCO curves.")
+    parser.add_argument("--label-cosmogrid", default="CosmoGridV1",
+                        help="Legend label base for CosmoGrid curves.")
+    parser.add_argument("--label-theory", default="CCL theory",
+                        help="Legend label for theory curves.")
+    parser.add_argument("--label-resid", default="DISCO - CosmoGrid (resid)",
+                        help="Legend label for DISCO residual curves.")
+    parser.add_argument("--label-resid-1664", dest="label_resid_1664",
+                        default="DISCO_1664 - CosmoGrid (resid)",
+                        help="Legend label for DISCO_1664 residual curves.")
     args = parser.parse_args()
 
     os.makedirs(args.out_dir, exist_ok=True)
@@ -213,8 +232,11 @@ def main():
     shells_d, info_d = load_shells(args.disco)
     print(f"Loading CosmoGridV1 shells from: {args.cosmogrid}")
     shells_c, info_c = load_shells(args.cosmogrid)
-    print(f"Loading DISCO 1664 shells from:  {args.disco_1664}")
-    shells_d1664, info_d1664 = load_shells(args.disco_1664)
+    shells_d1664 = None
+    info_d1664 = None
+    if args.disco_1664:
+        print(f"Loading DISCO 1664 shells from:  {args.disco_1664}")
+        shells_d1664, info_d1664 = load_shells(args.disco_1664)
 
     n_shells = shells_d.shape[0]
     npix     = shells_d.shape[1]
@@ -263,36 +285,39 @@ def main():
 
         cl_d = compute_cl(shells_d[idx], lmax)
         cl_c = compute_cl(shells_c[idx], lmax)
-        cl_d1664 = compute_cl(shells_d1664[idx], lmax)
+        cl_d1664 = compute_cl(shells_d1664[idx], lmax) if shells_d1664 is not None else None
 
-        # Theory Cl from pyccl
-        cl_th = compute_theory_cl(ccl_cosmo, z_lo, z_hi, ells)
+        cl_th = compute_theory_cl(ccl_cosmo, z_lo, z_hi, ells) if args.show_theory else None
 
         # Also compute Cls of the residual maps: (delta_d - delta_c) and
         # (delta_d1664 - delta_c). This requires making overdensity maps
         # and running anafast on their difference.
         delta_d = to_overdensity(shells_d[idx])
         delta_c = to_overdensity(shells_c[idx])
-        delta_d1664 = to_overdensity(shells_d1664[idx])
+        delta_d1664 = to_overdensity(shells_d1664[idx]) if shells_d1664 is not None else None
 
-        cl_resid = hp.anafast(delta_d - delta_c, lmax=lmax)
-        cl_resid1664 = hp.anafast(delta_d1664 - delta_c, lmax=lmax)
+        cl_resid = hp.anafast(delta_d - delta_c, lmax=lmax) if args.show_resid else None
+        cl_resid1664 = hp.anafast(delta_d1664 - delta_c, lmax=lmax) if (args.show_resid and delta_d1664 is not None) else None
 
         # Ratios against CosmoGridV1
         with np.errstate(divide="ignore", invalid="ignore"):
             ratio     = np.where(cl_c != 0, cl_d    / cl_c, np.nan)
-            ratio1664 = np.where(cl_c != 0, cl_d1664 / cl_c, np.nan)
+            ratio1664 = np.where(cl_c != 0, cl_d1664 / cl_c, np.nan) if cl_d1664 is not None else None
 
-        ax_cl.plot(ells, cl_d, color=color, lw=1.0, label=f"DISCO  {label}")
-        ax_cl.plot(ells, cl_d1664, color=color, lw=1.0, linestyle=":", alpha=0.9,
-                   label=f"DISCO_1664 {label}")
+        ax_cl.plot(ells, cl_d, color=color, lw=1.0, label=f"{args.label_disco}  {label}")
+        if cl_d1664 is not None:
+            ax_cl.plot(ells, cl_d1664, color=color, lw=1.0, linestyle=":", alpha=0.9,
+                       label=f"{args.label_disco_1664} {label}")
         ax_cl.plot(ells, cl_c, color=color, lw=1.0, linestyle="--", alpha=0.6)
-        ax_cl.plot(ells, cl_th, color=color, lw=1.2, linestyle="-.", alpha=0.8,
-                   label=f"CCL theory {label}")
+        if cl_th is not None:
+            ax_cl.plot(ells, cl_th, color=color, lw=1.2, linestyle="-.", alpha=0.8,
+                       label=f"{args.label_theory} {label}")
 
-        ax_ratio.plot(ells, ratio,     color=color, lw=1.0, label=f"DISCO / CosmoGrid  {label}")
-        ax_ratio.plot(ells, ratio1664, color=color, lw=1.0, linestyle=":", alpha=0.9,
-                      label=f"DISCO_1664 / CosmoGrid  {label}")
+        ax_ratio.plot(ells, ratio,     color=color, lw=1.0,
+                      label=f"{args.label_disco} / {args.label_cosmogrid}  {label}")
+        if ratio1664 is not None:
+            ax_ratio.plot(ells, ratio1664, color=color, lw=1.0, linestyle=":", alpha=0.9,
+                          label=f"{args.label_disco_1664} / {args.label_cosmogrid}  {label}")
 
         # Per-shell scale lines on summary plots (subtle dotted, shell colour)
         chi = float(info_d[idx]["shell_com"])
@@ -318,8 +343,14 @@ def main():
     # Ratio plot formatting
     ax_ratio.axhline(1.0, color="k", lw=0.8, linestyle="--", label="ratio = 1")
     ax_ratio.set_xlabel(r"Multipole $\ell$", fontsize=13)
-    ax_ratio.set_ylabel(r"$C_\ell^{\rm DISCO}\,/\,C_\ell^{\rm CosmoGrid}$", fontsize=13)
-    ax_ratio.set_title("Angular power spectrum ratio: DISCO / CosmoGridV1", fontsize=13)
+    ax_ratio.set_ylabel(
+        rf"$C_\ell^{{\rm {args.label_disco}}}\,/\,C_\ell^{{\rm {args.label_cosmogrid}}}$",
+        fontsize=13,
+    )
+    ax_ratio.set_title(
+        f"Angular power spectrum ratio: {args.label_disco} / {args.label_cosmogrid}",
+        fontsize=13,
+    )
     ax_ratio.set_xscale("log")
     ax_ratio.set_xlim(2, lmax)
     ax_ratio.legend(fontsize=8, loc="upper right")
@@ -333,7 +364,10 @@ def main():
     # Cl comparison plot formatting
     ax_cl.set_xlabel(r"Multipole $\ell$", fontsize=13)
     ax_cl.set_ylabel(r"$C_\ell$", fontsize=13)
-    ax_cl.set_title("Angular power spectra: DISCO (solid) vs CosmoGridV1 (dashed)", fontsize=13)
+    ax_cl.set_title(
+        f"Angular power spectra: {args.label_disco} (solid) vs {args.label_cosmogrid} (dashed)",
+        fontsize=13,
+    )
     ax_cl.set_xscale("log")
     ax_cl.set_yscale("log")
     ax_cl.set_xlim(2, lmax)
@@ -357,27 +391,37 @@ def main():
 
         cl_d = compute_cl(shells_d[idx], lmax)
         cl_c = compute_cl(shells_c[idx], lmax)
-        cl_d1664 = compute_cl(shells_d1664[idx], lmax)
-        cl_th = compute_theory_cl(ccl_cosmo, z_lo, z_hi, ells)
+        cl_d1664 = compute_cl(shells_d1664[idx], lmax) if shells_d1664 is not None else None
+        cl_th = compute_theory_cl(ccl_cosmo, z_lo, z_hi, ells) if args.show_theory else None
+
+        delta_d = to_overdensity(shells_d[idx])
+        delta_c = to_overdensity(shells_c[idx])
+        delta_d1664 = to_overdensity(shells_d1664[idx]) if shells_d1664 is not None else None
+        cl_resid = hp.anafast(delta_d - delta_c, lmax=lmax) if args.show_resid else None
+        cl_resid1664 = hp.anafast(delta_d1664 - delta_c, lmax=lmax) if (args.show_resid and delta_d1664 is not None) else None
 
         with np.errstate(divide="ignore", invalid="ignore"):
-            ratio     = np.where(cl_c != 0, cl_d    / cl_c, np.nan)
+            ratio     = np.where(cl_c != 0, cl_d / cl_c, np.nan)
             ratio1664 = np.where(cl_c != 0, cl_d1664 / cl_c, np.nan) if cl_d1664 is not None else None
-            ratio_d_th = np.where(cl_th != 0, cl_d / cl_th, np.nan)
-            ratio_c_th = np.where(cl_th != 0, cl_c / cl_th, np.nan)
+            ratio_d_th = np.where(cl_th != 0, cl_d / cl_th, np.nan) if cl_th is not None else None
+            ratio_c_th = np.where(cl_th != 0, cl_c / cl_th, np.nan) if cl_th is not None else None
 
         fig, axes = plt.subplots(2, 1, figsize=(10, 8), sharex=True)
 
-        axes[0].plot(ells, cl_d, label="DISCO", lw=1.2, color="steelblue")
-        axes[0].plot(ells, cl_d1664, label="DISCO_1664", lw=1.2, color="seagreen", linestyle=":")
-        axes[0].plot(ells, cl_c, label="CosmoGridV1", lw=1.2, color="tomato", linestyle="--")
-        axes[0].plot(ells, cl_th, label="CCL theory", lw=1.4, color="darkorange", linestyle="-.", alpha=0.9)
+        axes[0].plot(ells, cl_d, label=args.label_disco, lw=1.2, color="steelblue")
+        if cl_d1664 is not None:
+            axes[0].plot(ells, cl_d1664, label=args.label_disco_1664, lw=1.2, color="seagreen", linestyle=":")
+        axes[0].plot(ells, cl_c, label=args.label_cosmogrid, lw=1.2, color="tomato", linestyle="--")
+        if cl_th is not None:
+            axes[0].plot(ells, cl_th, label=args.label_theory, lw=1.4, color="darkorange", linestyle="-.", alpha=0.9)
 
         # Plot residual Cls (DISCO - CosmoGrid) and (DISCO_1664 - CosmoGrid)
-        axes[0].plot(ells, cl_resid, label="DISCO - CosmoGrid (resid)", lw=1.0,
-                 color="purple", linestyle="-.")
-        axes[0].plot(ells, cl_resid1664, label="DISCO_1664 - CosmoGrid (resid)", lw=1.0,
-                 color="navy", linestyle=(0, (3, 1, 1, 1)))
+        if cl_resid is not None:
+            axes[0].plot(ells, cl_resid, label=args.label_resid, lw=1.0,
+                     color="purple", linestyle="-.")
+            if cl_resid1664 is not None:
+                axes[0].plot(ells, cl_resid1664, label=args.label_resid_1664, lw=1.0,
+                         color="navy", linestyle=(0, (3, 1, 1, 1)))
         axes[0].set_ylabel(r"$C_\ell$", fontsize=12)
         axes[0].set_yscale("log")
         _grid_str = f"  |  grid={grid_size:.3f} cMpc/h" if grid_size is not None else ""
@@ -389,16 +433,21 @@ def main():
         axes[0].grid(True, which="both", alpha=0.3)
 
         # Ratio panel: DISCO / CosmoGrid (and DISCO_1664 / CosmoGrid if present)
-        axes[1].plot(ells, ratio, lw=1.2, color="darkorchid", label="DISCO / CosmoGrid")
+        axes[1].plot(ells, ratio, lw=1.2, color="darkorchid",
+                     label=f"{args.label_disco} / {args.label_cosmogrid}")
         if ratio1664 is not None:
-            axes[1].plot(ells, ratio1664, lw=1.2, color="midnightblue", linestyle=":", label="DISCO_1664 / CosmoGrid")
+            axes[1].plot(ells, ratio1664, lw=1.2, color="midnightblue", linestyle=":",
+                         label=f"{args.label_disco_1664} / {args.label_cosmogrid}")
 
-        axes[1].plot(ells, ratio_d_th, lw=1.0, color="orange", linestyle="--", label="DISCO / CCL theory")
-        axes[1].plot(ells, ratio_c_th, lw=1.0, color="red", linestyle="--", label="CosmoGrid / CCL theory")
+        if ratio_d_th is not None and ratio_c_th is not None:
+            axes[1].plot(ells, ratio_d_th, lw=1.0, color="orange", linestyle="--",
+                         label=f"{args.label_disco} / {args.label_theory}")
+            axes[1].plot(ells, ratio_c_th, lw=1.0, color="red", linestyle="--",
+                         label=f"{args.label_cosmogrid} / {args.label_theory}")
         axes[1].axhline(1.0, color="k", lw=0.8, linestyle="--")
         axes[1].set_xlabel(r"Multipole $\ell$", fontsize=12)
         #axes[1].set_ylabel(r"$C_\ell^{\rm DISCO}\,/\,C_\ell^{\rm CosmoGrid}$", fontsize=12)
-        axes[1].set_ylim(0.0, 2.0)  # fixed y-limits for ratio plot
+        axes[1].set_ylim(0.7, 1.3)  # fixed y-limits for ratio plot
         axes[1].legend(fontsize=9)
         axes[1].grid(True, which="both", alpha=0.3)
 

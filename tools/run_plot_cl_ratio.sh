@@ -18,8 +18,8 @@ SCRATCH_DIR=/capstor/scratch/cscs/damrein
 CONDA_ROOT=/users/damrein/miniforge3
 CONDA_ENV=disco-dj
 
-DISCO_FILE="/capstor/scratch/cscs/damrein/outputs/shells_bullfrog/shells_nside=2048.npz"
-DISCO_FILE_1664="/capstor/scratch/cscs/damrein/outputs/shells_res_pm_1664/shells_nside=2048.npz"
+DISCO_FILE="/capstor/scratch/cscs/damrein/outputs/shells_symplectic_better_fixed_chi_of_a/shells_nside=2048.npz"
+DISCO_FILE_1664="/capstor/scratch/cscs/damrein/outputs/shells_symplectic/shells_nside=2048.npz"
 COSMOGRID_FILE="/capstor/scratch/cscs/damrein/cosmogridv1/cosmo_000001/run_0/compressed_shells.npz"
 PARAMS_YML="/capstor/scratch/cscs/damrein/cosmogridv1/cosmo_000001/run_0/params.yml"
 OUT_DIR="${SCRATCH_DIR}/outputs/cl_ratio"
@@ -32,10 +32,24 @@ PY_SCRIPT=/users/damrein/masterProject/tools/plot_cl_ratio.py
 # shell 34 z~[0.720, 0.780]
 # shell 51 z~[1.540, 1.650]
 # shell 68 z~[3.351, 3.500]
-SHELL_INDICES="10"
+SHELL_INDICES="10 20 30 40 50 60"
 
 # Maximum multipole (default: 3*2048-1 = 6143, can reduce for speed)
 LMAX=3000
+
+# Toggle optional curves in plots
+# true  -> include curve family
+# false -> hide curve family
+SHOW_THEORY=false
+SHOW_RESID=false
+
+# Custom legend labels
+LABEL_DISCO="DISCO_bullfrog"
+LABEL_DISCO_1664="DISCO_symplectic"
+LABEL_COSMOGRID="CosmoGridV1"
+LABEL_THEORY="CCL theory"
+LABEL_RESID="DISCO - CosmoGrid (resid)"
+LABEL_RESID_1664="DISCO_1664 - CosmoGrid (resid)"
 
 # ---------------------------------------------------------------------------
 # Environment
@@ -68,6 +82,18 @@ echo "  Params YML: ${PARAMS_YML}"
 echo "  Output dir: ${OUT_DIR}"
 echo "  Shells:     ${SHELL_INDICES}"
 echo "  lmax:       ${LMAX}"
+echo "  showTheory: ${SHOW_THEORY}"
+echo "  showResid:  ${SHOW_RESID}"
+
+THEORY_FLAG="--show-theory"
+if [[ "${SHOW_THEORY}" != "true" ]]; then
+    THEORY_FLAG="--no-show-theory"
+fi
+
+RESID_FLAG="--show-resid"
+if [[ "${SHOW_RESID}" != "true" ]]; then
+    RESID_FLAG="--no-show-resid"
+fi
 
 # shellcheck disable=SC2086
 python "${PY_SCRIPT}" \
@@ -79,6 +105,14 @@ python "${PY_SCRIPT}" \
     --lmax       "${LMAX}" \
     --lbox       900 \
     --res-pm     1664 \
-    --params-yml "${PARAMS_YML}"
+    --params-yml "${PARAMS_YML}" \
+    ${THEORY_FLAG} \
+    ${RESID_FLAG} \
+    --label-disco "${LABEL_DISCO}" \
+    --label-disco-1664 "${LABEL_DISCO_1664}" \
+    --label-cosmogrid "${LABEL_COSMOGRID}" \
+    --label-theory "${LABEL_THEORY}" \
+    --label-resid "${LABEL_RESID}" \
+    --label-resid-1664 "${LABEL_RESID_1664}"
 
 echo "[$(date --iso-8601=seconds)] Done. Plots written to ${OUT_DIR}"
