@@ -8,7 +8,7 @@
 #SBATCH --job-name=disco_multigpu
 #SBATCH --account=sk037
 #SBATCH --partition=normal
-#SBATCH --nodes=4
+#SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1         # one Python process per node
 #SBATCH --gpus-per-node=4           # 4 GH200 GPUs per node; process owns all local GPUs
 # NOTE: RES must be divisible by (nodes * gpus-per-node).
@@ -25,10 +25,10 @@ CONDA_ENV=disco-dj
 CONDA_INIT=$HOME/miniforge3/etc/profile.d/conda.sh
 
 # Input IC file (only used when USE_INTERNAL_ICS=false)
-IC_FILE=/capstor/scratch/cscs/damrein/cosmogridv1/cosmo_000001/run_0/CosmoML_000001_run_0.00000
+IC_FILE=/capstor/scratch/cscs/damrein/cosmogridv1_fiducial/run_0000/standard/CosmoML.00000
 
 # Path to the params.yml for the simulation cosmology (leave empty to use COSMO preset)
-PARAMS_YML=/capstor/scratch/cscs/damrein/cosmogridv1/cosmo_000001/run_0/params.yml
+PARAMS_YML=/capstor/scratch/cscs/damrein/cosmogridv1_fiducial/run_0000/params.yml
 
 # Use internal ngenic-like ICs instead of an external tipsy file
 USE_INTERNAL_ICS=false
@@ -37,7 +37,7 @@ NGENIC_SEED=180723
 # Initial linear power spectrum file (optional, .pk format from PKDGRAV/nbodykit)
 # When set, overrides the Eisenstein-Hu transfer function for internal ICs.
 # Leave empty to use Eisenstein-Hu (default).
-LINEAR_PS_FILE=/capstor/scratch/cscs/damrein/cosmogridv1/cosmo_000001/run_0/CosmoML_000001_run_0.00000.pk
+LINEAR_PS_FILE=/capstor/scratch/cscs/damrein/cosmogridv1_fiducial/run_0000/standard/CosmoML.00000.pk
 
 # Output paths
 LOG_DIR=${SCRATCH_DIR}/outputs/logs
@@ -52,21 +52,21 @@ GPUS_PER_NODE=4              # must match --gpus-per-node above
 # ── Simulation parameters ─────────────────────────────────────────────────
 MODE=gpu
 RES=832
-RES_PM=1664
+RES_PM=832
 BOXSIZE=900.0
 COSMO=Planck15  # used only when PARAMS_YML is empty
 A_INI=0.01
 A_END=1.0
-N_STEPS=20         # used only when SHELLS_METAINFO is empty
+N_STEPS=140         # used only when SHELLS_METAINFO is empty
 N_PRESTEPS=30    # sub-steps from a_ini to first shell boundary (z=99→3.5); pkdgrav3 uses ~30
 STEPPER=bullfrog
 TIME_VAR=D
 METHOD=pm
-GRAD_KERNEL_ORDER=4
+GRAD_KERNEL_ORDER=0
 LAPLACE_KERNEL_ORDER=0
 NUM_CHUNKS=1
 LIGHTCONE=false
-BUILD_SHELLS=true
+BUILD_SHELLS=false
 SHELLS_METAINFO="/capstor/scratch/cscs/damrein/cosmogridv1/CosmoGridV1_metainfo.h5"
 #SHELLS_METAINFO=""
 

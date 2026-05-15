@@ -6,9 +6,11 @@ from typing import Tuple
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+import matplotlib.gridspec as gridspec
 import MAS_library as MASL
 import numpy as np
 import Pk_library as PKL
+
 
 
 def read_tipsy_dark(snapshot_path: Path) -> np.ndarray:
@@ -102,15 +104,17 @@ def write_pk_table(out_path: Path, k_values: np.ndarray, pk_values: np.ndarray) 
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Compare P(k) from two snapshots (.npz or PKDGRAV Tipsy).")
+    parser = argparse.ArgumentParser(description="Compare P(k) from three snapshots (.npz or PKDGRAV Tipsy).")
     parser.add_argument("--snapshot-a", required=True, help="First snapshot path (.npz or CosmoML.00000-style Tipsy)")
     parser.add_argument("--snapshot-b", required=True, help="Second snapshot path (.npz or CosmoML.00000-style Tipsy)")
+    parser.add_argument("--snapshot-c", required=True, help="Third snapshot path (.npz or CosmoML.00000-style Tipsy)")
     parser.add_argument("--out-dir", required=True, help="Output directory for the plot and tabulated spectra")
     parser.add_argument("--lbox", type=float, default=900.0, help="Simulation box size in Mpc/h")
     parser.add_argument("--ngrid", type=int, default=512, help="FFT grid size used for the density mesh")
     parser.add_argument("--threads", type=int, default=4, help="Thread count passed to Pk_library")
     parser.add_argument("--label-a", default="Snapshot A", help="Legend label for the first snapshot")
     parser.add_argument("--label-b", default="Snapshot B", help="Legend label for the second snapshot")
+    parser.add_argument("--label-c", default="Snapshot C", help="Legend label for the third snapshot")
     parser.add_argument("--title", default="Power Spectrum Comparison", help="Plot title")
     parser.add_argument("--output-name", default="pk_snapshot_comparison", help="Base name for output files")
     return parser
@@ -121,47 +125,71 @@ def main() -> None:
 
     snapshot_a = Path(args.snapshot_a).expanduser().resolve()
     snapshot_b = Path(args.snapshot_b).expanduser().resolve()
+    snapshot_c = Path(args.snapshot_c).expanduser().resolve()
     out_dir = Path(args.out_dir).expanduser().resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    for path in (snapshot_a, snapshot_b):
+    for path in (snapshot_a, snapshot_b, snapshot_c):
         if not path.is_file():
             raise FileNotFoundError(f"Snapshot not found: {path}")
 
     positions_a, boxsize_a = load_positions(snapshot_a, args.lbox)
     positions_b, boxsize_b = load_positions(snapshot_b, args.lbox)
+    positions_c, boxsize_c = load_positions(snapshot_c, args.lbox)
 
     if not math.isclose(boxsize_a, boxsize_b, rel_tol=0.0, abs_tol=1e-6):
         raise ValueError(f"Box size mismatch between snapshots: {boxsize_a} vs {boxsize_b}")
+    if not math.isclose(boxsize_a, boxsize_c, rel_tol=0.0, abs_tol=1e-6):
+        raise ValueError(f"Box size mismatch between snapshots: {boxsize_a} vs {boxsize_c}")
 
     print(f"Loaded {snapshot_a.name}: {positions_a.shape[0]} particles, Lbox={boxsize_a}")
     print(f"Loaded {snapshot_b.name}: {positions_b.shape[0]} particles, Lbox={boxsize_b}")
+    print(f"Loaded {snapshot_c.name}: {positions_c.shape[0]} particles, Lbox={boxsize_c}")
     print(f"Computing P(k) on a {args.ngrid}^3 CIC mesh")
 
     k_a, pk_a = get_pk(positions_a, boxsize_a, args.ngrid, args.threads)
     k_b, pk_b = get_pk(positions_b, boxsize_b, args.ngrid, args.threads)
+    k_c, pk_c = get_pk(positions_c, boxsize_c, args.ngrid, args.threads)
 
     base = out_dir / args.output_name
     table_a = base.with_name(f"{base.name}_a.txt")
     table_b = base.with_name(f"{base.name}_b.txt")
+    table_c = base.with_name(f"{base.name}_c.txt")
     write_pk_table(table_a, k_a, pk_a)
     write_pk_table(table_b, k_b, pk_b)
+    write_pk_table(table_c, k_c, pk_c)
 
-    fig, ax = plt.subplots(figsize=(8, 6))
-    ax.loglog(k_a, pk_a, label=args.label_a, marker="o", markersize=3, linewidth=1.2)
-    ax.loglog(k_b, pk_b, label=args.label_b, marker="s", markersize=3, linewidth=1.2)
-    ax.set_xlabel("k [h/Mpc]")
-    ax.set_ylabel("P(k) [(Mpc/h)^3]")
-    ax.set_title(args.title)
-    ax.grid(True, which="both", alpha=0.3)
-    ax.legend()
+
+    fig = plt.figure(figsize=(9, 8))
+    gs  = gridspec.GridSpec(2, 1, height_ratios=[3, 1], hspace=0.08)
+    ax1 = fig.add_subplot(gs[0])
+    ax2 = fig.add_subplot(gs[1], sharex=ax1)
+
+    ax1.loglog(k_a, pk_a, label=args.label_a, marker="o", markersize=3, linewidth=1.2)
+    ax1.loglog(k_b, pk_b, label=args.label_b, marker="s", markersize=3, linewidth=1.2)
+    ax1.loglog(k_c, pk_c, label=args.label_c, marker="^", markersize=3, linewidth=1.2)
+    ax1.set_xlabel("k [h/Mpc]")
+    ax1.set_ylabel("P(k) [(Mpc/h)^3]")
+    ax1.grid(True, which="both", alpha=0.3)
+    ax1.legend()
+
+    ax2.plot(k_a, pk_a / pk_b, label=f"{args.label_a} / {args.label_b}", marker="o", markersize=3, linewidth=1.2)
+    ax2.plot(k_c, pk_c / pk_b, label=f"{args.label_c} / {args.label_b}", marker="^", markersize=3, linewidth=1.2)
+    ax2.axhline(1.0, color="k", lw=0.8, linestyle="--")
+    ax2.set_xlabel("k [h/Mpc]")
+    ax2.set_ylabel("P(K)_DISCO / P(K)_PKDGRAV")
+    ax2.set_xscale("log")
+    ax2.set_ylim(0.9, 1.1)
+    ax2.grid(True, which="both", alpha=0.3)
+    ax2.legend()
+
     fig.tight_layout()
     png_path = base.with_suffix(".png")
     fig.savefig(png_path, dpi=200)
     plt.close(fig)
 
     print(f"Saved plot to {png_path}")
-    print(f"Saved spectra to {table_a} and {table_b}")
+    print(f"Saved spectra to {table_a}, {table_b}, and {table_c}")
 
 
 if __name__ == "__main__":
