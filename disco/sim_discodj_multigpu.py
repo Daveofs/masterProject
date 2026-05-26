@@ -104,7 +104,8 @@ def parse_args() -> argparse.Namespace:
 
     # --- ICs ---
     p.add_argument("--ic-file", type=Path, required=False,
-                   help="Path to PKDGRAV tipsy IC file (external ICs)")
+                   help="Path to IC file: PKDGRAV tipsy file, or HDF5 file "
+                        "(.h5/.hdf5, pkdgrav or gadget4_monofonic format)")
     p.add_argument("--use-internal-ics", action="store_true",
                    help="Generate internal ICs (ngenic-like white noise) instead of using an external IC file")
     p.add_argument("--ngenic-seed", type=int, default=180723,
@@ -262,7 +263,7 @@ def _load_cosmo_from_params_yml(yml_path: Path) -> tuple[dict, int | None]:
     with yml_path.open() as f:
         p = yaml.safe_load(f)
     cosmo_dict = dict(
-        Omega_c=float(p["O_cdm"]),
+        Omega_c=float(p["O_cdm"]) + float(p.get("O_nu", 0.0)),
         Omega_b=float(p["Ob"]),
         h=float(p["H0"]) / 100.0,
         sigma8=float(p["s8"]),
@@ -327,6 +328,81 @@ def _load_external_ics(ic_path: Path) -> tuple[np.ndarray, np.ndarray]:
     idx = jnp.argsort(pos[:, 0])
     pos_sorted = np.asarray(pos[idx])
     vel_sorted = np.asarray(vel[idx])
+
+    return pos_sorted, vel_sorted
+
+
+def _load_hdf5_ics(ic_path: Path) -> tuple[np.ndarray, np.ndarray]:
+    """Load HDF5 ICs (pkdgrav or gadget4_monofonic format) following the same
+    coordinate/velocity conversion logic as load_ics.load_ic_file, but returns
+    flat (N^3, 3) numpy arrays suitable for dj.with_external_ics().
+
+    Supported formats (auto-detected from header):
+      - pkdgrav:           'PKDGRAV version' key in Header attrs, or
+                           'Cosmology' group with 'dOmega0' attr.
+      - gadget4_monofonic: HDF5 without a 'Units' group and no pkdgrav marker.
+    """
+    import h5py
+
+    if jax.process_index() == 0:
+        print(f"Reading HDF5 ICs from {ic_path}")
+
+    with h5py.File(ic_path, "r") as f:
+        partgroup = f["PartType1"]
+        header = dict(f["Header"].attrs)
+        units_header = dict(f["Units"].attrs) if "Units" in f.keys() else None
+
+        if "PKDGRAV version" in header or (
+            "Cosmology" in f and "dOmega0" in f["Cosmology"].attrs
+        ):
+            fmt = "pkdgrav"
+        elif units_header is None:
+            fmt = "gadget4_monofonic"
+        else:
+            raise ValueError(
+                f"Unknown HDF5 IC format in {ic_path}. "
+                "Expected pkdgrav or gadget4_monofonic."
+            )
+
+        boxsize = header["BoxSize"]
+        if isinstance(boxsize, (list, np.ndarray)):
+            boxsize = float(boxsize[0])
+        else:
+            boxsize = float(boxsize)
+
+        if fmt == "pkdgrav":
+            redshift = float(np.squeeze(header["Redshift"]))
+            a = 1.0 / (redshift + 1.0)
+        else:  # gadget4_monofonic
+            a = float(header["Time"][0])
+
+        coords = np.array(partgroup["Coordinates"], dtype=np.float32)
+        velocities = np.array(partgroup["Velocities"], dtype=np.float32)
+
+    if fmt == "pkdgrav":
+        # pkdgrav stores positions in [-0.5, 0.5) * boxsize units; shift to
+        # [0, boxsize) and then add Lbox/2 (mod Lbox) so the pkdgrav lightcone
+        # corner at physical 0,0,0 maps to DISCO-DJ's box-centre observer.
+        coords = (coords + 0.5) * boxsize
+        coords = (coords + np.float32(Lbox / 2.0)) % np.float32(Lbox)
+        # Convert PKD comoving velocities → DISCO-DJ external units
+        v_factor = np.float32(a_ini ** 2 / np.sqrt(8 * np.pi / 3) * boxsize)
+        velocities = velocities * v_factor
+    else:  # gadget4_monofonic
+        coords = np.mod(coords, boxsize)
+        # gadget4 peculiar velocities (km/s * sqrt(a)) → DISCO-DJ external units
+        velocities = velocities / (100.0 / a ** 1.5)
+
+    # Sort by x (consistent with Lagrangian x-ordering used by DiscoDJ)
+    gpu_devs = [d for d in jax.local_devices() if d.platform == "gpu"]
+    dev = gpu_devs[0] if gpu_devs else jax.local_devices()[0]
+    pos_dev = jax.device_put(coords, dev)
+    vel_dev = jax.device_put(velocities, dev)
+    del coords, velocities
+
+    idx = jnp.argsort(pos_dev[:, 0])
+    pos_sorted = np.asarray(pos_dev[idx])
+    vel_sorted = np.asarray(vel_dev[idx])
 
     return pos_sorted, vel_sorted
 
@@ -397,9 +473,14 @@ if args.use_internal_ics:
 
 
 elif args.ic_file is not None:
-    if jax.process_index() == 0:
-        print("Using external PKDGRAV ICs")
-    pos_sorted, vel_sorted = _load_external_ics(args.ic_file)
+    if args.ic_file.suffix in (".h5", ".hdf5"):
+        if jax.process_index() == 0:
+            print("Using external HDF5 ICs")
+        pos_sorted, vel_sorted = _load_hdf5_ics(args.ic_file)
+    else:
+        if jax.process_index() == 0:
+            print("Using external PKDGRAV tipsy ICs")
+        pos_sorted, vel_sorted = _load_external_ics(args.ic_file)
     dj = dj.with_external_ics(pos=pos_sorted, vel=vel_sorted)
     del pos_sorted, vel_sorted
 

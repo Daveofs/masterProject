@@ -19,14 +19,14 @@ CONDA_ROOT=/users/damrein/miniforge3
 CONDA_ENV=disco-dj
 
 PK_DIR=${SCRATCH_DIR}/pk
-PK_A=/capstor/scratch/cscs/damrein/pk/pk_pkd_fiducial_david.txt
-PK_B=/capstor/scratch/cscs/damrein/outputs/pk_snapshot_comparison/pk_snapshot_comparison_fiducial_photons_with_bullfrog_and_symplectic_b.txt
-OUTPUT_PNG=${PK_DIR}/pk_pkd_fiducial_vs_photons.png
+PK_A=/capstor/scratch/cscs/damrein/pk/pk_pkd_fiducial_lorenzo.txt
+PK_B=/users/damrein/masterProject/tools/pk_disco_backscaling.txt
+OUTPUT_PNG=${PK_DIR}/pk_fiducial_vs_backscaling_lorenzo.png
 
 LABEL_A="PK_A: PKD fiducial standard"
-LABEL_B="PK_B: PKD fiducial photons"
+LABEL_B="PK_B: PKD backscaling"
 
-PY_SCRIPT=/users/damrein/masterProject/tools/plot_two_pk_ratio.py
+PY_SCRIPT=/users/damrein/masterProject/tools/plot_pk_from_txt.py
 
 # ---------------------------------------------------------------------------
 # Environment

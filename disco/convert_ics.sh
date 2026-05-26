@@ -17,8 +17,8 @@ import sys
 sys.path.insert(0, "${SCRIPT_DIR}")
 from read_tipsy_file import tipsy_to_hdf5
 
-file_ics        = '/capstor/scratch/cscs/damrein/CosmoML_fiducial_Lorenzo'
-snapshot_output = '/capstor/scratch/cscs/damrein/CosmoML_fiducial_Lorenzo.hdf5'
+file_ics        = '/capstor/scratch/cscs/damrein/fiducial_backscaling_no_nu/CosmoML_b_no_nu_fiducial_0000.00000'
+snapshot_output = '/capstor/scratch/cscs/damrein/fiducial_backscaling_no_nu/CosmoML_b_no_nu_fiducial_0000.00000.hdf5'
 
 # fiducial — omega_lambda matches PKdgrav_fiducial: 1 - (0.209277442262 + 0.0014225577379999993) - 0.0493
 hdf5_file = tipsy_to_hdf5(
@@ -29,7 +29,7 @@ hdf5_file = tipsy_to_hdf5(
     h            = 0.6736,
     omega_m      = 0.2600,
     omega_b      = 0.0493,
-    omega_lambda = 0.7399999499320984,
+    omega_lambda = 0.7399454973786425,
 )
 
 print(f"Done: {hdf5_file}")

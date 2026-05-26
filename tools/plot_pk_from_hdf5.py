@@ -1,3 +1,5 @@
+import argparse
+import os
 import h5py
 import numpy as np
 import matplotlib.pyplot as plt
@@ -38,21 +40,40 @@ def get_pk(pos, Lbox, Ngrid):
 # User parameters
 # =========================
 
-pkdgrav_file = "/capstor/scratch/cscs/damrein/cosmogridv1_fiducial/run_0000/standard/CosmoML.00140.hdf5"
-pkdgrav_key = "PartType1/Coordinates"
+def parse_args():
+    p = argparse.ArgumentParser(description="Compute and plot P(k) from HDF5 snapshots")
+    p.add_argument("--pkdgrav-file", required=True)
+    p.add_argument("--pkdgrav-key", default="PartType1/Coordinates")
+    p.add_argument("--disco-base", required=True,
+                   help="Base path for DISCO-DJ shards; snapshots assumed to be snapshot.0..snapshot.N-1.hdf5")
+    p.add_argument("--disco-nshard", type=int, default=8)
+    p.add_argument("--disco-key", default="PartType1/Coordinates")
+    p.add_argument("--lbox", type=float, default=900.0)
+    p.add_argument("--ngrid", type=int, default=832)
+    p.add_argument("--output-dir", required=True)
+    p.add_argument("--k-ny-plot-factor", type=float, default=1.6)
+    return p.parse_args()
 
-disco_base = "/users/damrein/masterProject/disco/data/output/gpu_fiducial_3523591"
-disco_files = [f"{disco_base}/snapshot.{i}.hdf5" for i in range(8)]
-disco_key = "PartType1/Coordinates"
 
-Lbox = 900.0
+args = parse_args()
 
-# Density grid resolution.
-Ngrid = 832
+pkdgrav_file = args.pkdgrav_file
+pkdgrav_key = args.pkdgrav_key
+
+disco_base = args.disco_base
+disco_files = [f"{disco_base}/snapshot.{i}.hdf5" for i in range(args.disco_nshard)]
+disco_key = args.disco_key
+
+Lbox = args.lbox
+Ngrid = args.ngrid
 
 # Plot up to this multiple of the Nyquist frequency.
 # Used only internally to define the x-axis range.
-k_ny_plot_factor = 1.6
+k_ny_plot_factor = args.k_ny_plot_factor
+
+# Ensure output directory exists
+output_dir = args.output_dir
+os.makedirs(output_dir, exist_ok=True)
 
 
 # =========================
@@ -196,8 +217,8 @@ print(f"k max plotted = {k_plot.max():.6f}")
 # Save P(k) values to txt
 # =========================
 
-out_pkd_txt = "pk_pkd_fiducial.txt"
-out_disco_txt = "pk_disco_fiducial.txt"
+out_pkd_txt = os.path.join(output_dir, "pk_pkd_fiducial.txt")
+out_disco_txt = os.path.join(output_dir, "pk_disco_fiducial.txt")
 
 np.savetxt(
     out_pkd_txt,
@@ -222,7 +243,7 @@ print(out_disco_txt)
 # Plot 1: Power spectra
 # =========================
 
-out_pk_png = "pkd_disco_pks.png"
+out_pk_png = os.path.join(output_dir, "pkd_disco_pks.png")
 
 plt.figure(figsize=(8, 5.5))
 
@@ -246,7 +267,7 @@ print(out_pk_png)
 # Plot 2: Ratio
 # =========================
 
-out_ratio_png = "pkd_disco_ratio.png"
+out_ratio_png = os.path.join(output_dir, "pkd_disco_ratio.png")
 
 plt.figure(figsize=(8, 5.5))
 

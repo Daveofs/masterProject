@@ -8,8 +8,8 @@
 #SBATCH --ntasks-per-node=4
 #SBATCH --time=00:30:00
 #SBATCH --gres=gpu:4
-#SBATCH --output=/capstor/scratch/cscs/damrein/outputs/logs/slurm-%j.out
-#SBATCH --error=/capstor/scratch/cscs/damrein/outputs/logs/slurm-%j.err
+#SBATCH --output=/capstor/scratch/cscs/damrein/outputs/logs/disco_lorenzo/slurm-%j.out
+#SBATCH --error=/capstor/scratch/cscs/damrein/outputs/logs/disco_lorenzo/slurm-%j.err
 #SBATCH --chdir=/capstor/scratch/cscs/damrein/outputs/disco_lorenzo
 
 set -euo pipefail
@@ -24,8 +24,9 @@ LOG_DIR=/capstor/scratch/cscs/damrein/outputs/logs/disco_lorenzo
 OUT_DIR=/capstor/scratch/cscs/damrein/outputs/disco_lorenzo
 
 mkdir -p "${SNAP_DIR}" "${LOG_DIR}" "${OUT_DIR}"
+mkdir -p "${OUT_DIR}/data/output"
 
-ICS_FILE=/capstor/scratch/cscs/damrein/CosmoML_fiducial_Lorenzo.hdf5
+ICS_FILE=/capstor/scratch/cscs/damrein/fiducial_backscaling_no_nu/CosmoML_b_no_nu_fiducial_0000.00000.hdf5
 CONDA_INIT=/users/damrein/miniforge3/etc/profile.d/conda.sh
 CONDA_ENV=disco_lorenzo
 

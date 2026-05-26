@@ -7,12 +7,12 @@
 # ============================================================
 #SBATCH --job-name=disco_multigpu
 #SBATCH --account=sk037
-#SBATCH --partition=normal
+#SBATCH --partition=debug
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1         # one Python process per node
 #SBATCH --gpus-per-node=4           # 4 GH200 GPUs per node; process owns all local GPUs
 # NOTE: RES must be divisible by (nodes * gpus-per-node).
-#SBATCH --time=24:00:00
+#SBATCH --time=00:30:00
 #SBATCH --output=/capstor/scratch/cscs/damrein/outputs/logs/disco/disco_multigpu_%j.out
 #SBATCH --error=/capstor/scratch/cscs/damrein/outputs/logs/disco/disco_multigpu_%j.err
 
@@ -25,9 +25,9 @@ CONDA_ENV=disco-dj
 CONDA_INIT=$HOME/miniforge3/etc/profile.d/conda.sh
 
 # Input IC file (only used when USE_INTERNAL_ICS=false)
-IC_FILE=/capstor/scratch/cscs/damrein/cosmogridv1_fiducial/run_0000/standard/CosmoML.00000
+IC_FILE=/capstor/scratch/cscs/damrein/fiducial_backscaling_no_nu/CosmoML_b_no_nu_fiducial_0000.00000.hdf5
 
-# Path to the params.yml for the simulation cosmology (leave empty to use COSMO preset)
+# Path to the params.yml/class_processed.hdf5 for the simulation cosmology (leave empty to use COSMO preset)
 PARAMS_YML=/capstor/scratch/cscs/damrein/cosmogridv1_fiducial/run_0000/params.yml
 
 # Use internal ngenic-like ICs instead of an external tipsy file
@@ -57,7 +57,7 @@ BOXSIZE=900.0
 COSMO=Planck15  # used only when PARAMS_YML is empty
 A_INI=0.01
 A_END=1.0
-N_STEPS=140         # used only when SHELLS_METAINFO is empty
+N_STEPS=100         # used only when SHELLS_METAINFO is empty
 N_PRESTEPS=30    # sub-steps from a_ini to first shell boundary (z=99→3.5); pkdgrav3 uses ~30
 STEPPER=bullfrog
 TIME_VAR=D

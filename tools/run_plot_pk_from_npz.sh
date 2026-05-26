@@ -18,22 +18,22 @@ SCRATCH_DIR=/capstor/scratch/cscs/damrein
 CONDA_ROOT=/users/damrein/miniforge3
 CONDA_ENV=disco-dj
 
-SNAPSHOT_A=/capstor/scratch/cscs/damrein/outputs/snapshots/fidcuial_photons_sigma=0.7_bullfrog.npz
-SNAPSHOT_B=/capstor/scratch/cscs/damrein/cosmogridv1_fiducial/run_0000/just_photons/CosmoML.00140
-SNAPSHOT_C=/capstor/scratch/cscs/damrein/outputs/snapshots/final_multigpu_3415974.npz
+SNAPSHOT_A=/capstor/scratch/cscs/damrein/outputs/snapshots/final_multigpu_3536615.npz
+SNAPSHOT_B=/capstor/scratch/cscs/damrein/cosmogridv1_fiducial/run_0000/standard/CosmoML.00140
+SNAPSHOT_C=/capstor/scratch/cscs/damrein/outputs/snapshots/final_multigpu_3536615.npz
 OUT_DIR=${SCRATCH_DIR}/outputs/pk_snapshot_comparison
 
-PY_SCRIPT=/users/damrein/masterProject/tools/plot_pk_snapshot_comparison.py
+PY_SCRIPT=/users/damrein/masterProject/tools/plot_pk_from_npz.py
 
 LBOX=900
 NGRID=512
 THREADS=8
 
-LABEL_A="DISCO-DJ snapshot - bullfrog"
-LABEL_B="PKDGRAV Tipsy - photons"
-LABEL_C="DISCO-DJ snapshot - symplectic"
+LABEL_A="DISCO-DJ snapshot - backscaling with Omega_nu and hdf5 ICs"
+LABEL_B="PKDGRAV Tipsy - standard fiducial"
+LABEL_C="DISCO-DJ snapshot - same"
 TITLE="Snapshot Power Spectrum Comparison"
-OUTPUT_NAME="pk_snapshot_comparison test"
+OUTPUT_NAME="pk_snapshot_backscaling_omega_nu_hdf5.png"
 
 # ---------------------------------------------------------------------------
 # Environment
