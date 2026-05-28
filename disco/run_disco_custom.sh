@@ -8,9 +8,9 @@
 #SBATCH --ntasks-per-node=1
 #SBATCH --time=00:30:00
 #SBATCH --gres=gpu:4
-#SBATCH --output=/capstor/scratch/cscs/damrein/outputs/logs/disco_lorenzo/slurm-%j.out
-#SBATCH --error=/capstor/scratch/cscs/damrein/outputs/logs/disco_lorenzo/slurm-%j.err
-#SBATCH --chdir=/capstor/scratch/cscs/damrein/outputs/disco_lorenzo
+#SBATCH --output=/capstor/scratch/cscs/damrein/outputs/logs/disco_custom/slurm-%j.out
+#SBATCH --error=/capstor/scratch/cscs/damrein/outputs/logs/disco_custom/slurm-%j.err
+#SBATCH --chdir=/capstor/scratch/cscs/damrein/outputs/disco_custom
 
 set -euo pipefail
 
@@ -20,21 +20,20 @@ export JAX_TRACEBACK_FILTERING=off
 
 # ── ICS / cosmology ───────────────────────────────────────────────────────
 SNAP_DIR=/capstor/scratch/cscs/damrein/outputs/snapshots
-LOG_DIR=/capstor/scratch/cscs/damrein/outputs/logs/disco_lorenzo
-OUT_DIR=/capstor/scratch/cscs/damrein/outputs/disco_lorenzo
-
+LOG_DIR=/capstor/scratch/cscs/damrein/outputs/logs/disco_custom
+OUT_DIR=/capstor/scratch/cscs/damrein/outputs/disco_custom
 mkdir -p "${SNAP_DIR}" "${LOG_DIR}" "${OUT_DIR}"
 mkdir -p "${OUT_DIR}/data/output"
 
 ICS_FILE=/capstor/scratch/cscs/damrein/fiducial_backscaling_no_nu/CosmoML_b_no_nu_fiducial_0000.00000.hdf5
 CONDA_INIT=/users/damrein/miniforge3/etc/profile.d/conda.sh
-CONDA_ENV=disco_lorenzo
+CONDA_ENV=disco_custom
 
 source "${CONDA_INIT}"
 conda activate "${CONDA_ENV}"
 
 PYTHON_BIN=$(which python)
-SIMRUN_BIN="/users/damrein/masterProject/disco/local_simulation_run.sh"
+SIMRUN_BIN=$(which simulation_run)
 
 echo "Python:         ${PYTHON_BIN}"
 echo "simulation_run: ${SIMRUN_BIN}"
