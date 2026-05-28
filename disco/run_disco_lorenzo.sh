@@ -5,7 +5,7 @@
 #SBATCH --job-name=discodj-multigpu-lorenzo
 #SBATCH --partition=debug
 #SBATCH --account=sk037
-#SBATCH --ntasks-per-node=4
+#SBATCH --ntasks-per-node=1
 #SBATCH --time=00:30:00
 #SBATCH --gres=gpu:4
 #SBATCH --output=/capstor/scratch/cscs/damrein/outputs/logs/disco_lorenzo/slurm-%j.out
@@ -34,7 +34,7 @@ source "${CONDA_INIT}"
 conda activate "${CONDA_ENV}"
 
 PYTHON_BIN=$(which python)
-SIMRUN_BIN=$(which simulation_run)
+SIMRUN_BIN="/users/damrein/masterProject/disco/local_simulation_run.sh"
 
 echo "Python:         ${PYTHON_BIN}"
 echo "simulation_run: ${SIMRUN_BIN}"
