@@ -25,7 +25,7 @@ OUT_DIR=/capstor/scratch/cscs/damrein/outputs/disco_custom
 mkdir -p "${SNAP_DIR}" "${LOG_DIR}" "${OUT_DIR}"
 mkdir -p "${OUT_DIR}/data/output"
 
-ICS_FILE=/capstor/scratch/cscs/damrein/fiducial_backscaling_no_nu/CosmoML_b_no_nu_fiducial_0000.00000.hdf5
+ICS_FILE=/capstor/scratch/cscs/damrein/cosmogridv1_fiducial/run_0000/standard/CosmoML.00000.0.7399441599845886.hdf5
 CONDA_INIT=/users/damrein/miniforge3/etc/profile.d/conda.sh
 CONDA_ENV=disco_custom
 
@@ -37,6 +37,8 @@ SIMRUN_BIN=$(which simulation_run)
 
 echo "Python:         ${PYTHON_BIN}"
 echo "simulation_run: ${SIMRUN_BIN}"
+
+METAINFO_FILE=/capstor/scratch/cscs/damrein/cosmogridv1/CosmoGridV1_metainfo.h5
 
 srun --ntasks=$((SLURM_NNODES * 4)) --ntasks-per-node=4 \
     "${SIMRUN_BIN}" \
@@ -55,4 +57,6 @@ srun --ntasks=$((SLURM_NNODES * 4)) --ntasks-per-node=4 \
     --no-calculate-fof \
     --save-hdf5-snapshot \
     --grad-kernel-order 4 \
-    --n-order 3
+    --n-order 3 \
+    --build-shells \
+    --shells-metainfo "${METAINFO_FILE}"
