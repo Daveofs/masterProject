@@ -1,6 +1,7 @@
 import numpy as np
-import healpy as hp
 from time import time
+import jax_healpy as hp_jax
+import healpy as hp
 from shell_builder.utils import compute_replica_offsets, vec2pix_ring_jax
 
 
@@ -60,13 +61,16 @@ def _compile_accumulate_kernel():
             r0 = jnp.sqrt(jnp.sum(R0 * R0, axis=1))
             r1 = jnp.sqrt(jnp.sum(R1 * R1, axis=1))
 
-            denom_lc   = (r_hi - r_lo) + (r1 - r0)
+            dr = r1 - r0
+            is_moving = jnp.abs(dr) > 1e-20 # tolerance for rounding errors
+            denom_lc   = (r_hi - r_lo) + dr
             safe_denom = jnp.where(jnp.abs(denom_lc) > 1e-10, denom_lc,
                                    jnp.float32(1e-10))
-            vx        = (r_hi - r0) / safe_denom
+            vx_raw     = (r_hi - r0) / safe_denom
+            vx         = jnp.where(is_moving, vx_raw, 0.0)
             direction = (1.0 - vx[:, None]) * R0 + vx[:, None] * R1
             r_cross   = jnp.sqrt(jnp.sum(direction * direction, axis=1))
-            mask = ((vx >= 0.0) & (vx < 1.0) &
+            mask = (is_moving & (vx >= 0.0) & (vx < 1.0) &
                     (r_cross >= r_lo_meta) & (r_cross < r_hi_meta))
 
             safe_dir = jnp.where(
@@ -75,8 +79,13 @@ def _compile_accumulate_kernel():
                 jnp.broadcast_to(jnp.array([1., 0., 0.], dtype=jnp.float32),
                                  direction.shape),
             )
-            pix  = vec2pix_ring_jax(nside, safe_dir[:, 0],
-                                    safe_dir[:, 1], safe_dir[:, 2])
+            # pix  = vec2pix_ring_jax(nside, safe_dir[:, 0],
+            #                         safe_dir[:, 1], safe_dir[:, 2])
+            x, y, z = safe_dir[:, 0], safe_dir[:, 1], safe_dir[:, 2]
+            theta = jnp.arctan2(jnp.sqrt(x**2 + y**2), z)
+            phi = jnp.arctan2(y, x)
+            phi = jnp.where(phi < 0.0, phi + 2.0 * jnp.pi, phi)  # [0, 2π)
+            pix = hp_jax.ang2pix(nside, theta, phi)
             pix  = jnp.clip(pix, 0, npix - 1)
             # Spread zero-weight atomics uniformly to avoid hot-address serialisation
             trash_pix = jnp.arange(X0.shape[0], dtype=jnp.int32) % jnp.int32(npix)
@@ -344,14 +353,46 @@ class LightconeShellBuilder:
         n_devs = len(devs)
         X0_flat = pos_prev_jax.reshape(-1, 3).astype(jnp.float32)
         X1_flat = pos_curr_jax.reshape(-1, 3).astype(jnp.float32)
-        if jax.process_count() > 1:
+        if isinstance(X0_flat, np.ndarray):
+            # Bereits numpy (kompaktifiziert im Aufrufer) → direkt verwenden
+            X0_np = X0_flat.astype(np.float32, copy=False)
+            X1_np = X1_flat.astype(np.float32, copy=False)
+        elif jax.process_count() > 1:
             X0_np = np.concatenate(
                 [np.asarray(s.data) for s in X0_flat.addressable_shards], axis=0)
             X1_np = np.concatenate(
                 [np.asarray(s.data) for s in X1_flat.addressable_shards], axis=0)
+             # ── NEU: Maske gleich behandeln ──────────────────────────────
+             
+            # if particle_mask is not None:
+            #     mask_flat = particle_mask.reshape(-1)
+            #     mask_np = np.concatenate(
+            #         [np.asarray(s.data) for s in mask_flat.addressable_shards], axis=0)
+            # else:
+            #     mask_np = None
         else:
             X0_np = np.array(X0_flat)
             X1_np = np.array(X1_flat)
+            # if particle_mask is not None:
+            #     mask_np = np.array(particle_mask).reshape(-1)
+            # else:
+            #     mask_np = None
+
+        # print("MASK SHAPE: ", mask_np.shape if mask_np is not None else None)
+        # print("X0 SHAPE: ", X0_np.shape)
+        # print("X1 SHAPE: ", X1_np.shape)
+
+        # if mask_np is not None:
+        #     X0_np = X0_np[mask_np]
+        #     X1_np = X1_np[mask_np]
+        #     print("MASKED X0 SHAPE: ", X0_np.shape)
+        #     print("MASKED X1 SHAPE: ", X1_np.shape)
+
+        # print(f"jax.process_count() = {jax.process_count()}")
+        # print(f"jax.process_index() = {jax.process_index()}")
+        # print(f"jax.local_devices() = {jax.local_devices()}")
+        # print(f"jax.device_count()  = {jax.device_count()}")
+
         # Centre + shard particles across GPUs
         X0_np -= np.array(self.obs, dtype=np.float32)
         X1_np -= np.array(self.obs, dtype=np.float32)
@@ -423,7 +464,6 @@ class LightconeShellBuilder:
             from jax.experimental.multihost_utils import process_allgather as _pag
             gathered = np.asarray(_pag(shell_map))  # (n_procs, npix)
             shell_map = gathered.sum(axis=0).astype(np.float32)
-
         print(f"    [jax_shell] r_step=[{r_step_lo:.1f},{r_step_hi:.1f}]  "
               f"r_meta=[{r_lo_meta:.1f},{r_hi_meta:.1f}] Mpc/h  gpu={t_gpu:.2f}s  "
               f"replicas={n_rep_kept}/{n_rep_total}  "

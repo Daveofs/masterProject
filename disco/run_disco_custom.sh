@@ -2,11 +2,11 @@
 
 #SBATCH --nodes=2
 #SBATCH --exclusive
-#SBATCH --job-name=discodj-multigpu-lorenzo
-#SBATCH --partition=debug
+#SBATCH --job-name=discodj-custom
+#SBATCH --partition=normal
 #SBATCH --account=sk037
-#SBATCH --ntasks-per-node=1
-#SBATCH --time=00:30:00
+#SBATCH --ntasks-per-node=4
+#SBATCH --time=01:00:00
 #SBATCH --gres=gpu:4
 #SBATCH --output=/capstor/scratch/cscs/damrein/outputs/logs/disco_custom/slurm-%j.out
 #SBATCH --error=/capstor/scratch/cscs/damrein/outputs/logs/disco_custom/slurm-%j.err
@@ -25,7 +25,7 @@ OUT_DIR=/capstor/scratch/cscs/damrein/outputs/disco_custom
 mkdir -p "${SNAP_DIR}" "${LOG_DIR}" "${OUT_DIR}"
 mkdir -p "${OUT_DIR}/data/output"
 
-ICS_FILE=/capstor/scratch/cscs/damrein/cosmogridv1_fiducial/run_0000/standard/CosmoML.00000.0.7399441599845886.hdf5
+ICS_FILE=/capstor/scratch/cscs/damrein/cosmogridv1/cosmo_000001/run_0/CosmoML_000001_run_0.00000.hdf5
 CONDA_INIT=/users/damrein/miniforge3/etc/profile.d/conda.sh
 CONDA_ENV=disco_custom
 
@@ -35,28 +35,44 @@ conda activate "${CONDA_ENV}"
 PYTHON_BIN=$(which python)
 SIMRUN_BIN=$(which simulation_run)
 
+
+echo "[$(date --iso-8601=seconds)] Starting DISCO-CUSTOM multi-GPU"
+
 echo "Python:         ${PYTHON_BIN}"
 echo "simulation_run: ${SIMRUN_BIN}"
 
 METAINFO_FILE=/capstor/scratch/cscs/damrein/cosmogridv1/CosmoGridV1_metainfo.h5
+COSMO_KEY=cosmo_000001
+RES=832
+RES_PM=832
+BOXSIZE=900.0
+NUMSTEPS=100
+A_INI=0.01
+A_END=1.0
+COSMO=PKdgrav_fiducial
 
 srun --ntasks=$((SLURM_NNODES * 4)) --ntasks-per-node=4 \
     "${SIMRUN_BIN}" \
-    --padded-sim \
     --ics-file "${ICS_FILE}" \
-    --res 832 \
-    --res-pm 832 \
-    --boxsize 900 \
-    --numsteps 100 \
+    --res "${RES}" \
+    --res-pm "${RES_PM}" \
+    --boxsize "${BOXSIZE}" \
+    --numsteps "${NUMSTEPS}" \
     --run-mode gpu \
     --no-dump-xla \
     --name fiducial \
-    --a-ini 0.01 \
-    --a-end 1.0 \
-    --cosmo PKdgrav_fiducial \
+    --a-ini "${A_INI}" \
+    --a-end "${A_END}" \
+    --cosmo "${COSMO}" \
     --no-calculate-fof \
     --save-hdf5-snapshot \
     --grad-kernel-order 4 \
     --n-order 3 \
     --build-shells \
-    --shells-metainfo "${METAINFO_FILE}"
+    --shells-metainfo "${METAINFO_FILE}" \
+    --shells-cosmo-key "${COSMO_KEY}" \
+    --shells-nside 2048 \
+    --shells-z-min 0.0 \
+    --shells-z-max 3.5 \
+    --pre-steps 10 
+echo "[$(date --iso-8601=seconds)] DISCO-CUSTOM run completed"

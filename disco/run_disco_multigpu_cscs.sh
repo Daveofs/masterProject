@@ -25,7 +25,7 @@ CONDA_ENV=disco-dj
 CONDA_INIT=$HOME/miniforge3/etc/profile.d/conda.sh
 
 # Input IC file (only used when USE_INTERNAL_ICS=false)
-IC_FILE=/capstor/scratch/cscs/damrein/fiducial_backscaling_no_nu/CosmoML_b_no_nu_fiducial_0000.00000.hdf5
+IC_FILE=/capstor/scratch/cscs/damrein/cosmogridv1/cosmo_000001/run_0/CosmoML_000001_run_0.00000.hdf5
 
 # Path to the params.yml/class_processed.hdf5 for the simulation cosmology (leave empty to use COSMO preset)
 PARAMS_YML=/capstor/scratch/cscs/damrein/cosmogridv1_fiducial/run_0000/params.yml
@@ -58,7 +58,7 @@ COSMO=Planck15  # used only when PARAMS_YML is empty
 A_INI=0.01
 A_END=1.0
 N_STEPS=100         # used only when SHELLS_METAINFO is empty
-N_PRESTEPS=30    # sub-steps from a_ini to first shell boundary (z=99→3.5); pkdgrav3 uses ~30
+N_PRESTEPS=10    # sub-steps from a_ini to first shell boundary (z=99→3.5); pkdgrav3 uses ~30
 STEPPER=bullfrog
 TIME_VAR=D
 METHOD=pm
@@ -66,7 +66,7 @@ GRAD_KERNEL_ORDER=0
 LAPLACE_KERNEL_ORDER=0
 NUM_CHUNKS=1
 LIGHTCONE=false
-BUILD_SHELLS=false
+BUILD_SHELLS=true
 SHELLS_METAINFO="/capstor/scratch/cscs/damrein/cosmogridv1/CosmoGridV1_metainfo.h5"
 #SHELLS_METAINFO=""
 
