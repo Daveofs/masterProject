@@ -28,7 +28,7 @@ CONDA_INIT=$HOME/miniforge3/etc/profile.d/conda.sh
 IC_FILE=/capstor/scratch/cscs/damrein/cosmogridv1/cosmo_000001/run_0/CosmoML_000001_run_0.00000.hdf5
 
 # Path to the params.yml/class_processed.hdf5 for the simulation cosmology (leave empty to use COSMO preset)
-PARAMS_YML=/capstor/scratch/cscs/damrein/cosmogridv1_fiducial/run_0000/params.yml
+PARAMS_YML=/capstor/scratch/cscs/damrein/cosmogridv1/cosmo_000001/run_0/params.yml
 
 # Use internal ngenic-like ICs instead of an external tipsy file
 USE_INTERNAL_ICS=false
@@ -37,13 +37,13 @@ NGENIC_SEED=180723
 # Initial linear power spectrum file (optional, .pk format from PKDGRAV/nbodykit)
 # When set, overrides the Eisenstein-Hu transfer function for internal ICs.
 # Leave empty to use Eisenstein-Hu (default).
-LINEAR_PS_FILE=/capstor/scratch/cscs/damrein/cosmogridv1_fiducial/run_0000/standard/CosmoML.00000.pk
+LINEAR_PS_FILE=/capstor/scratch/cscs/damrein/cosmogridv1/cosmo_000001/run_0/CosmoML_000001_run_0.00000.pk
 
 # Output paths
 LOG_DIR=${SCRATCH_DIR}/outputs/logs
 SNAP_DIR=${SCRATCH_DIR}/outputs/snapshots
 DISCO_LC_DIR=${SCRATCH_DIR}/outputs/disco_lc
-SHELL_DIR=${SCRATCH_DIR}/outputs/shells_symplectic_1664
+SHELL_DIR=${SCRATCH_DIR}/outputs/shells_cosmo_000001
 PLOT_DIR=${SCRATCH_DIR}/outputs/plots/multigpu
 
 # ── Multi-node settings ──────────────────────────────────────────────────

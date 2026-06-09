@@ -3,14 +3,15 @@
 #SBATCH --account=sk037
 #SBATCH --partition=normal
 #SBATCH --nodes=1
-#SBATCH --ntasks-per-node=1
+#SBATCH --ntasks-per-node=4
 #SBATCH --cpus-per-task=64
 #SBATCH --time=01:00:00
 #SBATCH --output=/capstor/scratch/cscs/damrein/outputs/logs/class/class_%j.out
 #SBATCH --error=/capstor/scratch/cscs/damrein/outputs/logs/class/class_%j.err
+#SBATCH --chdir=/capstor/scratch/cscs/damrein/outputs/class
 
 CLASS_DIR=/users/damrein/class/class_public
-INI_FILE=/users/damrein/class_exact.ini
+INI_FILE=/capstor/scratch/cscs/damrein/class_backscaling/class_exact.ini
 
 # Deactivate conda so its libraries don't interfere
 CONDA_ROOT=/users/damrein/miniforge3
