@@ -294,6 +294,8 @@ class LightconeShellBuilder:
                              pos_curr_jax,
                              a_prev: float,
                              a_curr: float,
+                             prev_mask=None,
+                             curr_mask=None,
                              r_lo_override: float | None = None,
                              r_hi_override: float | None = None) -> np.ndarray:
         """
@@ -363,30 +365,35 @@ class LightconeShellBuilder:
             X1_np = np.concatenate(
                 [np.asarray(s.data) for s in X1_flat.addressable_shards], axis=0)
              # ── NEU: Maske gleich behandeln ──────────────────────────────
-             
-            # if particle_mask is not None:
-            #     mask_flat = particle_mask.reshape(-1)
-            #     mask_np = np.concatenate(
-            #         [np.asarray(s.data) for s in mask_flat.addressable_shards], axis=0)
-            # else:
-            #     mask_np = None
+            if prev_mask is not None and curr_mask is not None:
+                mask_flat = prev_mask.reshape(-1)
+                prev_mask_np = np.concatenate(
+                    [np.asarray(s.data) for s in mask_flat.addressable_shards], axis=0)
+                mask_flat = curr_mask.reshape(-1)
+                curr_mask_np = np.concatenate(
+                    [np.asarray(s.data) for s in mask_flat.addressable_shards], axis=0)
+            else:
+                prev_mask_np = None
+                curr_mask_np = None
         else:
             X0_np = np.array(X0_flat)
             X1_np = np.array(X1_flat)
-            # if particle_mask is not None:
-            #     mask_np = np.array(particle_mask).reshape(-1)
-            # else:
-            #     mask_np = None
+            if prev_mask is not None and curr_mask is not None:
+                prev_mask_np = np.array(prev_mask).reshape(-1)
+                curr_mask_np = np.array(curr_mask).reshape(-1)
+            else:
+                prev_mask_np = None
+                curr_mask_np = None
 
         # print("MASK SHAPE: ", mask_np.shape if mask_np is not None else None)
-        # print("X0 SHAPE: ", X0_np.shape)
-        # print("X1 SHAPE: ", X1_np.shape)
+        print("X0 SHAPE: ", X0_np.shape)
+        print("X1 SHAPE: ", X1_np.shape)
 
-        # if mask_np is not None:
-        #     X0_np = X0_np[mask_np]
-        #     X1_np = X1_np[mask_np]
-        #     print("MASKED X0 SHAPE: ", X0_np.shape)
-        #     print("MASKED X1 SHAPE: ", X1_np.shape)
+        if prev_mask_np is not None and curr_mask_np is not None:
+            X0_np = X0_np[prev_mask_np]
+            X1_np = X1_np[curr_mask_np]
+            print("MASKED X0 SHAPE: ", X0_np.shape)
+            print("MASKED X1 SHAPE: ", X1_np.shape)
 
         # print(f"jax.process_count() = {jax.process_count()}")
         # print(f"jax.process_index() = {jax.process_index()}")

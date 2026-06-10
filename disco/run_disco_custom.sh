@@ -59,8 +59,9 @@ srun --ntasks=$((SLURM_NNODES * 4)) --ntasks-per-node=4 \
     --boxsize "${BOXSIZE}" \
     --numsteps "${NUMSTEPS}" \
     --run-mode gpu \
+    --precision double \
     --no-dump-xla \
-    --name fiducial \
+    --name grid \
     --a-ini "${A_INI}" \
     --a-end "${A_END}" \
     --no-calculate-fof \
@@ -75,5 +76,5 @@ srun --ntasks=$((SLURM_NNODES * 4)) --ntasks-per-node=4 \
     --shells-nside 2048 \
     --shells-z-min 0.0 \
     --shells-z-max 3.5 \
-    --pre-steps 10 
+    --pre-steps 40 
 echo "[$(date --iso-8601=seconds)] DISCO-CUSTOM run completed"

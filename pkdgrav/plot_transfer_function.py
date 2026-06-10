@@ -44,9 +44,9 @@ def plot_comparison(file_configs, output_path):
 # Configuration for your two files
 file_configs = [
     {
-        'path': '/capstor/scratch/cscs/damrein/outputs/class/class_output_fiducial_exact01_tk.dat',
+        'path': '/capstor/scratch/cscs/damrein/cosmogridv1_fiducial/run_0000/transfer_fiducial.dat',
         'k_col': 0,
-        't_col': 6,
+        't_col': 1,
         'label': 'David',
         'color': 'black'
     },

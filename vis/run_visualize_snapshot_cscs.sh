@@ -45,7 +45,7 @@ if ! "${PYTHON_BIN}" -c "import numpy, matplotlib" >/dev/null 2>&1; then
   exit 3
 fi
 
-SNAPSHOT=${SCRATCH}/outputs/snapshots/final_multigpu_3009179.npz
+SNAPSHOT=${SCRATCH}/outputs/snapshots/grid_cosmo_000001_run_0.npz
 OUTDIR=${SCRATCH}/outputs/plots/snapshots
 
 mkdir -p "${OUTDIR}"
@@ -114,6 +114,8 @@ else:
     pos = np.column_stack([p['x'], p['y'], p['z']])
     grid_val = 832
     slice_thickness_val = 5.0
+
+print(f"BOXSIZE: {BOXSIZE}, slice_thickness_val: {slice_thickness_val}, grid_val: {grid_val}")
 
 plot_density_slice(
     positions=pos,
