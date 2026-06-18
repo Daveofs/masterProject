@@ -21,7 +21,7 @@ export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK:-64}"
 export MPLBACKEND=Agg
 
 mkdir -p /capstor/scratch/cscs/damrein/outputs/logs/get_tf
-PARAM_DIR=/capstor/scratch/cscs/damrein/cosmogridv1/cosmo_*/run_*/
+PARAM_DIR=/capstor/scratch/cscs/damrein/cosmogridv1_fiducial_test2/run_0000
 
 start_time=$(date +%s)
 echo "[$(date +'%Y-%m-%dT%H:%M:%S%z')] Starting get_transfer_function.py (OMP_NUM_THREADS=${OMP_NUM_THREADS})"

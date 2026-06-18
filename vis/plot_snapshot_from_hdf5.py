@@ -10,8 +10,8 @@ print("\n==============================")
 print("Reading DISCO-DJ")
 print("==============================")
 
-disco_base = '/capstor/scratch/cscs/damrein/outputs/disco_custom/data/output/gpu_grid_3629929'
-disco_files = [f"{disco_base}/snapshot.{i}.hdf5" for i in range(8)]
+disco_base = '/capstor/scratch/cscs/damrein/outputs/disco_custom/data/output/gpu_grid_3697757'
+disco_files = [f"{disco_base}/snapshot.{i}.hdf5" for i in range(4)]
 disco_key = 'PartType1/Coordinates'
 Boxsize = 900.0
 slice_thickness_val = 5.0

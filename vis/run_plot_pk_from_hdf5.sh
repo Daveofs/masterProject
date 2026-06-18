@@ -12,15 +12,16 @@ cd "$(dirname "$0")"
 PKDGRAV_FILE="/capstor/scratch/cscs/damrein/cosmogridv1_fiducial/run_0000/standard/CosmoML.00140.hdf5"
 PKDGRAV_KEY="PartType1/Coordinates"
 
-DISCO_BASE="/capstor/scratch/cscs/damrein/outputs/disco_lorenzo/data/output/gpu_fiducial_3536656"
+DISCO_BASE="/capstor/scratch/cscs/damrein/outputs/disco_custom/data/output/gpu_grid_3666779"
 DISCO_KEY="PartType1/Coordinates"
-DISCO_NSHARD=8
+# Number of DISCO-DJ shards (depends on number of GPUS used in the run)
+DISCO_NSHARD=8 
 
 LBOX=900.0
 NGRID=832
 
 # Where to write outputs (make sure this is writable on your system)
-OUTPUT_DIR="/capstor/scratch/cscs/damrein/outputs/pk_lorenzo"
+OUTPUT_DIR="/capstor/scratch/cscs/damrein/outputs/pk_backscaling"
 
 mkdir -p "$OUTPUT_DIR"
 

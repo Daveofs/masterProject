@@ -79,13 +79,13 @@ def _compile_accumulate_kernel():
                 jnp.broadcast_to(jnp.array([1., 0., 0.], dtype=jnp.float32),
                                  direction.shape),
             )
-            # pix  = vec2pix_ring_jax(nside, safe_dir[:, 0],
-            #                         safe_dir[:, 1], safe_dir[:, 2])
-            x, y, z = safe_dir[:, 0], safe_dir[:, 1], safe_dir[:, 2]
-            theta = jnp.arctan2(jnp.sqrt(x**2 + y**2), z)
-            phi = jnp.arctan2(y, x)
-            phi = jnp.where(phi < 0.0, phi + 2.0 * jnp.pi, phi)  # [0, 2π)
-            pix = hp_jax.ang2pix(nside, theta, phi)
+            pix  = vec2pix_ring_jax(nside, safe_dir[:, 0],
+                                    safe_dir[:, 1], safe_dir[:, 2])
+            # x, y, z = safe_dir[:, 0], safe_dir[:, 1], safe_dir[:, 2]
+            # theta = jnp.arctan2(jnp.sqrt(x**2 + y**2), z)
+            # phi = jnp.arctan2(y, x)
+            # phi = jnp.where(phi < 0.0, phi + 2.0 * jnp.pi, phi)  # [0, 2π)
+            # pix = hp_jax.ang2pix(nside, theta, phi)
             pix  = jnp.clip(pix, 0, npix - 1)
             # Spread zero-weight atomics uniformly to avoid hot-address serialisation
             trash_pix = jnp.arange(X0.shape[0], dtype=jnp.int32) % jnp.int32(npix)

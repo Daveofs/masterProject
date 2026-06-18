@@ -167,7 +167,7 @@ if _is_rank0:
 # ---------------------------------------------------------------------------
 if _is_rank0:
     print("Update Disco-Dj global state BEFORE importing discodj")
-from discodj.core.global_state import update_global_options
+from discodj.core.global_state import update_global_options, get_global_state
 update_global_options(
     res=args.res,
     res_pm=args.res_pm,
@@ -440,6 +440,7 @@ dj = DiscoDJ(
 
 if jax.process_index() == 0:
     print("DISCO-DJ initialised:", dj)
+    print("Global State after init:", get_global_state())
 
 t1 = time()
 

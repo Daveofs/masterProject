@@ -54,7 +54,7 @@ file_configs = [
         'path': '/capstor/scratch/cscs/damrein/class_backscaling/transfer_fiducial.dat',
         'k_col': 0,
         't_col': 1,
-        'label': 'Jozef',
+        'label': 'with nu',
         'color': 'red'
     }
 ]

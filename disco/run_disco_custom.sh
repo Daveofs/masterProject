@@ -1,11 +1,11 @@
 #!/bin/bash
 
-#SBATCH --nodes=2
+#SBATCH --nodes=1
 #SBATCH --exclusive
 #SBATCH --job-name=discodj-custom
 #SBATCH --partition=normal
 #SBATCH --account=sk037
-#SBATCH --ntasks-per-node=4
+#SBATCH --ntasks-per-node=1
 #SBATCH --time=00:30:00
 #SBATCH --gres=gpu:4
 #SBATCH --output=/capstor/scratch/cscs/damrein/outputs/logs/disco_custom/slurm-%j.out
@@ -25,9 +25,9 @@ OUT_DIR=/capstor/scratch/cscs/damrein/outputs/disco_custom
 mkdir -p "${SNAP_DIR}" "${LOG_DIR}" "${OUT_DIR}"
 mkdir -p "${OUT_DIR}/data/output"
 
-ICS_FILE=/capstor/scratch/cscs/damrein/cosmogridv1/cosmo_000001/run_0/CosmoML_000001_run_0.00000.hdf5
-PARAM_YML=/capstor/scratch/cscs/damrein/cosmogridv1/cosmo_000001/run_0/params.yml
-CLASS_PROCESSED=/capstor/scratch/cscs/damrein/cosmogridv1/cosmo_000001/run_0/class_processed.hdf5
+ICS_FILE=/capstor/scratch/cscs/damrein/cosmogridv1_fiducial_test2/run_0000/CosmoML_cosmogridv1_fiducial_test2_run_0000.00000.hdf5
+PARAM_YML=/capstor/scratch/cscs/damrein/cosmogridv1_fiducial_test2/run_0000/params.yml
+CLASS_PROCESSED=/capstor/scratch/cscs/damrein/cosmogridv1_fiducial_test2/run_0000/class_processed.hdf5
 CONDA_INIT=/users/damrein/miniforge3/etc/profile.d/conda.sh
 CONDA_ENV=disco_custom
 
@@ -43,7 +43,7 @@ echo "Python:         ${PYTHON_BIN}"
 echo "simulation_run: ${SIMRUN_BIN}"
 
 METAINFO_FILE=/capstor/scratch/cscs/damrein/cosmogridv1/CosmoGridV1_metainfo.h5
-COSMO_KEY=cosmo_000001
+COSMO_KEY=cosmo_fiducial
 RES=832
 RES_PM=832
 BOXSIZE=900.0
@@ -59,15 +59,15 @@ srun --ntasks=$((SLURM_NNODES * 4)) --ntasks-per-node=4 \
     --boxsize "${BOXSIZE}" \
     --numsteps "${NUMSTEPS}" \
     --run-mode gpu \
-    --precision double \
+    --cosmo PKdgrav_fiducial \
     --no-dump-xla \
     --name grid \
     --a-ini "${A_INI}" \
     --a-end "${A_END}" \
     --no-calculate-fof \
-    --save-hdf5-snapshot \
-    --grad-kernel-order 4 \
-    --n-order 3 \
+    --save-npz-snapshot \
+    --grad-kernel-order 0 \
+    --n-order 1 \
     --build-shells \
     --shells-metainfo "${METAINFO_FILE}" \
     --param-file "${PARAM_YML}" \

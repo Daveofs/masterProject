@@ -18,38 +18,32 @@ SCRATCH_DIR=/capstor/scratch/cscs/damrein
 CONDA_ROOT=/users/damrein/miniforge3
 CONDA_ENV=disco-dj
 
-DISCO_FILE="/capstor/scratch/cscs/damrein/outputs/shells_symplectic_better_fixed_chi_of_a/shells_nside=2048.npz"
-DISCO_FILE_1664="/capstor/scratch/cscs/damrein/outputs/shells_symplectic/shells_nside=2048.npz"
-COSMOGRID_FILE="/capstor/scratch/cscs/damrein/cosmogridv1/cosmo_000001/run_0/compressed_shells.npz"
-PARAMS_YML="/capstor/scratch/cscs/damrein/cosmogridv1/cosmo_000001/run_0/params.yml"
+DISCO_FILE="/capstor/scratch/cscs/damrein/outputs/disco_custom/data/output/gpu_grid_3698056/shells_nside=2048.npz"
+# Set to "None" or leave empty to make it optional
+DISCO_FILE_1664=None
+COSMOGRID_FILE="/capstor/scratch/cscs/damrein/cosmogridv1_fiducial_test2/run_0000/compressed_shells.npz"
+PARAMS_YML="/capstor/scratch/cscs/damrein/cosmogridv1_fiducial_test2/run_0000/params.yml"
 OUT_DIR="${SCRATCH_DIR}/outputs/cl_ratio"
 
-PY_SCRIPT=/users/damrein/masterProject/tools/plot_cl_ratio.py
+PY_SCRIPT=/users/damrein/masterProject/vis/plot_cl_ratio.py
 
 # Shell indices to plot: 5 evenly spaced across the 69 shells (0-based)
-# shell 0  z~[0.000, 0.013]
-# shell 17 z~[0.285, 0.310]
-# shell 34 z~[0.720, 0.780]
-# shell 51 z~[1.540, 1.650]
-# shell 68 z~[3.351, 3.500]
-SHELL_INDICES="10 20 30 40 50 60"
+SHELL_INDICES="3 15 20 30 65"
 
 # Maximum multipole (default: 3*2048-1 = 6143, can reduce for speed)
 LMAX=3000
 
 # Toggle optional curves in plots
-# true  -> include curve family
-# false -> hide curve family
 SHOW_THEORY=false
 SHOW_RESID=false
 
 # Custom legend labels
-LABEL_DISCO="DISCO_bullfrog"
-LABEL_DISCO_1664="DISCO_symplectic"
+LABEL_DISCO="DTF - Disco fiducial with transfer function"
+LABEL_DISCO_1664="Ignore"
 LABEL_COSMOGRID="CosmoGridV1"
 LABEL_THEORY="CCL theory"
-LABEL_RESID="DISCO - CosmoGrid (resid)"
-LABEL_RESID_1664="DISCO_1664 - CosmoGrid (resid)"
+LABEL_RESID="DTF - CosmoGrid (resid)"
+LABEL_RESID_1664="Ignore - CosmoGrid (resid)"
 
 # ---------------------------------------------------------------------------
 # Environment
@@ -65,6 +59,11 @@ conda activate "${CONDA_ENV}"
 # Validate inputs
 # ---------------------------------------------------------------------------
 for f in "${DISCO_FILE}" "${DISCO_FILE_1664}" "${COSMOGRID_FILE}" "${PARAMS_YML}" "${PY_SCRIPT}"; do
+    # Skip validation if the file is explicitly marked as "None" or empty
+    if [[ "${f}" == "None" || -z "${f}" ]]; then
+        continue
+    fi
+
     if [[ ! -f "${f}" ]]; then
         echo "[ERROR] File not found: ${f}" >&2
         exit 2
@@ -75,16 +74,17 @@ done
 # Run
 # ---------------------------------------------------------------------------
 echo "[$(date --iso-8601=seconds)] Starting Cl ratio computation"
-echo "  DISCO:      ${DISCO_FILE}"
-echo "  DISCO_1664: ${DISCO_FILE_1664}"
+echo "  DISCO:       ${DISCO_FILE}"
+echo "  DISCO_1664:  ${DISCO_FILE_1664}"
 echo "  CosmoGridV1: ${COSMOGRID_FILE}"
-echo "  Params YML: ${PARAMS_YML}"
-echo "  Output dir: ${OUT_DIR}"
-echo "  Shells:     ${SHELL_INDICES}"
-echo "  lmax:       ${LMAX}"
-echo "  showTheory: ${SHOW_THEORY}"
-echo "  showResid:  ${SHOW_RESID}"
+echo "  Params YML:  ${PARAMS_YML}"
+echo "  Output dir:  ${OUT_DIR}"
+echo "  Shells:      ${SHELL_INDICES}"
+echo "  lmax:        ${LMAX}"
+echo "  showTheory:  ${SHOW_THEORY}"
+echo "  showResid:   ${SHOW_RESID}"
 
+# Handle conditional flags
 THEORY_FLAG="--show-theory"
 if [[ "${SHOW_THEORY}" != "true" ]]; then
     THEORY_FLAG="--no-show-theory"
@@ -95,10 +95,15 @@ if [[ "${SHOW_RESID}" != "true" ]]; then
     RESID_FLAG="--no-show-resid"
 fi
 
+DISCO_1664_FLAG=""
+if [[ "${DISCO_FILE_1664}" != "None" && -n "${DISCO_FILE_1664}" ]]; then
+    DISCO_1664_FLAG="--disco-1664 ${DISCO_FILE_1664}"
+fi
+
 # shellcheck disable=SC2086
 python "${PY_SCRIPT}" \
     --disco      "${DISCO_FILE}" \
-    --disco-1664 "${DISCO_FILE_1664}" \
+    ${DISCO_1664_FLAG} \
     --cosmogrid  "${COSMOGRID_FILE}" \
     --out-dir    "${OUT_DIR}" \
     --shells     ${SHELL_INDICES} \

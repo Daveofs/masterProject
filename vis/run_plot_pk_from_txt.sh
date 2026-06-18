@@ -19,14 +19,14 @@ CONDA_ROOT=/users/damrein/miniforge3
 CONDA_ENV=disco-dj
 
 PK_DIR=${SCRATCH_DIR}/pk
-PK_A=/capstor/scratch/cscs/damrein/outputs/pk_custom/pk_disco_concept_nu_omega_r_5.58e-5.txt
-PK_B="/capstor/scratch/cscs/damrein/outputs/pk_custom/pk_disco_backscaling_omega_r_5.58e-5.txt"  # Optional additional spectrum; leave empty if not used
-PK_C=/capstor/scratch/cscs/damrein/outputs/pk_custom/pk_pkd_standard_fiducial.txt
-OUTPUT_PNG=${PK_DIR}/pk_backscaling_vs_concept_nu_omega_r_5.58e-5.png
+PK_A="/capstor/scratch/cscs/damrein/outputs/pk_backscaling/pk_disco_fiducial.txt"
+PK_B="/users/damrein/k_pk_disco_fiducial_with_neutrinos.txt"  # Optional additional spectrum; leave empty if not used
+PK_C="/users/damrein/k_pk_pkd_fiducial_with_neutrinos.txt"
+OUTPUT_PNG=${PK_DIR}/pk_backscaling_david_vs_jozef.png
 
-LABEL_A="PK_A: DISCO concept nu omega_r=5.58e-5"
-LABEL_B="PK_B: DISCO backscaling omega_r=5.58e-5"
-LABEL_C="PK_C: PKD fiducial standard"
+LABEL_A="PK_A: DISCO David"
+LABEL_B="PK_B: DISCO Jozef"
+LABEL_C="PK_C: PKD fiducial Jozef"
 
 PY_SCRIPT=/users/damrein/masterProject/tools/plot_pk_from_txt.py
 
