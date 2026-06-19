@@ -274,7 +274,6 @@ print("Saved: Pk_comparison.png")
 np.savetxt(f"{PARAM_DIR}/Pk_linear_concept.txt",np.c_[k_hMpc,Pk_class], header="k [h/Mpc]    P(k) [(Mpc/h)^3]")
 
 
-
 k, tf = get_class_transfer_function(k_hMpc, Pk_hdf5, A_s, n_s, k_pivot, h)
 save_class_transfer_function(k, tf, os.path.join(PARAM_DIR, 'transfer_fiducial.dat'), label='tot')
 

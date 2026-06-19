@@ -18,10 +18,10 @@ SCRATCH_DIR=/capstor/scratch/cscs/damrein
 CONDA_ROOT=/users/damrein/miniforge3
 CONDA_ENV=disco-dj
 
-DISCO_FILE="/capstor/scratch/cscs/damrein/outputs/disco_custom/data/output/gpu_grid_3698056/shells_nside=2048.npz"
+DISCO_FILE="/capstor/scratch/cscs/damrein/cosmogridv1_test2/cosmo_000001/run_0/shells_nside=2048_corrected.npz"
 # Set to "None" or leave empty to make it optional
 DISCO_FILE_1664=None
-COSMOGRID_FILE="/capstor/scratch/cscs/damrein/cosmogridv1_fiducial_test2/run_0000/compressed_shells.npz"
+COSMOGRID_FILE="/capstor/scratch/cscs/damrein/cosmogridv1_test2/cosmo_000001/run_0/compressed_shells.npz"
 PARAMS_YML="/capstor/scratch/cscs/damrein/cosmogridv1_fiducial_test2/run_0000/params.yml"
 OUT_DIR="${SCRATCH_DIR}/outputs/cl_ratio"
 
@@ -38,11 +38,11 @@ SHOW_THEORY=false
 SHOW_RESID=false
 
 # Custom legend labels
-LABEL_DISCO="DTF - Disco fiducial with transfer function"
+LABEL_DISCO="DRF - Disco grid with transfer function"
 LABEL_DISCO_1664="Ignore"
 LABEL_COSMOGRID="CosmoGridV1"
 LABEL_THEORY="CCL theory"
-LABEL_RESID="DTF - CosmoGrid (resid)"
+LABEL_RESID="DRF - CosmoGrid (resid)"
 LABEL_RESID_1664="Ignore - CosmoGrid (resid)"
 
 # ---------------------------------------------------------------------------

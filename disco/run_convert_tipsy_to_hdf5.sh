@@ -17,8 +17,8 @@ import sys
 sys.path.insert(0, "${SCRIPT_DIR}")
 from read_tipsy_file import tipsy_to_hdf5
 
-file_ics        = '/capstor/scratch/cscs/damrein/cosmogridv1_fiducial_test2/run_0000/CosmoML_cosmogridv1_fiducial_test2_run_0000.00000'
-snapshot_output = '/capstor/scratch/cscs/damrein/cosmogridv1_fiducial_test2/run_0000/CosmoML_cosmogridv1_fiducial_test2_run_0000.00000.hdf5'
+file_ics        = '/capstor/scratch/cscs/damrein/cosmogridv1_test2/cosmo_000001/run_0/CosmoML_000001_run_0.00000'
+snapshot_output = '/capstor/scratch/cscs/damrein/cosmogridv1_test2/cosmo_000001/run_0/CosmoML_000001_run_0.00000.hdf5'
 
 # Set h, omega_m, omega_b, and omega_lambda to 0.0
 

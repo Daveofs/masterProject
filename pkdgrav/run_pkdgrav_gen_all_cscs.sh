@@ -28,7 +28,7 @@
 #SBATCH --error=/capstor/scratch/cscs/damrein/outputs/logs/pkdgrav/pkdgrav_gen_%A_%a.err
 
 # ---- Paths -------------------------------------------------------
-COSMOGRID_DIR="/capstor/scratch/cscs/damrein/cosmogridv1"
+COSMOGRID_DIR="/capstor/scratch/cscs/damrein/cosmogridv1_test2"
 PKDGRAV_BIN="/users/damrein/pkdgrav/pkdgrav3_dev-master/build/pkdgrav3"
 JOB_LIST="/users/damrein/masterProject/pkdgrav/job_list_gen_all.txt"
 LOG_DIR="/capstor/scratch/cscs/damrein/outputs/logs/pkdgrav"

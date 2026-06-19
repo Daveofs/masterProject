@@ -42,7 +42,7 @@ export NCCL_NET_GDR_LEVEL=5
 # Paths
 # ============================================================
 SCRIPT_DIR="/users/damrein/masterProject/ml"
-DATA_DIR="/capstor/scratch/cscs/damrein/cosmogrid"
+DATA_DIR="/capstor/scratch/cscs/damrein/cosmogridv1_test2"
 OUT_DIR="/capstor/scratch/cscs/damrein/outputs/flow_matching/${SLURM_JOB_ID}"
 
 mkdir -p "$OUT_DIR"
@@ -60,14 +60,14 @@ srun bash -c "\
         --rdzv_endpoint=${MASTER_ADDR}:${MASTER_PORT} \
     ${SCRIPT_DIR}/train_flow_matching.py \
         --data-dir ${DATA_DIR} \
-        --low-npz disco_shells.npz \
+        --low-npz shells_nside=2048.npz \
         --high-npz compressed_shells.npz \
-        --max-shells 10 \
-        --batch-size 8 \
-        --epochs 5 \
+        --max-shells 20 \
+        --batch-size 2 \
+        --epochs 1 \
         --lr 1e-3 \
         --sigma 0.01 \
-        --hidden 512 \
+        --hidden 1024 \
         --num-workers 4 \
         --out-dir ${OUT_DIR} \
         --log-interval 10

@@ -5,7 +5,7 @@
 #   3. Patch baryonification_params.py (transfct path)
 # Patching is idempotent: each change is only applied if still needed.
 
-COSMOGRID_DIR="/capstor/scratch/cscs/damrein/cosmogridv1_fiducial_test2"
+COSMOGRID_DIR="/capstor/scratch/cscs/damrein/cosmogridv1_test2"
 
 # Activate conda environment
 source /users/damrein/miniforge3/bin/activate
@@ -172,7 +172,7 @@ patch_cosmology_par() {
     fi
 
     if grep -q 'achClassFilename' "$par_file"; then
-        sed -i 's|^achClassFilename.*|achTfFile = "transfer_function.dat"|' "$par_file"
+        sed -i 's|^achClassFilename.*|achTfFile = "transfer_fiducial_cb.dat"|' "$par_file"
         changed=1
     fi
 

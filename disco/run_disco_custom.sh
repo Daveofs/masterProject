@@ -1,12 +1,12 @@
 #!/bin/bash
 
-#SBATCH --nodes=1
+#SBATCH --nodes=2
 #SBATCH --exclusive
 #SBATCH --job-name=discodj-custom
 #SBATCH --partition=normal
 #SBATCH --account=sk037
 #SBATCH --ntasks-per-node=1
-#SBATCH --time=00:30:00
+#SBATCH --time=01:00:00
 #SBATCH --gres=gpu:4
 #SBATCH --output=/capstor/scratch/cscs/damrein/outputs/logs/disco_custom/slurm-%j.out
 #SBATCH --error=/capstor/scratch/cscs/damrein/outputs/logs/disco_custom/slurm-%j.err
@@ -21,13 +21,13 @@ export JAX_TRACEBACK_FILTERING=off
 # ── ICS / cosmology ───────────────────────────────────────────────────────
 SNAP_DIR=/capstor/scratch/cscs/damrein/outputs/snapshots
 LOG_DIR=/capstor/scratch/cscs/damrein/outputs/logs/disco_custom
-OUT_DIR=/capstor/scratch/cscs/damrein/outputs/disco_custom
+OUT_DIR=/capstor/scratch/cscs/damrein/outputs
 mkdir -p "${SNAP_DIR}" "${LOG_DIR}" "${OUT_DIR}"
-mkdir -p "${OUT_DIR}/data/output"
+mkdir -p "${OUT_DIR}/disco_sim"
 
-ICS_FILE=/capstor/scratch/cscs/damrein/cosmogridv1_fiducial_test2/run_0000/CosmoML_cosmogridv1_fiducial_test2_run_0000.00000.hdf5
-PARAM_YML=/capstor/scratch/cscs/damrein/cosmogridv1_fiducial_test2/run_0000/params.yml
-CLASS_PROCESSED=/capstor/scratch/cscs/damrein/cosmogridv1_fiducial_test2/run_0000/class_processed.hdf5
+ICS_FILE=/capstor/scratch/cscs/damrein/cosmogridv1_test2/cosmo_000001/run_0/CosmoML_000001_run_0.00000.hdf5
+PARAM_YML=/capstor/scratch/cscs/damrein/cosmogridv1_test2/cosmo_000001/run_0/params.yml
+CLASS_PROCESSED=/capstor/scratch/cscs/damrein/cosmogridv1_test2/cosmo_000001/run_0/class_processed.hdf5
 CONDA_INIT=/users/damrein/miniforge3/etc/profile.d/conda.sh
 CONDA_ENV=disco_custom
 
@@ -43,9 +43,9 @@ echo "Python:         ${PYTHON_BIN}"
 echo "simulation_run: ${SIMRUN_BIN}"
 
 METAINFO_FILE=/capstor/scratch/cscs/damrein/cosmogridv1/CosmoGridV1_metainfo.h5
-COSMO_KEY=cosmo_fiducial
+COSMO_KEY=cosmo_000001
 RES=832
-RES_PM=832
+RES_PM=1664
 BOXSIZE=900.0
 NUMSTEPS=100
 A_INI=0.01
