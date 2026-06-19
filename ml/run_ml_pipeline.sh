@@ -1,0 +1,79 @@
+#!/bin/bash
+#SBATCH --nodes=2
+#SBATCH --exclusive
+#SBATCH --job-name=flow-loo-pipeline
+#SBATCH --partition=normal
+#SBATCH --account=sk037
+#SBATCH --ntasks-per-node=1
+#SBATCH --time=01:00:00
+#SBATCH --gres=gpu:4
+#SBATCH --output=/capstor/scratch/cscs/damrein/outputs/logs/flow_matching/slurm-pipeline-%j.out
+#SBATCH --error=/capstor/scratch/cscs/damrein/outputs/logs/flow_matching/slurm-pipeline-%j.err
+#SBATCH --chdir=/capstor/scratch/cscs/damrein/outputs/flow_matching
+
+# ============================================================
+# Environment setup
+# ============================================================
+source /users/damrein/miniforge3/bin/activate
+
+# ============================================================
+# Multi-node / multi-GPU config
+# ============================================================
+export MASTER_ADDR=$(scontrol show hostnames "$SLURM_JOB_NODELIST" | head -n 1)
+export MASTER_PORT=29500
+
+export GPUS_PER_NODE=4
+export NNODES=${SLURM_NNODES}
+export WORLD_SIZE=$((NNODES * GPUS_PER_NODE))
+
+echo "========================================"
+echo "MASTER_ADDR: ${MASTER_ADDR}"
+echo "MASTER_PORT: ${MASTER_PORT}"
+echo "NNODES:      ${NNODES}"
+echo "WORLD_SIZE:  ${WORLD_SIZE}"
+echo "========================================"
+
+export NCCL_DEBUG=INFO
+export NCCL_IB_DISABLE=0
+export NCCL_NET_GDR_LEVEL=5
+
+# ============================================================
+# Paths
+# ============================================================
+SCRIPT_DIR="/users/damrein/masterProject"
+DATA_DIR="/capstor/scratch/cscs/damrein/cosmogridv1_test2"
+OUT_ROOT="/capstor/scratch/cscs/damrein/outputs/flow_matching/${SLURM_JOB_ID}"
+SHARED_TMP="/capstor/scratch/cscs/damrein/outputs/tmp/${SLURM_JOB_ID}"
+
+mkdir -p "$OUT_ROOT"
+mkdir -p "$SHARED_TMP"
+mkdir -p /capstor/scratch/cscs/damrein/outputs/logs/flow_matching
+
+# ============================================================
+# Launch Pipeline Wrapper
+# ============================================================
+# We execute run_pipeline.py on the head node. It will automatically
+# trigger srun + torchrun for the training phase because of the flag.
+
+python ${SCRIPT_DIR}/ml/run_pipeline.py \
+    --data-root ${DATA_DIR} \
+    --test-cosmo cosmo_000001 \
+    --out-root ${OUT_ROOT} \
+    --train-script train_flow_matching.py \
+    --apply-script apply_flow_correction.py \
+    --low-npz shells_nside=2048.npz \
+    --high-npz compressed_shells.npz \
+    --shared-tmp ${SHARED_TMP} \
+    --srun-torchrun \
+    --max-shells 20 \
+    --batch-size 2 \
+    --epochs 1 \
+    --lr 1e-3 \
+    --sigma 0.01 \
+    --hidden 1024 \
+    --nside-patch 128
+
+echo "Pipeline ${SLURM_JOB_ID} finished at $(date)"
+
+# Cleanup the shared temp directory
+rm -rf "$SHARED_TMP"

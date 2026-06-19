@@ -3,7 +3,7 @@
 
 Pipeline steps:
 1) Build a temporary training root containing symlinks to all `cosmo_*` folders except one held-out test folder.
-2) Call `ml/train_flow_matching.py` to train a model.
+2) Call `ml/train_flow_matching.py` to train a model (supports SLURM torchrun).
 3) Call `apply_flow_correction.py` on the held-out folder.
 4) Save helper NPZ files (`shells_nside=...`, `shells_corrected_nside=...`, and difference).
 5) Plot original, corrected, and difference shells using `plot_shells()`.
@@ -15,11 +15,16 @@ import argparse
 import subprocess
 import sys
 import tempfile
+import os
 from pathlib import Path
-
+import torch
 import healpy as hp
 import numpy as np
 
+
+vis_root = Path("/users/damrein/masterProject/vis")
+if str(vis_root) not in sys.path:
+    sys.path.insert(0, str(vis_root))
 from visualize import plot_shells
 
 
@@ -35,8 +40,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--low-npz", type=str, default="shells_nside=512_noisy_shuffle.npz")
     p.add_argument("--high-npz", type=str, default="compressed_shells.npz")
 
-    p.add_argument("--nside-small", type=int, default=128)
-    p.add_argument("--n-patches", type=int, default=1)
+    # Replaced obsolete args with new nside-patch
+    p.add_argument("--nside-patch", type=int, default=16, help="Nside for patch grid")
     p.add_argument("--max-shells", type=int, default=10)
     p.add_argument("--batch-size", type=int, default=1)
     p.add_argument("--epochs", type=int, default=5)
@@ -47,8 +52,11 @@ def parse_args() -> argparse.Namespace:
 
     p.add_argument("--shell-index", type=int, default=5, help="Shell index used for plotting")
     p.add_argument("--apply-t", type=float, default=0.0, help="t passed to apply_flow_correction.py")
-    p.add_argument("--apply-power", type=float, default=0.0, help="power passed to apply_flow_correction.py")
     p.add_argument("--device", type=str, default="cpu")
+
+    # Distributed / Cluster specific args
+    p.add_argument("--srun-torchrun", action="store_true", help="Wrap training command in srun + torchrun for SLURM")
+    p.add_argument("--shared-tmp", type=str, default=None, help="Shared directory for LOO symlinks (crucial for multi-node)")
 
     p.add_argument(
         "--out-root",
@@ -62,7 +70,9 @@ def parse_args() -> argparse.Namespace:
 
 
 def run_cmd(cmd: list[str], cwd: Path) -> None:
+    print("\n" + "="*80)
     print("Running:", " ".join(str(x) for x in cmd))
+    print("="*80 + "\n")
     subprocess.run(cmd, cwd=cwd, check=True)
 
 
@@ -78,10 +88,17 @@ def main() -> None:
     if not test_dir.exists() or not test_dir.is_dir():
         raise FileNotFoundError(f"Held-out test folder not found: {test_dir}")
 
+    # Find all cosmo_*/run_* folders and exclude the held-out test folder
     all_cosmos = sorted(d for d in data_root.iterdir() if d.is_dir() and d.name.startswith("cosmo_"))
     train_cosmos = [d for d in all_cosmos if d.name != args.test_cosmo]
     if len(train_cosmos) == 0:
         raise RuntimeError("No training folders left after excluding test-cosmo.")
+    test_run_dirs = [r for r in sorted(test_dir.iterdir()) if r.is_dir() and r.name.startswith("run_")]
+    if test_run_dirs:
+        test_run_dir = test_run_dirs[0]
+        print(f"[Pipeline] Found run subdirectories inside test cosmo. Using: {test_run_dir.name}")
+    else:
+        test_run_dir = test_dir
 
     out_root = Path(args.out_root).expanduser()
     run_out = out_root / args.test_cosmo
@@ -98,10 +115,10 @@ def main() -> None:
         raise FileNotFoundError(f"train script not found: {train_script}")
     if not apply_script.exists():
         raise FileNotFoundError(f"apply script not found: {apply_script}")
-
-    test_input = test_dir / args.low_npz
-    test_high = test_dir / args.high_npz
-    test_params = test_dir / "params.yml"
+    
+    test_input = test_run_dir / args.low_npz
+    test_high = test_run_dir / args.high_npz
+    test_params = test_run_dir / "params.yml"
     if not test_input.exists():
         raise FileNotFoundError(f"Held-out input file not found: {test_input}")
     if not test_high.exists():
@@ -111,71 +128,73 @@ def main() -> None:
 
     corrected_out = npz_out / f"{args.test_cosmo}_{Path(args.low_npz).stem}_corrected.npz"
 
-    with tempfile.TemporaryDirectory(prefix="flow_train_loo_") as tmp:
+    # Setup shared temporary directory
+    shared_tmp_dir = Path(args.shared_tmp) if args.shared_tmp else None
+    if shared_tmp_dir:
+        shared_tmp_dir.mkdir(parents=True, exist_ok=True)
+
+    with tempfile.TemporaryDirectory(prefix="flow_train_loo_", dir=shared_tmp_dir) as tmp:
         tmp_root = Path(tmp)
         for folder in train_cosmos:
             link = tmp_root / folder.name
             link.symlink_to(folder, target_is_directory=True)
 
-        train_cmd = [
-            args.python,
+        # Base arguments for the train script
+        train_args = [
             str(train_script),
-            "--data-dir",
-            str(tmp_root),
-            "--low-npz",
-            args.low_npz,
-            "--high-npz",
-            args.high_npz,
-            "--nside-small",
-            str(args.nside_small),
-            "--max-shells",
-            str(args.max_shells),
-            "--batch-size",
-            str(args.batch_size),
-            "--epochs",
-            str(args.epochs),
-            "--lr",
-            str(args.lr),
-            "--sigma",
-            str(args.sigma),
-            "--hidden",
-            str(args.hidden),
-            "--n-patches",
-            str(args.n_patches),
-            "--out-dir",
-            str(model_out),
-            "--log-interval",
-            str(args.log_interval),
+            "--data-dir", str(tmp_root),
+            "--low-npz", args.low_npz,
+            "--high-npz", args.high_npz,
+            "--nside-patch", str(args.nside_patch),
+            "--max-shells", str(args.max_shells),
+            "--batch-size", str(args.batch_size),
+            "--epochs", str(args.epochs),
+            "--lr", str(args.lr),
+            "--sigma", str(args.sigma),
+            "--hidden", str(args.hidden),
+            "--out-dir", str(model_out),
+            "--log-interval", str(args.log_interval),
         ]
+
+        # Wrap in torchrun if specified
+        if args.srun_torchrun:
+            nnodes = os.environ.get("SLURM_NNODES", "1")
+            gpus = os.environ.get("GPUS_PER_NODE", "4")
+            master_addr = os.environ.get("MASTER_ADDR", "127.0.0.1")
+            master_port = os.environ.get("MASTER_PORT", "29500")
+            job_id = os.environ.get("SLURM_JOB_ID", "0")
+            
+            torchrun_str = (
+                f"torchrun --nnodes={nnodes} --nproc_per_node={gpus} "
+                f"--rdzv_id={job_id} --rdzv_backend=c10d --rdzv_endpoint={master_addr}:{master_port} "
+            )
+            full_cmd_str = torchrun_str + " ".join(train_args)
+            train_cmd = ["srun", "bash", "-c", full_cmd_str]
+        else:
+            train_cmd = [args.python] + train_args
+
         run_cmd(train_cmd, cwd=root_dir)
 
     model_path = model_out / "flow_mlp.pth"
     if not model_path.exists():
         raise FileNotFoundError(f"Expected trained model not found: {model_path}")
 
+    # Ensure device is set to cuda:0 if training on GPUs
+    apply_device = args.device
+    if args.srun_torchrun and torch.cuda.is_available():
+        apply_device = "cuda:0"
+
     apply_cmd = [
         args.python,
         str(apply_script),
-        "--model",
-        str(model_path),
-        "--input",
-        str(test_input),
-        "--params",
-        str(test_params),
-        "--nside-small",
-        str(args.nside_small),
-        "--n-patches",
-        str(args.n_patches),
-        "--power",
-        str(args.apply_power),
-        "--shell-index",
-        "-1",
-        "--t",
-        str(args.apply_t),
-        "--device",
-        str(args.device),
-        "--out",
-        str(corrected_out),
+        "--model", str(model_path),
+        "--input", str(test_input),
+        "--params", str(test_params),
+        "--nside-patch", str(args.nside_patch),
+        "--shell-index", "-1",
+        "--t", str(args.apply_t),
+        "--device", apply_device,
+        "--out", str(corrected_out),
     ]
     run_cmd(apply_cmd, cwd=root_dir)
 
@@ -193,10 +212,7 @@ def main() -> None:
         raise ValueError(f"Shape mismatch: original {shells_orig.shape} vs corrected {shells_corr.shape}")
 
     npix = int(shells_orig.shape[1])
-    if not hp.isnpixok(npix):
-        raise ValueError(f"Second axis is not valid HEALPix npix: {npix}")
     nside_orig = hp.npix2nside(npix)
-
     shells_diff = shells_corr - shells_orig
 
     orig_named = npz_out / f"shells_nside={nside_orig}.npz"
@@ -211,47 +227,12 @@ def main() -> None:
     if not (0 <= idx < shells_orig.shape[0]):
         raise IndexError(f"shell-index {idx} out of range [0, {shells_orig.shape[0]-1}]")
 
-    plot_shells(
-        npz_path=orig_named,
-        z_bin=idx,
-        nside=args.plot_nside,
-        output_dir=plot_out,
-        plot_logarithmic=args.plot_log,
-        name=f"{args.test_cosmo}_shells_nside{args.plot_nside}_idx{idx}",
-    )
-    plot_shells(
-        npz_path=corr_named,
-        z_bin=idx,
-        nside=args.plot_nside,
-        output_dir=plot_out,
-        plot_logarithmic=args.plot_log,
-        name=f"{args.test_cosmo}_shells_corrected_nside{args.plot_nside}_idx{idx}",
-    )
-    plot_shells(
-        npz_path=diff_named,
-        z_bin=idx,
-        nside=args.plot_nside,
-        output_dir=plot_out,
-        plot_logarithmic=args.plot_log,
-        name=f"{args.test_cosmo}_shells_diff_nside{args.plot_nside}_idx{idx}",
-    )
-    plot_shells(
-        npz_path=test_high,
-        z_bin=idx,
-        nside=args.plot_nside,
-        output_dir=plot_out,
-        plot_logarithmic=args.plot_log,
-        name=f"{args.test_cosmo}_high_npz_nside{args.plot_nside}_idx{idx}",
-    )
+    plot_shells(npz_path=orig_named, z_bin=idx, nside=args.plot_nside, output_dir=plot_out, plot_logarithmic=args.plot_log, name=f"{args.test_cosmo}_shells_nside{args.plot_nside}_idx{idx}")
+    plot_shells(npz_path=corr_named, z_bin=idx, nside=args.plot_nside, output_dir=plot_out, plot_logarithmic=args.plot_log, name=f"{args.test_cosmo}_shells_corrected_nside{args.plot_nside}_idx{idx}")
+    plot_shells(npz_path=diff_named, z_bin=idx, nside=args.plot_nside, output_dir=plot_out, plot_logarithmic=args.plot_log, name=f"{args.test_cosmo}_shells_diff_nside{args.plot_nside}_idx{idx}")
+    plot_shells(npz_path=test_high, z_bin=idx, nside=args.plot_nside, output_dir=plot_out, plot_logarithmic=args.plot_log, name=f"{args.test_cosmo}_high_npz_nside{args.plot_nside}_idx{idx}")
 
     print("Leave-one-out pipeline completed.")
-    print(f"Held-out test folder: {test_dir}")
-    print(f"Model path: {model_path}")
-    print(f"Original shells file: {orig_named}")
-    print(f"Corrected shells file: {corr_named}")
-    print(f"Difference shells file: {diff_named}")
-    print(f"High shells input: {test_high}")
-    print(f"Plots directory: {plot_out}")
 
 
 if __name__ == "__main__":

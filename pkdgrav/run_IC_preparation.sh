@@ -5,7 +5,7 @@
 #   3. Patch baryonification_params.py (transfct path)
 # Patching is idempotent: each change is only applied if still needed.
 
-COSMOGRID_DIR="/capstor/scratch/cscs/damrein/cosmogridv1_test2"
+COSMOGRID_DIR="/capstor/scratch/cscs/damrein/cosmogridv1_test4"
 
 # Activate conda environment
 source /users/damrein/miniforge3/bin/activate
@@ -158,6 +158,32 @@ except Exception as e:
 PYEOF
 }
 
+extract_w_0() {
+    local params_file="$1"
+
+    if [ ! -f "$params_file" ]; then
+        echo ""
+        return
+    fi
+
+    python3 - "$params_file" <<'PYEOF'
+import sys
+import yaml
+from pathlib import Path
+
+yml_path = Path(sys.argv[1])
+try:
+    with yml_path.open() as f:
+        p = yaml.safe_load(f)
+
+    w0 = float(p.get("w0"))
+    print(f"{w0:.12f}")
+except Exception as e:
+    print("", file=sys.stderr)
+    print(f"  Warning: Failed to read w0 from {yml_path}: {e}", file=sys.stderr)
+PYEOF
+}
+
 patch_cosmology_par() {
     local par_file="$1"
     local abs_class="$2"
@@ -196,7 +222,7 @@ patch_cosmology_par() {
     done
 
     if [ -f "$bary_file" ] && [ -n "$abs_class" ]; then
-        local h_val omega_0 omega_b_val ns_val sigma8_val
+        local h_val omega_0 omega_b_val ns_val sigma8_val w0_val
 
         omega_rad=$(extract_omega_rad "$abs_class")
         h_val=$(extract_py_param "$bary_file" "par.cosmo.h0")
@@ -204,6 +230,7 @@ patch_cosmology_par() {
         omega_b_val=$(extract_py_param "$bary_file" "par.cosmo.Ob")
         ns_val=$(extract_py_param "$bary_file" "par.cosmo.ns")
         sigma8_val=$(extract_sigma8 "$abs_class" "$params_file")
+        w0_val=$(extract_w_0 "$params_file")
 
         cat >> "$par_file" <<EOF
         
@@ -215,6 +242,7 @@ dLambda          = $(awk "BEGIN {printf \"%.10g\", 1 - ${omega_0}}")
 dOmegab          = ${omega_b_val}
 dSpectral        = ${ns_val}
 dSigma8          = ${sigma8_val}
+w0               = ${w0_val}
 EOF
             changed=1
     fi
