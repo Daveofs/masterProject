@@ -18,7 +18,7 @@ SCRATCH_DIR=/capstor/scratch/cscs/damrein
 CONDA_ROOT=/users/damrein/miniforge3
 CONDA_ENV=disco-dj
 
-DISCO_FILE="/capstor/scratch/cscs/damrein/outputs/flow_matching/3710680/cosmo_000001/npz/cosmo_000001_shells_nside=2048_corrected.npz"
+DISCO_FILE="/capstor/scratch/cscs/damrein/outputs/flow_matching/3710743/cosmo_000001/npz/cosmo_000001_shells_nside=2048_corrected.npz"
 # Set to "None" or leave empty to make it optional
 DISCO_FILE_1664=None
 COSMOGRID_FILE="/capstor/scratch/cscs/damrein/cosmogridv1_test2/cosmo_000001/run_0/compressed_shells.npz"
