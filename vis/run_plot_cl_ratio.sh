@@ -18,7 +18,7 @@ SCRATCH_DIR=/capstor/scratch/cscs/damrein
 CONDA_ROOT=/users/damrein/miniforge3
 CONDA_ENV=disco-dj
 
-DISCO_FILE="/capstor/scratch/cscs/damrein/outputs/disco_custom/disco_sim/gpu_grid_3704461/disco_shells_nside=2048.npz"
+DISCO_FILE="/capstor/scratch/cscs/damrein/outputs/flow_matching/3710680/cosmo_000001/npz/cosmo_000001_shells_nside=2048_corrected.npz"
 # Set to "None" or leave empty to make it optional
 DISCO_FILE_1664=None
 COSMOGRID_FILE="/capstor/scratch/cscs/damrein/cosmogridv1_test2/cosmo_000001/run_0/compressed_shells.npz"
@@ -28,7 +28,7 @@ OUT_DIR="${SCRATCH_DIR}/outputs/cl_ratio"
 PY_SCRIPT=/users/damrein/masterProject/vis/plot_cl_ratio.py
 
 # Shell indices to plot: 5 evenly spaced across the 69 shells (0-based)
-SHELL_INDICES="3 15 20 30 65"
+SHELL_INDICES="3 65"
 
 # Maximum multipole (default: 3*2048-1 = 6143, can reduce for speed)
 LMAX=3000

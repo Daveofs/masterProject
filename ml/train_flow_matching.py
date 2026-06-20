@@ -1,12 +1,10 @@
 #!/usr/bin/env python3
-"""Minimal conditional Flow-Matching trainer for HEALPix shells (proof-of-concept).
+"""Conditional Flow-Matching trainer for HEALPix shells in Spherical Harmonic (Alm) space.
 
-- Loads `params.yml` from a user-specified data directory as conditioning vector.
-- Loads paired maps from two NPZ files (low-res and high-res).
-- Splits each shell into HEALPix patches for memory-efficient training.
-- Trains a small MLP to regress the conditional vector field u_t(x|z) = x1 - x0
-  following the flow-matching tutorial (toy-style training loop).
-- Supports multi-node / multi-GPU training via PyTorch DDP.
+- Converts maps to complex Alm coefficients up to a chosen lmax.
+- Stacks [real, imag] into a real 1D vector of length 2 * N_alm.
+- Uses feature-wise Z-score normalization to naturally whiten the power spectrum.
+- Integrates a clean YAML parser to whitelist true cosmological parameters.
 """
 
 import argparse
@@ -29,14 +27,12 @@ from mlp import SmallMLP
 
 
 def is_main_process():
-    """Returns True if this is rank 0 (or if not running distributed)."""
     if dist.is_initialized():
         return dist.get_rank() == 0
     return True
 
 
 def setup_distributed():
-    """Initialize distributed process group if environment variables are set."""
     if "RANK" in os.environ and "WORLD_SIZE" in os.environ:
         rank = int(os.environ["RANK"])
         world_size = int(os.environ["WORLD_SIZE"])
@@ -50,85 +46,57 @@ def setup_distributed():
 
         return local_rank, rank, world_size
     else:
-        print("[DDP] Not running distributed (no RANK/WORLD_SIZE env vars found).")
+        print("[DDP] Not running distributed.")
         return 0, 0, 1
 
 
 def cleanup_distributed():
-    """Destroy the process group if initialized."""
     if dist.is_initialized():
         dist.destroy_process_group()
 
 
-def split_into_patches(shell_map, nside_patch=16):
-    """Split a full-resolution HEALPix map into patches defined by lower-res pixels.
+def load_clean_params(params_path: Path):
+    """Safely extracts cosmological floats, ignoring SLURM IDs, paths, and seeds."""
+    params = yaml.safe_load(params_path.read_text())
+    bad_subphrases = ["seed", "job", "part", "box", "step", "nside", "path", "dir", "file", "rank", "node", "gpu", "time"]
+    
+    valid_keys = []
+    for k, v in sorted(params.items()):
+        if any(b in k.lower() for b in bad_subphrases):
+            continue
+        try:
+            float(v)
+            valid_keys.append(k)
+        except (ValueError, TypeError):
+            continue
 
-    Each patch corresponds to one pixel at nside_patch, containing all the
-    sub-pixels from the full-resolution map that fall within it.
-
-    Args:
-        shell_map: 1D array of shape [npix_full]
-        nside_patch: nside defining the patch grid
-
-    Returns:
-        patches: array of shape [n_patches, pixels_per_patch]
-    """
-    nside_full = hp.npix2nside(len(shell_map))
-    assert nside_full >= nside_patch, (
-        f"Full nside ({nside_full}) must be >= patch nside ({nside_patch})"
-    )
-    npix_patch = hp.nside2npix(nside_patch)
-    pixels_per_patch = (nside_full // nside_patch) ** 2
-
-    # HEALPix NESTED ordering guarantees contiguous sub-pixels
-    # Convert to nested ordering if needed, then reshape
-    shell_nested = hp.reorder(shell_map, r2n=True)
-    patches = shell_nested.reshape(npix_patch, pixels_per_patch)
-    return patches
+    vec = np.array([float(params[k]) for k in valid_keys], dtype=np.float32)
+    return vec, valid_keys, params
 
 
-class ShellPairsDataset(Dataset):
-    """Loads paired shells and splits them into patches for memory-efficient training.
-
-    Directory structure supported:
-      data_dir/
-      ├── cosmo_0000001/
-      │   ├── params.yml
-      │   ├── run_0/
-      │   │   ├── shells_nside=2048.npz
-      │   │   └── compressed_shells.npz
-      │   └── run_1/ ...
-      ├── cosmo_0000002/ ...
-
-    Each sample returned is a single patch (not an entire shell).
-    """
-
+class ShellAlmDataset(Dataset):
     def __init__(
         self,
         data_dir: Path,
         low_name: str = "shells_nside=2048.npz",
         high_name: str = "compressed_shells.npz",
-        nside_patch: int = 248,
+        lmax: int = 1024,
         max_shells: int = 0,
         verbose: bool = True,
     ):
         data_dir = Path(data_dir)
         assert data_dir.exists(), f"data_dir not found: {data_dir}"
+        self.lmax = lmax
+        self.N_alm = hp.Alm.getsize(lmax)
 
-        self.nside_patch = nside_patch
+        low_list = []
+        high_list = []
+        cosmo_list = []
 
-        # collect per-shell lists
-        low_patches_list = []
-        high_patches_list = []
-        cosmo_vecs = []
-
-        # detect cosmo_* subdirs
         subdirs = [d for d in sorted(data_dir.iterdir()) if d.is_dir() and d.name.startswith("cosmo_")]
-
         if len(subdirs) == 0:
             subdirs = [data_dir]
 
-        # Expand each cosmo dir into its run_* subdirs (if they exist)
         leaf_dirs = []
         for sd in subdirs:
             run_dirs = [r for r in sorted(sd.iterdir()) if r.is_dir() and r.name.startswith("run_")]
@@ -138,14 +106,13 @@ class ShellPairsDataset(Dataset):
                 leaf_dirs.append(sd)
 
         total_collected = 0
-        shell_total = int(max_shells) if max_shells and max_shells > 0 else None
-        pbar_shells = tqdm(total=shell_total, desc="Loading shells", unit="shell", disable=not verbose)
+        pbar = tqdm(total=max_shells if max_shells > 0 else None, desc="Transforming maps -> Alms", disable=not verbose)
 
+        param_names = None
         for ld in leaf_dirs:
             if max_shells and total_collected >= max_shells:
                 break
 
-            # params.yml can live in the run dir or the parent cosmo dir
             params_yml = ld / "params.yml"
             if not params_yml.exists():
                 params_yml = ld.parent / "params.yml"
@@ -156,71 +123,54 @@ class ShellPairsDataset(Dataset):
             if not (params_yml.exists() and low_npz.exists() and high_npz.exists()):
                 continue
 
-            params = yaml.safe_load(params_yml.read_text())
-            keys = sorted(params.keys())
-            cosmo_vec = np.array([float(params[k]) for k in keys], dtype=np.float32)
+            cosmo_vec, p_names, raw_dict = load_clean_params(params_yml)
+            if param_names is None and verbose:
+                param_names = p_names
+                print(f"\n[YAML Parser] Active Conditioning Vector ({len(p_names)} params):")
+                for k in p_names:
+                    print(f"   {k}: {raw_dict[k]}")
 
-            low = np.load(low_npz, allow_pickle=False)
-            high = np.load(high_npz, allow_pickle=False)
-            assert "shells" in low and "shells" in high, f"NPZ must contain 'shells' in {ld}"
+            low = np.load(low_npz, allow_pickle=False)["shells"]
+            high = np.load(high_npz, allow_pickle=False)["shells"]
 
-            low_shells = low["shells"]
-            high_shells = high["shells"]
-            assert low_shells.shape[0] == high_shells.shape[0], f"Mismatched shell counts in {ld}"
-
-            for i in range(low_shells.shape[0]):
+            for i in range(low.shape[0]):
                 if max_shells and total_collected >= max_shells:
                     break
 
-                # Split each shell into patches: [n_patches, pixels_per_patch]
-                low_p = split_into_patches(low_shells[i], nside_patch=nside_patch)
-                high_p = split_into_patches(high_shells[i], nside_patch=nside_patch)
+                alm_low = hp.map2alm(low[i], lmax=lmax, iter=1)
+                alm_high = hp.map2alm(high[i], lmax=lmax, iter=1)
 
-                low_patches_list.append(low_p.astype(np.float32))
-                high_patches_list.append(high_p.astype(np.float32))
-                cosmo_vecs.append(cosmo_vec)
+                vec_low = np.concatenate([alm_low.real, alm_low.imag]).astype(np.float32)
+                vec_high = np.concatenate([alm_high.real, alm_high.imag]).astype(np.float32)
+
+                low_list.append(vec_low)
+                high_list.append(vec_high)
+                cosmo_list.append(cosmo_vec)
+
                 total_collected += 1
-                pbar_shells.update(1)
+                pbar.update(1)
 
-        pbar_shells.close()
+        pbar.close()
+        assert len(low_list) > 0, "No valid shell pairs found."
 
-        assert len(low_patches_list) > 0, f"No valid shell pairs found under {data_dir}"
+        self.low_mat = torch.from_numpy(np.stack(low_list))     # [N_shells, 2 * N_alm]
+        self.high_mat = torch.from_numpy(np.stack(high_list))
+        self.cosmo_mat = torch.from_numpy(np.stack(cosmo_list)) # [N_shells, cond_dim]
 
-        # Stack: [N_shells, N_patches, D_patch]
-        low_all = np.stack(low_patches_list)   # [N, P, D]
-        high_all = np.stack(high_patches_list)  # [N, P, D]
-        cosmo_all = np.stack(cosmo_vecs)        # [N, C]
+        # 1. Feature-wise Z-score Whitening across the Harmonic spectrum
+        self.data_mean = self.low_mat.mean(dim=0)
+        self.data_std = self.low_mat.std(dim=0).clamp(min=1e-8)
 
-        N, P, D = low_all.shape
-        C = cosmo_all.shape[1]
-
-        # Flatten shells × patches into individual samples: [N*P, D]
-        self.low_mat = torch.from_numpy(low_all.reshape(N * P, D))
-        self.high_mat = torch.from_numpy(high_all.reshape(N * P, D))
-
-        # Calculate statistics over the input dataset
-        self.data_mean = self.low_mat.mean()
-        self.data_std = self.low_mat.std()
-        
-        # Standardize both inputs and targets to N(0, 1)
         self.low_mat = (self.low_mat - self.data_mean) / self.data_std
         self.high_mat = (self.high_mat - self.data_mean) / self.data_std
-        # -------------------------
 
-        # Repeat cosmo vector for each patch in a shell: [N*P, C]
-        self.cosmo_mat = torch.from_numpy(
-            np.repeat(cosmo_all, P, axis=0)  # [N*P, C]
-        )
-
-        self.sample_dim = D
-        self.n_shells = N
-        self.n_patches_per_shell = P
+        # 2. Standardize Conditioning Vector
+        self.cosmo_mean = self.cosmo_mat.mean(dim=0)
+        self.cosmo_std = self.cosmo_mat.std(dim=0).clamp(min=1e-8)
+        self.cosmo_mat = (self.cosmo_mat - self.cosmo_mean) / self.cosmo_std
 
         if verbose:
-            print(
-                f"Dataset ready: {N} shells × {P} patches = {len(self)} samples | "
-                f"patch_dim={D} | cosmo_dim={C} | nside_patch={nside_patch}"
-            )
+            print(f"Dataset ready: {len(self)} complete shells | Vector dim: {self.low_mat.shape[1]} | Cond dim: {self.cosmo_mat.shape[1]}")
 
     def __len__(self):
         return self.low_mat.shape[0]
@@ -230,25 +180,15 @@ class ShellPairsDataset(Dataset):
 
 
 def train(args):
-    # ----------------------------------------------------------------
-    # 1. Setup distributed
-    # ----------------------------------------------------------------
     local_rank, rank, world_size = setup_distributed()
     is_distributed = world_size > 1
     device = torch.device(f"cuda:{local_rank}" if torch.cuda.is_available() else "cpu")
 
-    if is_main_process():
-        print(f"Device: {device} | World size: {world_size}")
-
-    # ----------------------------------------------------------------
-    # 2. Dataset & DataLoader
-    # ----------------------------------------------------------------
-    data_dir = Path(args.data_dir)
-    ds = ShellPairsDataset(
-        data_dir,
+    ds = ShellAlmDataset(
+        args.data_dir,
         low_name=args.low_npz,
         high_name=args.high_npz,
-        nside_patch=args.nside_patch,
+        lmax=args.lmax,
         max_shells=args.max_shells,
         verbose=is_main_process(),
     )
@@ -261,35 +201,24 @@ def train(args):
         sampler=sampler,
         num_workers=args.num_workers,
         pin_memory=True,
-        drop_last=True,
+        drop_last=False,
     )
 
-    # ----------------------------------------------------------------
-    # 3. Model, optimizer, loss
-    # ----------------------------------------------------------------
     cond_dim = ds.cosmo_mat.shape[1]
-    dim_in = ds.sample_dim
+    dim_in = ds.low_mat.shape[1]
     model = SmallMLP(dim_in=dim_in, cond_dim=cond_dim, hidden=args.hidden).to(device)
 
     if is_distributed:
         model = DDP(model, device_ids=[local_rank], output_device=local_rank)
 
-    opt = torch.optim.Adam(model.parameters(), lr=args.lr)
+    opt = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)
     mse = nn.MSELoss()
-
-    sigma = args.sigma
-    epochs = args.epochs
 
     if is_main_process():
         print(f"Model params: {sum(p.numel() for p in model.parameters()):,}")
-        print(f"dim_in (patch size): {dim_in}")
-        print(f"Effective batch size: {args.batch_size * world_size}")
 
-    # ----------------------------------------------------------------
-    # 4. Training loop
-    # ----------------------------------------------------------------
     loss_history = []
-    for ep in range(epochs):
+    for ep in range(args.epochs):
         t0 = time.time()
         running = 0.0
         step_count = 0
@@ -297,65 +226,58 @@ def train(args):
         if sampler is not None:
             sampler.set_epoch(ep)
 
-        pbar = tqdm(dl, desc=f"Epoch {ep+1}/{epochs}", unit="step", disable=not is_main_process())
-        for i, (x0, x1, cosmo) in enumerate(pbar):
-            x0 = x0.to(device, non_blocking=True)       # [B, D]
-            x1 = x1.to(device, non_blocking=True)       # [B, D]
-            cosmo = cosmo.to(device, non_blocking=True)  # [B, C]
+        pbar = tqdm(dl, desc=f"Epoch {ep+1}/{args.epochs}", unit="step", disable=not is_main_process())
+        for x0, x1, cosmo in pbar:
+            x0 = x0.to(device, non_blocking=True)
+            x1 = x1.to(device, non_blocking=True)
+            cosmo = cosmo.to(device, non_blocking=True)
 
             B = x0.shape[0]
-            t = torch.rand(B, device=device)
-            mu_t = t.view(-1, 1) * x1 + (1 - t).view(-1, 1) * x0
-            eps = torch.randn_like(x0) * sigma
+            t = torch.rand(B, 1, device=device)
+            mu_t = t * x1 + (1 - t) * x0
+            eps = torch.randn_like(x0) * args.sigma
             xt = mu_t + eps
-            ut = x1 - x0  # conditional vector field target
+            ut = x1 - x0
 
-            pred = model(xt, t, cond=cosmo)
+            pred = model(xt, t.squeeze(1), cond=cosmo)
             loss = mse(pred, ut)
 
             opt.zero_grad()
             loss.backward()
             opt.step()
 
-            loss_val = loss.item()
-            running += loss_val
+            running += loss.item()
             step_count += 1
-            loss_history.append(loss_val)
+            loss_history.append(loss.item())
 
             if is_main_process() and step_count % args.log_interval == 0:
-                avg_loss = running / step_count
-                pbar.set_postfix(loss=f"{avg_loss:.4f}")
+                pbar.set_postfix(loss=f"{running / step_count:.4f}")
 
-        epoch_time = time.time() - t0
         if is_main_process():
-            avg_epoch_loss = running / max(step_count, 1)
-            print(f"Epoch {ep+1}/{epochs} done | avg loss: {avg_epoch_loss:.6f} | time: {epoch_time:.1f}s")
+            print(f"Epoch {ep+1}/{args.epochs} done | avg loss: {running / step_count:.6f} | time: {time.time() - t0:.1f}s")
 
-    # ----------------------------------------------------------------
-    # 5. Save model and loss (only on rank 0)
-    # ----------------------------------------------------------------
     if is_main_process():
         out = Path(args.out_dir)
         out.mkdir(parents=True, exist_ok=True)
 
         state_dict = model.module.state_dict() if is_distributed else model.state_dict()
         torch.save(state_dict, out / "flow_mlp.pth")
-        print("Saved model to", out / "flow_mlp.pth")
 
-        # Save metadata for inference (needed to reconstruct patches → full map)
         metadata = {
-            "nside_patch": args.nside_patch,
+            "lmax": args.lmax,
             "sample_dim": dim_in,
             "cond_dim": cond_dim,
             "hidden": args.hidden,
-            "data_mean": ds.data_mean.item(),
-            "data_std": ds.data_std.item(),
+            "data_mean": ds.data_mean.cpu(),
+            "data_std": ds.data_std.cpu(),
+            "cosmo_mean": ds.cosmo_mean.cpu(),
+            "cosmo_std": ds.cosmo_std.cpu(),
         }
         torch.save(metadata, out / "metadata.pth")
-
+        print(f"Saved model and whitening metadata to {out}")
         try:
-            fig, ax = plt.subplots(figsize=(6, 4))
-            ax.plot(np.arange(len(loss_history)), loss_history, marker='.', linewidth=1)
+            fig, ax = plt.subplots(figsize=(12, 8))
+            ax.plot(np.arange(len(loss_history)), loss_history, marker='.', linewidth=0.5)
             ax.set_yscale('log')
             ax.set_xlabel('Training step')
             ax.set_ylabel('MSE loss')
@@ -369,35 +291,22 @@ def train(args):
         except Exception as e:
             print('Could not save loss plot:', e)
 
-    # ----------------------------------------------------------------
-    # 6. Cleanup
-    # ----------------------------------------------------------------
     cleanup_distributed()
 
 
-if __name__ == '__main__':
-
+if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument('--data-dir', type=str, default='/Users/david/testData')
-    parser.add_argument('--low-npz', type=str, default='disco_shells.npz')
-    parser.add_argument('--high-npz', type=str, default='compressed_shells.npz')
-    parser.add_argument('--nside-patch', type=int, default=16,
-                        help='Nside for patch grid. With nside_full=2048 and nside_patch=16, '
-                             'each patch has (2048/16)^2 = 16384 pixels. '
-                             'Use 8 for larger patches (65536 px) or 32 for smaller (4096 px).')
-    parser.add_argument('--max-shells', type=int, default=10)
-    parser.add_argument('--batch-size', type=int, default=64,
-                        help='Batch size in patches (not shells). With 3072 patches/shell, '
-                             'batch_size=64 means ~0.02 shells per step.')
-    parser.add_argument('--epochs', type=int, default=10)
-    parser.add_argument('--lr', type=float, default=1e-3)
-    parser.add_argument('--sigma', type=float, default=0.01)
-    parser.add_argument('--hidden', type=int, default=512)
-    parser.add_argument('--num-workers', type=int, default=4,
-                        help='DataLoader num_workers')
-    parser.add_argument('--out-dir', type=str,
-                        default='/Users/david/Library/CloudStorage/OneDrive-ETHZurich/ETH-Material/Master Project/github/models')
-    parser.add_argument('--log-interval', type=int, default=10)
-    args = parser.parse_args()
-
-    train(args)
+    parser.add_argument("--data-dir", type=str, default="/Users/david/testData")
+    parser.add_argument("--low-npz", type=str, default="shells_nside=2048.npz")
+    parser.add_argument("--high-npz", type=str, default="compressed_shells.npz")
+    parser.add_argument("--lmax", type=int, default=1024, help="Maximum spherical harmonic multipole degree.")
+    parser.add_argument("--max-shells", type=int, default=20)
+    parser.add_argument("--batch-size", type=int, default=4, help="Batch size in full shells.")
+    parser.add_argument("--epochs", type=int, default=10)
+    parser.add_argument("--lr", type=float, default=1e-3)
+    parser.add_argument("--sigma", type=float, default=0.01)
+    parser.add_argument("--hidden", type=int, default=1024)
+    parser.add_argument("--num-workers", type=int, default=4)
+    parser.add_argument("--out-dir", type=str, default="./models")
+    parser.add_argument("--log-interval", type=int, default=5)
+    train(parser.parse_args())

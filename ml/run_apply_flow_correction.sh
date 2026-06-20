@@ -13,15 +13,15 @@
 source /users/damrein/miniforge3/bin/activate
 
 # Arguments
-MODEL="/capstor/scratch/cscs/damrein/outputs/flow_matching/3704630/flow_mlp.pth"
-INPUT="/capstor/scratch/cscs/damrein/cosmogridv1_test2/cosmo_000001/run_0/shells_nside=2048.npz"
-PARAMS="/capstor/scratch/cscs/damrein/cosmogridv1_test2/cosmo_000001/run_0/params.yml"
+MODEL="/capstor/scratch/cscs/damrein/outputs/flow_matching/3710549/cosmo_000001/model/flow_mlp.pth"
+INPUT="/capstor/scratch/cscs/damrein/cosmogridv1_test2/cosmo_000002/run_0/shells_nside=2048.npz"
+PARAMS="/capstor/scratch/cscs/damrein/cosmogridv1_test2/cosmo_000002/run_0/params.yml"
 NSIDE_PATCH=16
 SHELL_INDEX=-1  
 T=0.0
 BATCH_SIZE=256
 DEVICE="cpu"
-OUT="/capstor/scratch/cscs/damrein/cosmogridv1_test2/cosmo_000001/run_0/shells_nside=2048_corrected.npz"
+OUT="/capstor/scratch/cscs/damrein/cosmogridv1_test2/cosmo_000002/run_0/shells_nside=2048_corrected.npz"
 
 # Run script
 python /users/damrein/masterProject/ml/apply_flow_correction.py \

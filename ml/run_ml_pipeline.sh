@@ -1,14 +1,14 @@
 #!/bin/bash
 #SBATCH --nodes=2
 #SBATCH --exclusive
-#SBATCH --job-name=flow-loo-pipeline
+#SBATCH --job-name=flow-loo-harmonic
 #SBATCH --partition=normal
 #SBATCH --account=sk037
 #SBATCH --ntasks-per-node=1
 #SBATCH --time=01:00:00
 #SBATCH --gres=gpu:4
-#SBATCH --output=/capstor/scratch/cscs/damrein/outputs/logs/flow_matching/slurm-pipeline-%j.out
-#SBATCH --error=/capstor/scratch/cscs/damrein/outputs/logs/flow_matching/slurm-pipeline-%j.err
+#SBATCH --output=/capstor/scratch/cscs/damrein/outputs/logs/flow_matching/slurm-harmonic-pipeline-%j.out
+#SBATCH --error=/capstor/scratch/cscs/damrein/outputs/logs/flow_matching/slurm-harmonic-pipeline-%j.err
 #SBATCH --chdir=/capstor/scratch/cscs/damrein/outputs/flow_matching
 
 # ============================================================
@@ -50,10 +50,10 @@ mkdir -p "$SHARED_TMP"
 mkdir -p /capstor/scratch/cscs/damrein/outputs/logs/flow_matching
 
 # ============================================================
-# Launch Pipeline Wrapper
+# Launch Harmonic Pipeline Wrapper
 # ============================================================
-# We execute run_pipeline.py on the head node. It will automatically
-# trigger srun + torchrun for the training phase because of the flag.
+# Executes run_pipeline.py on the head node; triggers srun + torchrun 
+# for the DDP Alm training phase.
 
 python ${SCRIPT_DIR}/ml/run_pipeline.py \
     --data-root ${DATA_DIR} \
@@ -66,14 +66,16 @@ python ${SCRIPT_DIR}/ml/run_pipeline.py \
     --shared-tmp ${SHARED_TMP} \
     --srun-torchrun \
     --max-shells 20 \
-    --batch-size 2 \
-    --epochs 1 \
+    --batch-size 4 \
+    --epochs 10 \
     --lr 1e-3 \
     --sigma 0.01 \
     --hidden 1024 \
-    --nside-patch 128
+    --lmax 1024 \
+    --ode-steps 10 \
+    --plot-nside 2048 
 
-echo "Pipeline ${SLURM_JOB_ID} finished at $(date)"
+echo "Harmonic Pipeline ${SLURM_JOB_ID} finished at $(date)"
 
 # Cleanup the shared temp directory
 rm -rf "$SHARED_TMP"
