@@ -224,8 +224,8 @@ def main() -> None:
 
     out_root = Path(args.out_root).expanduser()
     run_out = out_root / args.test_cosmo
-    model_out, plot_out, npz_out = run_out / "model", run_out / "npz"
-    for d in [model_out, plot_out, npz_out]: d.mkdir(parents=True, exist_ok=True)
+    model_out, npz_out = run_out / "model", run_out / "npz"
+    for d in [model_out, npz_out]: d.mkdir(parents=True, exist_ok=True)
 
     train_script = (root_dir / args.train_script).resolve()
     apply_script = (root_dir / args.apply_script).resolve()
@@ -295,9 +295,9 @@ def main() -> None:
             cosmogrid_npz=str(test_high),
             out_dir=str(cl_out_dir),
             shell_indices=[3, 65],
-            lmax=args.cl_lmax,
-            lbox=float(args.cl_lbox),
-            res_pm=args.cl_res_pm,
+            lmax=3000,
+            lbox=900,
+            res_pm=1664,
             label_test="DRF - Low-res input",
             label_corrected="DRF - Flow Corrected",
             label_cosmogrid="CosmoGridV1",

@@ -1,10 +1,7 @@
 #!/usr/bin/env python3
-"""Apply trained Spherical Harmonic Flow correction to a HEALPix shell.
+"""Apply trained Spherical Harmonic Flow correction to HEALPix shells.
 
-- Converts input map to complex Alm representation.
-- Applies whitened vector normalization.
-- Solves the flow trajectory over N Euler ODE steps.
-- Reconstructs corrected HEALPix map preserving native data types.
+Uses per-sample norm normalization matching the training procedure.
 """
 
 import argparse
@@ -29,7 +26,7 @@ def parse_args():
     p.add_argument("--input", type=str, required=True)
     p.add_argument("--params", type=str, required=True)
     p.add_argument("--shell-index", type=int, default=-1)
-    p.add_argument("--steps", type=int, default=10, help="Number of Euler ODE integration steps.")
+    p.add_argument("--steps", type=int, default=25)
     p.add_argument("--device", type=str, default="cpu")
     p.add_argument("--out", type=str, default="")
     p.add_argument("--diagnostic", action="store_true")
@@ -42,28 +39,30 @@ def main():
     input_path = Path(args.input)
     out_path = Path(args.out) if args.out else input_path.with_name(input_path.stem + "_corrected.npz")
 
-    # 1. Load Whitening Metadata
+    # 1. Load metadata
     metadata = torch.load(model_path.with_name("metadata.pth"), map_location="cpu")
     lmax = metadata["lmax"]
     N_alm = hp.Alm.getsize(lmax)
-    
+    n_total_shells = metadata["n_total_shells"]
+
     device = torch.device(args.device)
     data_mean = metadata["data_mean"].to(device)
     data_std = metadata["data_std"].to(device)
     cosmo_mean = metadata["cosmo_mean"].to(device)
     cosmo_std = metadata["cosmo_std"].to(device)
 
-    print(f"Loaded Metadata: lmax={lmax} | Vector dim={metadata['sample_dim']} | ODE Steps={args.steps}")
+    print(f"Metadata: lmax={lmax} | dim={metadata['sample_dim']} | cond_dim={metadata['cond_dim']} | steps={args.steps}")
 
-    # 2. Init Model
+    # 2. Load model
     model = SmallMLP(dim_in=metadata["sample_dim"], cond_dim=metadata["cond_dim"], hidden=metadata["hidden"])
     model.load_state_dict(torch.load(model_path, map_location="cpu"))
     model.to(device).eval()
 
-    # 3. Prepare Conditioning Vector
+    # 3. Prepare cosmology conditioning
     raw_cond = load_clean_params(Path(args.params))
-    cond_norm = (torch.from_numpy(raw_cond).to(device).unsqueeze(0) - cosmo_mean) / cosmo_std
+    cond_base = (torch.from_numpy(raw_cond).to(device) - cosmo_mean) / cosmo_std
 
+    # 4. Load input shells
     data = dict(np.load(input_path, allow_pickle=False))
     shells = data["shells"]
     Nshells, Npix = shells.shape
@@ -75,24 +74,39 @@ def main():
 
     for idx in indices:
         m = shells[idx]
-        
-        # Transform map -> Alm vector
-        alm_orig = hp.map2alm(m, lmax=lmax, iter=1)
-        x0 = np.concatenate([alm_orig.real, alm_orig.imag]).astype(np.float32)
-        
-        x_curr = (torch.from_numpy(x0).to(device).unsqueeze(0) - data_mean) / data_std
 
-        # ODE Euler Integration
+        # Shell index conditioning: normalized to [0, 1]
+        shell_norm = torch.tensor([idx / max(n_total_shells - 1, 1)], dtype=torch.float32, device=device)
+        cond = torch.cat([cond_base, shell_norm]).unsqueeze(0)  # [1, cond_dim]
+
+        # Map -> Alm -> vector
+        alm_orig = hp.map2alm(m, lmax=lmax, iter=1)
+        x_raw = np.concatenate([alm_orig.real, alm_orig.imag]).astype(np.float32)
+        x_raw_t = torch.from_numpy(x_raw).to(device)
+
+        # Per-sample norm normalization (matching training)
+        input_norm = x_raw_t.norm().clamp(min=1e-8)
+        x_normed = x_raw_t / input_norm
+
+        # Whiten
+        x_curr = ((x_normed - data_mean) / data_std).unsqueeze(0)
+
+        # ODE integration
         dt = 1.0 / args.steps
         for step in range(args.steps):
             t_tensor = torch.full((1,), step * dt, dtype=torch.float32, device=device)
             with torch.no_grad():
-                v = model(x_curr, t_tensor, cond=cond_norm)
+                v = model(x_curr, t_tensor, cond=cond)
             x_curr = x_curr + v * dt
 
-        # Un-whiten back to physical Alm scale
-        pred_phys = (x_curr * data_std + data_mean).squeeze(0).cpu().numpy()
-        
+        # Un-whiten
+        x_out_normed = (x_curr.squeeze(0) * data_std + data_mean)
+
+        # Re-scale: the output is in "normalized" space, scale back by input norm
+        # The flow should adjust the norm implicitly, but we use input norm as anchor
+        x_out = x_out_normed * input_norm
+
+        pred_phys = x_out.cpu().numpy()
         alm_recon = pred_phys[:N_alm] + 1j * pred_phys[N_alm:]
         corrected_map = hp.alm2map(alm_recon, nside=nside_full)
 
@@ -100,7 +114,14 @@ def main():
         diff_l2 = float(np.linalg.norm(diff))
         diff_max = float(np.max(np.abs(diff)))
 
-        print(f"  Shell {idx}: Original std: {m.std():.6g} | Corrected std: {corrected_map.std():.6g} | Diff max: {diff_max:.6g}")
+        # Sanity check: if correction explodes, fall back to original
+        ratio = corrected_map.std() / max(m.std(), 1e-10)
+        if ratio > 5.0 or ratio < 0.2 or np.any(~np.isfinite(corrected_map)):
+            print(f"  Shell {idx}: ⚠️  UNSTABLE (ratio={ratio:.2f}), keeping original")
+            corrected_map = m
+            diff_l2, diff_max = 0.0, 0.0
+        else:
+            print(f"  Shell {idx}: std {m.std():.4f} → {corrected_map.std():.4f} | ratio={ratio:.3f} | diff_max={diff_max:.4f}")
 
         shells_corrected[idx] = corrected_map.astype(shells.dtype)
         processed_indices.append(idx)
@@ -116,8 +137,8 @@ def main():
         out_dict["diff_max"] = np.asarray(diff_max_list, dtype=np.float32)
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    np.savez(out_path, **out_dict) # Uncompressed save explicitly preserved per user ledger
-    print(f"Saved corrected harmonic output to: {out_path}")
+    np.savez(out_path, **out_dict)
+    print(f"Saved corrected output to: {out_path}")
 
 
 if __name__ == "__main__":
