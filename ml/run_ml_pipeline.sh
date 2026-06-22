@@ -1,11 +1,11 @@
 #!/bin/bash
-#SBATCH --nodes=3
+#SBATCH --nodes=4
 #SBATCH --exclusive
 #SBATCH --job-name=flow-loo-harmonic
-#SBATCH --partition=normal
+#SBATCH --partition=debug
 #SBATCH --account=sk037
 #SBATCH --ntasks-per-node=1
-#SBATCH --time=06:00:00
+#SBATCH --time=00:30:00
 #SBATCH --gres=gpu:4
 #SBATCH --output=/capstor/scratch/cscs/damrein/outputs/logs/flow_matching/slurm-harmonic-pipeline-%j.out
 #SBATCH --error=/capstor/scratch/cscs/damrein/outputs/logs/flow_matching/slurm-harmonic-pipeline-%j.err
@@ -61,17 +61,15 @@ python ${SCRIPT_DIR}/ml/run_pipeline.py \
     --out-root ${OUT_ROOT} \
     --train-script train_flow_matching.py \
     --apply-script apply_flow_correction.py \
-    --low-npz shells_nside=2048.npz \
-    --high-npz compressed_shells.npz \
     --shared-tmp ${SHARED_TMP} \
     --srun-torchrun \
     --max-shells 1000 \
-    --batch-size 69 \
+    --batch-size 4 \
     --epochs 100 \
     --lr 3e-3 \
     --sigma 0.01 \
     --hidden 1024 \
-    --lmax 1024 \
+    --lmax 3000 \
     --ode-steps 25 \
     --plot-nside 2048
 

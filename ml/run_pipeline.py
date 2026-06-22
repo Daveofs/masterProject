@@ -180,8 +180,6 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--train-script", type=str, default="train_flow_matching.py")
     p.add_argument("--apply-script", type=str, default="apply_flow_correction.py")
     p.add_argument("--python", type=str, default=sys.executable)
-    p.add_argument("--low-npz", type=str, default="shells_nside=2048.npz")
-    p.add_argument("--high-npz", type=str, default="compressed_shells.npz")
     
     p.add_argument("--lmax", type=int, default=1024, help="Harmonic bandlimit degree.")
     p.add_argument("--max-shells", type=int, default=20)
@@ -230,10 +228,10 @@ def main() -> None:
     train_script = (root_dir / args.train_script).resolve()
     apply_script = (root_dir / args.apply_script).resolve()
 
-    test_input = test_run_dir / args.low_npz
-    test_high = test_run_dir / args.high_npz
+    test_input = test_run_dir / "shells_nside=2048.npz"
+    test_high = test_run_dir / "compressed_shells.npz"
     test_params = test_run_dir / "params.yml"
-    corrected_out = npz_out / f"{args.test_cosmo}_{Path(args.low_npz).stem}_corrected.npz"
+    corrected_out = npz_out / f"{args.test_cosmo}_{Path('shells_nside=2048').stem}_corrected.npz"
 
     shared_tmp_dir = Path(args.shared_tmp) if args.shared_tmp else None
     if shared_tmp_dir: shared_tmp_dir.mkdir(parents=True, exist_ok=True)
@@ -246,8 +244,6 @@ def main() -> None:
         train_args = [
             str(train_script),
             "--data-dir", str(tmp_root),
-            "--low-npz", args.low_npz,
-            "--high-npz", args.high_npz,
             "--lmax", str(args.lmax),
             "--max-shells", str(args.max_shells),
             "--batch-size", str(args.batch_size),

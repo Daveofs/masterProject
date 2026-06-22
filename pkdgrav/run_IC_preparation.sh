@@ -5,7 +5,7 @@
 #   3. Patch baryonification_params.py (transfct path)
 # Patching is idempotent: each change is only applied if still needed.
 
-COSMOGRID_DIR="/capstor/scratch/cscs/damrein/cosmogridv1_test4"
+COSMOGRID_DIR="/capstor/scratch/cscs/damrein/cosmogrid_w0_test"
 
 # Activate conda environment
 source /users/damrein/miniforge3/bin/activate
