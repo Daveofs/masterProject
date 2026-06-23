@@ -68,10 +68,9 @@ def train(args):
         drop_last=False,
     )
 
-    # +1 for shell index in conditioning
     cond_dim = ds.cosmo_mat.shape[1] + 1
     dim_in = ds.low_mmaps[0].shape[1]
-    model = MLP(feature_dim=1, cond_dim=cond_dim, hidden=args.hidden).to(device)
+    model = MLP(dim_in=2, cond_dim=cond_dim, hidden=args.hidden).to(device)
 
     if is_distributed:
         model = DDP(model, device_ids=[local_rank], output_device=local_rank)
@@ -80,18 +79,11 @@ def train(args):
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=args.epochs, eta_min=args.lr * 0.01)
     mse = nn.MSELoss()
 
-    # Chunking config — tune based on GPU memory
-    ALM_CHUNK_SIZE = args.alm_chunk_size
-
     if is_main_process():
         print(f"Model params: {sum(p.numel() for p in model.parameters()):,}")
         print(f"N_alms (dim_in): {dim_in} | Cond dim: {cond_dim} | Hidden: {args.hidden}")
-        print(f"ALM chunk size: {ALM_CHUNK_SIZE}")
-        print(f"Batch size per GPU: {min(args.batch_size, len(ds))}")
 
     loss_history = []
-    best_loss = float("inf")
-
     for ep in range(args.epochs):
         t0 = time.time()
         running = 0.0
@@ -102,104 +94,57 @@ def train(args):
 
         model.train()
         for x0, x1, cond in dl:
-
-            # x0, x1: [B, N_alms] -> [B, N_alms, 1]
-            x0 = x0.to(device, non_blocking=True).unsqueeze(-1)
-            x1 = x1.to(device, non_blocking=True).unsqueeze(-1)
+            x0 = x0.to(device, non_blocking=True)
+            x1 = x1.to(device, non_blocking=True)
             cond = cond.to(device, non_blocking=True)
 
-            B, N_alms, _ = x0.shape
+            B = x0.shape[0]
 
-            # Sample time for each batch element
-            t = torch.rand(B, device=device)
-            t_view = t.view(B, 1, 1)  # [B, 1, 1]
+            x0_exp = x0.repeat_interleave(1, dim=0)
+            x1_exp = x1.repeat_interleave(1, dim=0)
+            cond_exp = cond.repeat_interleave(1, dim=0)
 
-            # Compute flow matching interpolation (cheap: [B, N_alms, 1])
-            mu_t = t_view * x1 + (1 - t_view) * x0
-            eps = torch.randn_like(x0) * args.sigma
+            t = torch.rand(B, 1, device=device)
+            mu_t = t * x1_exp + (1 - t) * x0_exp
+            eps = torch.randn_like(x0_exp) * args.sigma
             xt = mu_t + eps
-            ut = x1 - x0  # Target velocity field
+            ut = x1_exp - x0_exp
 
-            # Free intermediates we no longer need
-            del mu_t, eps, x0, x1
+            pred = model(xt, t.squeeze(1), cond=cond_exp)
+            loss = mse(pred, ut)
 
-            # --- Chunked forward + backward over N_alms dimension ---
             opt.zero_grad()
-            n_chunks = (N_alms + ALM_CHUNK_SIZE - 1) // ALM_CHUNK_SIZE
-            total_loss = 0.0
-
-            for chunk_idx in range(n_chunks):
-                start = chunk_idx * ALM_CHUNK_SIZE
-                end = min(start + ALM_CHUNK_SIZE, N_alms)
-
-                xt_chunk = xt[:, start:end, :]   # [B, chunk, 1]
-                ut_chunk = ut[:, start:end, :]   # [B, chunk, 1]
-
-                pred_chunk = model(xt_chunk, t, cond=cond)  # [B, chunk, 1]
-                chunk_loss = mse(pred_chunk, ut_chunk)
-
-                # Scale loss for proper gradient accumulation
-                scaled_loss = chunk_loss / n_chunks
-                scaled_loss.backward()
-
-                total_loss += chunk_loss.item()
-
-                # Free chunk tensors
-                del xt_chunk, ut_chunk, pred_chunk, chunk_loss, scaled_loss
-
+            loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
             opt.step()
 
-            avg_loss = total_loss / n_chunks
-            running += avg_loss
+            running += loss.item()
             step_count += 1
-            loss_history.append(avg_loss)
-
-            # Free remaining tensors
-            del xt, ut
+            loss_history.append(loss.item())
 
         scheduler.step()
-        epoch_avg_loss = running / max(step_count, 1)
-
-        if epoch_avg_loss < best_loss and is_main_process():
-            best_loss = epoch_avg_loss
-            state_dict = model.module.state_dict() if is_distributed else model.state_dict()
-            out = Path(args.out_dir)
-            out.mkdir(parents=True, exist_ok=True)
-            torch.save(state_dict, out / "flow_mlp_best.pth")
+        avg_loss = running / max(step_count, 1)
 
         if is_main_process() and (ep + 1) % args.log_interval == 0:
             lr_now = scheduler.get_last_lr()[0]
-            print(
-                f"Epoch {ep+1}/{args.epochs} | loss: {epoch_avg_loss:.6f} | "
-                f"best: {best_loss:.6f} | lr: {lr_now:.2e} | {time.time()-t0:.1f}s"
-            )
+            print(f"Epoch {ep+1}/{args.epochs} | loss: {avg_loss:.6f} | lr: {lr_now:.2e} | {time.time()-t0:.1f}s")
 
-    # === Save final model ===
+
     if is_main_process():
         out = Path(args.out_dir)
         out.mkdir(parents=True, exist_ok=True)
-
-        best_path = out / "flow_mlp_best.pth"
-        if best_path.exists():
-            import shutil
-            shutil.copy2(best_path, out / "flow_mlp.pth")
-            print(f"Using best checkpoint (loss={best_loss:.6f})")
-        else:
-            state_dict = model.module.state_dict() if is_distributed else model.state_dict()
-            torch.save(state_dict, out / "flow_mlp.pth")
+        state_dict = model.module.state_dict() if is_distributed else model.state_dict()
+        torch.save(state_dict, out / "flow_mlp.pth")
 
         metadata = {
             "lmax": args.lmax,
             "sample_dim": dim_in,
             "cond_dim": cond_dim,
             "hidden": args.hidden,
-            "alm_chunk_size": ALM_CHUNK_SIZE,
         }
         torch.save(metadata, out / "metadata.pth")
         print(f"Saved model + metadata to {out}")
 
-        # Loss plot
         try:
             fig, axes = plt.subplots(1, 2, figsize=(14, 5))
             axes[0].plot(loss_history, linewidth=0.5, alpha=0.7)
@@ -234,16 +179,13 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--data-dir", type=str, default="/Users/david/testData")
     parser.add_argument("--lmax", type=int, default=1024)
-    parser.add_argument("--max-shells", type=int, default=20)
-    parser.add_argument("--n-total-shells", type=int, default=69)
-    parser.add_argument("--batch-size", type=int, default=20)
-    parser.add_argument("--epochs", type=int, default=300)
-    parser.add_argument("--lr", type=float, default=3e-4)
+    parser.add_argument("--max-shells", type=int, default=1000)
+    parser.add_argument("--batch-size", type=int, default=8)
+    parser.add_argument("--epochs", type=int, default=30)
+    parser.add_argument("--lr", type=float, default=1e-4)
     parser.add_argument("--sigma", type=float, default=0.01)
     parser.add_argument("--hidden", type=int, default=1024)
     parser.add_argument("--num-workers", type=int, default=4)
     parser.add_argument("--out-dir", type=str, default="./models")
-    parser.add_argument("--log-interval", type=int, default=5)
-    parser.add_argument("--alm-chunk-size", type=int, default=200_000,
-                        help="Number of alm coefficients to process per chunk (tune for GPU memory).")
+    parser.add_argument("--log-interval", type=int, default=1)
     train(parser.parse_args())

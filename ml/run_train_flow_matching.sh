@@ -2,7 +2,7 @@
 #SBATCH --nodes=2
 #SBATCH --exclusive
 #SBATCH --job-name=flow-matching
-#SBATCH --partition=normal
+#SBATCH --partition=debug
 #SBATCH --account=sk037
 #SBATCH --ntasks-per-node=1
 #SBATCH --time=00:30:00

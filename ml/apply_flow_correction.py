@@ -49,7 +49,7 @@ def main():
     print(f"Metadata: lmax={lmax} | dim={metadata['sample_dim']} | cond_dim={metadata['cond_dim']} | steps={args.steps}")
 
     # 2. Load model
-    model = MLP(feature_dim=metadata["sample_dim"], cond_dim=metadata["cond_dim"], hidden=metadata["hidden"])
+    model = MLP(dim_in=metadata["sample_dim"], cond_dim=metadata["cond_dim"], hidden=metadata["hidden"])
     model.load_state_dict(torch.load(model_path, map_location="cpu"))
     model.to(device).eval()
 

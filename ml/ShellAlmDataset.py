@@ -93,7 +93,7 @@ class ShellAlmDataset(Dataset):
             file_pointer_idx += 1
 
         assert len(self.sample_addresses) > 0, f"No .npy files found for lmax={lmax}."
-
+        
         if verbose:
             print(f"[Dataset Mounted] Total items mapped on disk: {len(self.sample_addresses)}")
 

@@ -1,8 +1,8 @@
 #!/bin/bash
-#SBATCH --nodes=6
+#SBATCH --nodes=2
 #SBATCH --exclusive
 #SBATCH --job-name=flow-loo-harmonic
-#SBATCH --partition=debug
+#SBATCH --partition=normal
 #SBATCH --account=sk037
 #SBATCH --ntasks-per-node=1
 #SBATCH --time=00:30:00
@@ -36,6 +36,7 @@ echo "========================================"
 export NCCL_DEBUG=INFO
 export NCCL_IB_DISABLE=0
 export NCCL_NET_GDR_LEVEL=5
+export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
 # ============================================================
 # Paths
@@ -65,7 +66,7 @@ python ${SCRIPT_DIR}/ml/run_pipeline.py \
     --srun-torchrun \
     --max-shells 1000 \
     --batch-size 8 \
-    --epochs 10 \
+    --epochs 1 \
     --lr 1e-4 \
     --sigma 0.01 \
     --hidden 1024 \

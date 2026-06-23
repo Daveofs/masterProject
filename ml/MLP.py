@@ -4,55 +4,25 @@ import torch
 from torch import nn
 
 
+# 3-layer MLP (3 layers of neurons)
 class MLP(nn.Module):
-    def __init__(self, feature_dim: int = 1, cond_dim: int = 0, hidden: int = 1024):
+    # hidden is the width (number of units) of the intermediate MLP layers -> it directly controls the model capacity, compute and memory.
+    def __init__(self, dim_in: int, cond_dim: int = 0, hidden=512):
         super().__init__()
-        self.feature_dim = feature_dim
-        self.cond_dim = cond_dim
+        # [xt | t | z]  →  Linear → ReLU → Linear → ReLU → Linear → output
         self.net = nn.Sequential(
-            nn.Linear(feature_dim + 1 + cond_dim, hidden),
+            nn.Linear(dim_in + 1 + cond_dim, hidden),  # applies linear transformation y = xA^T + b to the input x with shape (batch_size, dim_in + 1 + cond_dim) to the output y with shape (batch_size, hidden)
             nn.ReLU(),
             nn.Linear(hidden, hidden),
             nn.ReLU(),
-            nn.Linear(hidden, feature_dim),
+            nn.Linear(hidden, dim_in),  # output layer
         )
 
     def forward(self, x, t, cond=None):
-        """
-        x: [Batch, N_alms, feature_dim]
-        t: [Batch]
-        cond: [Batch, cond_dim] or None
-        """
-        B, N_alms, _ = x.shape
-
-        # Reshape t to [Batch, 1, 1] and expand across the N_alms dimension
-        T = t.view(B, 1, 1).expand(B, N_alms, 1)
-
+        # x: [B, D], t: [B]  cond: [B, C]
+        T = t.view(-1, 1)
         if cond is None:
             inp = torch.cat([x, T], dim=-1)
         else:
-            C = cond.view(B, 1, -1).expand(B, N_alms, cond.shape[-1])
-            inp = torch.cat([x, T, C], dim=-1)
-
+            inp = torch.cat([x, T, cond], dim=-1)
         return self.net(inp)
-
-    def forward_chunked(self, x, t, cond=None, chunk_size=200_000):
-        """
-        Memory-efficient forward pass that chunks over the N_alms dimension.
-        Mathematically identical to forward() but uses much less GPU memory.
-        
-        x: [Batch, N_alms, feature_dim]
-        t: [Batch]
-        cond: [Batch, cond_dim] or None
-        chunk_size: number of alms to process at once
-        """
-        B, N_alms, _ = x.shape
-        outputs = []
-
-        for start in range(0, N_alms, chunk_size):
-            end = min(start + chunk_size, N_alms)
-            x_chunk = x[:, start:end, :]  # [B, chunk, feature_dim]
-            out_chunk = self.forward(x_chunk, t, cond=cond)
-            outputs.append(out_chunk)
-
-        return torch.cat(outputs, dim=1)
