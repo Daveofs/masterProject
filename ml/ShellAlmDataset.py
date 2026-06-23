@@ -29,8 +29,13 @@ class ShellAlmDataset(Dataset):
         data_dir = Path(data_dir)
         self.lmax = lmax
 
-        low_list = []
-        high_list = []
+        # 1. Store open disk-pointers, NOT data
+        self.low_mmaps = []
+        self.high_mmaps = []
+        
+        # 2. Address book: global_idx -> (file_pointer_idx, row_inside_that_file)
+        self.sample_addresses = [] 
+        
         cosmo_list = []
         shell_idx_list = [] 
 
@@ -45,57 +50,67 @@ class ShellAlmDataset(Dataset):
 
         total_collected = 0
         param_names = None
+        file_pointer_idx = 0
         
-        # Look for the newly generated precomputed files
-        low_file_name = f"low_alms_lmax{lmax}.npz"
-        high_file_name = f"high_alms_lmax{lmax}.npz"
+        low_file_name = f"low_alms_lmax{lmax}.npy"
+        high_file_name = f"high_alms_lmax{lmax}.npy"
 
-        for ld in tqdm(leaf_dirs, desc="Loading precomputed Alm datasets", disable=not verbose):
+        for ld in tqdm(leaf_dirs, desc="Indexing .npy Memory Maps", disable=not verbose):
             if max_shells and total_collected >= max_shells:
                 break
 
             params_yml = ld / "params.yml" if (ld / "params.yml").exists() else ld.parent / "params.yml"
-            low_npz = ld / low_file_name
-            high_npz = ld / high_file_name
+            low_npy = ld / low_file_name
+            high_npy = ld / high_file_name
 
-            if not (params_yml.exists() and low_npz.exists() and high_npz.exists()):
+            if not (params_yml.exists() and low_npy.exists() and high_npy.exists()):
                 continue
 
-            cosmo_vec, p_names, raw_dict = load_clean_params(params_yml)
+            cosmo_vec, p_names, _ = load_clean_params(params_yml)
             if param_names is None and verbose:
                 param_names = p_names
                 print(f"\n[YAML Parser] Active Conditioning Vector ({len(p_names)} params)")
 
-            # Instantly load precomputed Alm flat tensors from disk
-            low_alms = np.load(low_npz, allow_pickle=False)["alms"]
-            high_alms = np.load(high_npz, allow_pickle=False)["alms"]
+            # Instantly mount the file to virtual memory (Costs ~100 bytes of RAM per file)
+            low_mmap = np.load(low_npy, mmap_mode='r')
+            high_mmap = np.load(high_npy, mmap_mode='r')
 
-            n_available = min(low_alms.shape[0], high_alms.shape[0])
+            self.low_mmaps.append(low_mmap)
+            self.high_mmaps.append(high_mmap)
+
+            n_available = min(low_mmap.shape[0], high_mmap.shape[0])
 
             for i in range(n_available):
                 if max_shells and total_collected >= max_shells:
                     break
 
-                low_list.append(low_alms[i])
-                high_list.append(high_alms[i])
+                self.sample_addresses.append((file_pointer_idx, i))
                 cosmo_list.append(cosmo_vec)
                 shell_idx_list.append(i)
 
                 total_collected += 1
 
-        assert len(low_list) > 0, f"No precomputed files found matching lmax={lmax}. Did you run the preprocessor script?"
+            file_pointer_idx += 1
+
+        assert len(self.sample_addresses) > 0, f"No .npy files found for lmax={lmax}."
 
         if verbose:
-            print(f"[Dataset Loaded] Total items in database: {len(low_list)}")
+            print(f"[Dataset Mounted] Total items mapped on disk: {len(self.sample_addresses)}")
 
-        self.low_mat = torch.from_numpy(np.stack(low_list))
-        self.high_mat = torch.from_numpy(np.stack(high_list))
+        # Only the tiny conditioning floats get loaded into actual RAM
         self.cosmo_mat = torch.from_numpy(np.stack(cosmo_list))
         self.shell_indices = torch.tensor(shell_idx_list, dtype=torch.float32)
 
     def __len__(self):
-        return self.low_mat.shape[0]
+        return len(self.sample_addresses)
 
     def __getitem__(self, idx):
+        file_idx, row_idx = self.sample_addresses[idx]
+
+        # Slicing the mmap triggers an OS kernel interrupt to fetch strictly this 1 row
+        # Wrapping in np.array() forces a memory copy so PyTorch doesn't complain about read-only buffers.
+        x0 = torch.from_numpy(np.array(self.low_mmaps[file_idx][row_idx]))
+        x1 = torch.from_numpy(np.array(self.high_mmaps[file_idx][row_idx]))
+
         cond = torch.cat([self.cosmo_mat[idx], self.shell_indices[idx:idx+1]])
-        return self.low_mat[idx], self.high_mat[idx], cond
+        return x0, x1, cond

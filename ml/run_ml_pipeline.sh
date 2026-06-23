@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --nodes=4
+#SBATCH --nodes=6
 #SBATCH --exclusive
 #SBATCH --job-name=flow-loo-harmonic
 #SBATCH --partition=debug
@@ -64,9 +64,9 @@ python ${SCRIPT_DIR}/ml/run_pipeline.py \
     --shared-tmp ${SHARED_TMP} \
     --srun-torchrun \
     --max-shells 1000 \
-    --batch-size 4 \
-    --epochs 100 \
-    --lr 3e-3 \
+    --batch-size 8 \
+    --epochs 10 \
+    --lr 1e-4 \
     --sigma 0.01 \
     --hidden 1024 \
     --lmax 3000 \

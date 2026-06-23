@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """One-time offline pre-computation script for HEALPix map -> Alm transformations.
 
-Saves flattend real/imaginary Alm float32 vectors directly to disk, shrinking
-data size by ~50x and eliminating startup bottlenecks in the training loop.
+Saves flattened real/imaginary Alm float32 vectors directly to disk as raw, 
+uncompressed .npy binaries, enabling zero-RAM memory mapping (mmap_mode='r').
 """
 
 import argparse
@@ -18,11 +18,10 @@ def process_single_run(task_args):
     """Worker function executed by CPU subprocesses."""
     ld, low_name, high_name, lmax = task_args
     
-    # Define production file names based on lmax
-    out_low_path = ld / f"low_alms_lmax{lmax}.npz"
-    out_high_path = ld / f"high_alms_lmax{lmax}.npz"
+    # 1. Changed target extensions to raw .npy
+    out_low_path = ld / f"low_alms_lmax{lmax}.npy"
+    out_high_path = ld / f"high_alms_lmax{lmax}.npy"
     
-    # Check if files already exist to allow safe pipeline resuming
     if out_low_path.exists() and out_high_path.exists():
         return f"[Skipped] {ld.relative_to(ld.parent.parent)} (Already transformed)"
         
@@ -34,7 +33,6 @@ def process_single_run(task_args):
         low_alms, high_alms = [], []
         
         for i in range(n_available):
-            # Transform and extract real/imag components
             alm_low = hp.map2alm(low_data[i], lmax=lmax, iter=1)
             alm_high = hp.map2alm(high_data[i], lmax=lmax, iter=1)
             
@@ -44,9 +42,9 @@ def process_single_run(task_args):
             low_alms.append(vec_low)
             high_alms.append(vec_high)
             
-        # Save compressed matrices to disk
-        np.savez_compressed(out_low_path, alms=np.stack(low_alms))
-        np.savez_compressed(out_high_path, alms=np.stack(high_alms))
+        # 2. Save as raw, uncompressed binary blocks
+        np.save(out_low_path, np.stack(low_alms))
+        np.save(out_high_path, np.stack(high_alms))
         
         return f"[Success] {ld.relative_to(ld.parent.parent)} ({n_available} shells processed)"
         
@@ -66,7 +64,6 @@ def main():
     data_dir = Path(args.data_dir)
     assert data_dir.exists(), f"Data directory not found: {data_dir}"
 
-    # Replicate your exact directory tree traversal logic
     subdirs = [d for d in sorted(data_dir.iterdir()) if d.is_dir() and d.name.startswith("cosmo_")]
     if len(subdirs) == 0:
         subdirs = [data_dir]
@@ -79,7 +76,6 @@ def main():
         else:
             leaf_dirs.append(sd)
 
-    # Build task sequence
     tasks = []
     for ld in leaf_dirs:
         if (ld / args.low_npz).exists() and (ld / args.high_npz).exists():
@@ -88,14 +84,11 @@ def main():
     print(f"Found {len(tasks)} valid execution targets inside: {data_dir}")
     print(f"Spawning {args.num_workers} multi-core processes...")
 
-    # Execute processing parallel across CPU pools
     with ProcessPoolExecutor(max_workers=args.num_workers) as executor:
         futures = [executor.submit(process_single_run, t) for t in tasks]
-        
         for fut in tqdm(as_completed(futures), total=len(futures), desc="Precomputing Alms"):
             res_message = fut.result()
-            # Un-comment the line below if you want a verbose tracking log per folder
-            # print(res_message)
+            print(res_message)
 
 
 if __name__ == "__main__":

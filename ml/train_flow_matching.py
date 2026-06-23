@@ -70,7 +70,7 @@ def train(args):
 
     # +1 for shell index in conditioning
     cond_dim = ds.cosmo_mat.shape[1] + 1
-    dim_in = ds.low_mat.shape[1]
+    dim_in = ds.low_mmaps[0].shape[1]
     model = MLP(feature_dim=1, cond_dim=cond_dim, hidden=args.hidden).to(device)
 
     if is_distributed:

@@ -4,8 +4,8 @@
 #SBATCH --partition=normal
 #SBATCH --time=00:15:00
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=64
-#SBATCH --mem=500G
+#SBATCH --cpus-per-task=100
+#SBATCH --mem=750G
 #SBATCH --output=/capstor/scratch/cscs/damrein/outputs/logs/preprocess_alms/preprocess_alms_%j.out
 #SBATCH --error=/capstor/scratch/cscs/damrein/outputs/logs/preprocess_alms/preprocess_alms_%j.err
 
@@ -18,4 +18,4 @@ DATA_DIR="/capstor/scratch/cscs/damrein/cosmogridv1_test2"
 python /users/damrein/masterProject/ml/preprocess_alms.py \
     --data-dir "$DATA_DIR" \
     --lmax 3000 \
-    --num-workers 20 \
+    --num-workers 30 \
