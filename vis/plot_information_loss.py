@@ -52,8 +52,7 @@ def plot_cl_ratio_and_with_information_loss(
     lmax_information_loss=2048,
     lbox=900.0,
     res_pm=1664,
-    label_test="DRF - Low-res input",
-    label_corrected="DRF - Flow Corrected",
+    label_test="CosmoGridV1 - only alm transformation",
     label_cosmogrid="CosmoGridV1",
 ):
     """
@@ -150,7 +149,7 @@ def plot_cl_ratio_and_with_information_loss(
             ax.set_xlim(2, lmax_power_spectrum)
 
         fig.tight_layout()
-        out_path = out_dir / f"cl_ratio_shell{idx:03d}_z{z_lo:.3f}-{z_hi:.3f}_lmax{lmax_information_loss}.png"
+        out_path = out_dir / f"cl_ratio_shell{idx:03d}_z{z_lo:.3f}-{z_hi:.3f}_lmax{lmax_information_loss}_only_alm_transformation.png"
         fig.savefig(out_path, dpi=150)
         plt.close(fig)
         print(f"  Saved {out_path}")

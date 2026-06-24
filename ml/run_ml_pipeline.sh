@@ -5,7 +5,7 @@
 #SBATCH --partition=normal
 #SBATCH --account=sk037
 #SBATCH --ntasks-per-node=1
-#SBATCH --time=00:30:00
+#SBATCH --time=00:15:00
 #SBATCH --gres=gpu:4
 #SBATCH --output=/capstor/scratch/cscs/damrein/outputs/logs/flow_matching/slurm-harmonic-pipeline-%j.out
 #SBATCH --error=/capstor/scratch/cscs/damrein/outputs/logs/flow_matching/slurm-harmonic-pipeline-%j.err
@@ -66,13 +66,14 @@ python ${SCRIPT_DIR}/ml/run_pipeline.py \
     --srun-torchrun \
     --max-shells 1000 \
     --batch-size 1 \
-    --epochs 5 \
+    --epochs 2 \
     --lr 2e-4 \
     --sigma 0.01 \
     --hidden 64 \
     --lmax 3000 \
     --ode-steps 25 \
-    --plot-nside 2048
+    --plot-nside 2048 \
+    --device cuda:0 
 
 
 echo "Harmonic Pipeline ${SLURM_JOB_ID} finished at $(date)"

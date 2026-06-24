@@ -5,7 +5,7 @@
 #   3. Patch baryonification_params.py (transfct path)
 # Patching is idempotent: each change is only applied if still needed.
 
-COSMOGRID_DIR="/capstor/scratch/cscs/damrein/cosmogrid_w0_test"
+COSMOGRID_DIR="/capstor/scratch/cscs/damrein/cosmogridv1_test3"
 
 # Activate conda environment
 source /users/damrein/miniforge3/bin/activate
@@ -234,15 +234,16 @@ patch_cosmology_par() {
 
         cat >> "$par_file" <<EOF
         
-# Cosmological parameters (from baryonification_params.py)
+# Cosmological parameters
 dOmegaRad        = ${omega_rad}
 h                = ${h_val}
 dOmega0          = ${omega_0}
-dLambda          = $(awk "BEGIN {printf \"%.10g\", 1 - ${omega_0}}")
+dOmegaDE          = $(awk "BEGIN {printf \"%.10g\", 1 - ${omega_0}}")
 dOmegab          = ${omega_b_val}
 dSpectral        = ${ns_val}
 dSigma8          = ${sigma8_val}
 w0               = ${w0_val}
+wa               = 0.0
 EOF
             changed=1
     fi

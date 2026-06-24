@@ -67,10 +67,7 @@ def train(args):
         pin_memory=True,
         drop_last=False,
     )
-
-    # --- THE FIX ---
-    # Probe sample 0 directly to get the ground-truth output shapes of the dataset.
-    # This guarantees the MLP's input layer matches the Dataloader's yielded tensors 1:1.
+    
     sample_x0, _, sample_cond = ds[0]
     dim_in = sample_x0.shape[-1]
     cond_dim = sample_cond.shape[-1] if sample_cond.ndim > 0 else 1
@@ -134,6 +131,11 @@ def train(args):
             lr_now = scheduler.get_last_lr()[0]
             print(f"Epoch {ep+1}/{args.epochs} | loss: {avg_loss:.6f} | lr: {lr_now:.2e} | {time.time()-t0:.1f}s")
 
+
+    # ===== SYNC ALL RANKS before rank-0 I/O =====
+    if is_distributed:
+        dist.barrier()
+
     if is_main_process():
         out = Path(args.out_dir)
         out.mkdir(parents=True, exist_ok=True)
@@ -179,7 +181,7 @@ def train(args):
     cleanup_distributed()
 
 
-if __name__ == "__main__":
+if __name__ == "__main__": 
     parser = argparse.ArgumentParser()
     parser.add_argument("--data-dir", type=str, default="/Users/david/testData")
     parser.add_argument("--lmax", type=int, default=1024)
@@ -192,4 +194,15 @@ if __name__ == "__main__":
     parser.add_argument("--num-workers", type=int, default=4)
     parser.add_argument("--out-dir", type=str, default="./models")
     parser.add_argument("--log-interval", type=int, default=1)
-    train(parser.parse_args())
+
+    args = parser.parse_args()
+    try:
+        train(args)
+    except Exception as e:
+        print(f"Training crashed with error: {e}")
+        if dist.is_initialized():
+            dist.destroy_process_group()
+        raise
+    finally:
+        # Force-exit to kill any lingering torchrun agent threads
+        os._exit(0)

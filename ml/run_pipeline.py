@@ -236,6 +236,11 @@ def main() -> None:
     shared_tmp_dir = Path(args.shared_tmp) if args.shared_tmp else None
     if shared_tmp_dir: shared_tmp_dir.mkdir(parents=True, exist_ok=True)
 
+
+    print("\n" + "=" * 80)
+    print("Start training flow-matching")
+    print("=" * 80 + "\n")
+
     with tempfile.TemporaryDirectory(prefix="flow_loo_", dir=shared_tmp_dir) as tmp:
         tmp_root = Path(tmp)
         for folder in train_cosmos:
@@ -266,6 +271,10 @@ def main() -> None:
             train_cmd = [args.python] + train_args
 
         run_cmd(train_cmd, cwd=root_dir)
+
+    print("\n" + "=" * 80)
+    print("Applying trained model to test cosmology")
+    print("=" * 80 + "\n")
 
     model_path = model_out / "flow_mlp.pth"
     apply_device = "cuda:0" if args.srun_torchrun and torch.cuda.is_available() else args.device
