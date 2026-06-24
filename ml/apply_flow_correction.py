@@ -15,9 +15,15 @@ from MLP import MLP
 
 def load_clean_params(params_path: Path):
     params = yaml.safe_load(params_path.read_text())
-    bad_phrases = ["seed", "job", "part", "box", "step", "nside", "path", "dir", "file", "rank", "node", "gpu", "time"]
-    valid = [k for k, v in sorted(params.items()) if not any(b in k.lower() for b in bad_phrases) and isinstance(v, (int, float))]
-    return np.array([float(params[k]) for k in valid], dtype=np.float32)
+    valid_keys = []
+    for k, v in sorted(params.items()):
+        try:
+            float(v)
+            valid_keys.append(k)
+        except (ValueError, TypeError):
+            continue
+    vec = np.array([float(params[k]) for k in valid_keys], dtype=np.float32)
+    return vec, valid_keys, params
 
 
 def parse_args():
@@ -54,8 +60,8 @@ def main():
     model.to(device).eval()
 
     # 3. Prepare cosmology conditioning
-    raw_cond = load_clean_params(Path(args.params))
-    cond_base = torch.from_numpy(raw_cond).to(device)
+    raw_cond = load_clean_params(Path(args.params))[0]
+    cond_base = torch.from_numpy(raw_cond).float().to(device)
 
     # 4. Load input shells
     data = dict(np.load(input_path, allow_pickle=False))

@@ -17,5 +17,5 @@ DATA_DIR="/capstor/scratch/cscs/damrein/cosmogridv1_test2"
 # Run script
 python /users/damrein/masterProject/ml/preprocess_alms.py \
     --data-dir "$DATA_DIR" \
-    --lmax 3000 \
+    --lmax 256 \
     --num-workers 30 \

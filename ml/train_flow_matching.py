@@ -68,9 +68,14 @@ def train(args):
         drop_last=False,
     )
 
-    cond_dim = ds.cosmo_mat.shape[1] + 1
-    dim_in = ds.low_mmaps[0].shape[1]
-    model = MLP(dim_in=2, cond_dim=cond_dim, hidden=args.hidden).to(device)
+    # --- THE FIX ---
+    # Probe sample 0 directly to get the ground-truth output shapes of the dataset.
+    # This guarantees the MLP's input layer matches the Dataloader's yielded tensors 1:1.
+    sample_x0, _, sample_cond = ds[0]
+    dim_in = sample_x0.shape[-1]
+    cond_dim = sample_cond.shape[-1] if sample_cond.ndim > 0 else 1
+
+    model = MLP(dim_in=dim_in, cond_dim=cond_dim, hidden=args.hidden).to(device)
 
     if is_distributed:
         model = DDP(model, device_ids=[local_rank], output_device=local_rank)
@@ -128,7 +133,6 @@ def train(args):
         if is_main_process() and (ep + 1) % args.log_interval == 0:
             lr_now = scheduler.get_last_lr()[0]
             print(f"Epoch {ep+1}/{args.epochs} | loss: {avg_loss:.6f} | lr: {lr_now:.2e} | {time.time()-t0:.1f}s")
-
 
     if is_main_process():
         out = Path(args.out_dir)
