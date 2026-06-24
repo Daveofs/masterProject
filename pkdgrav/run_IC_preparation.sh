@@ -70,9 +70,7 @@ PYEOF
 }
 
 
-# Compute sigma8 from class_processed.hdf5 and params.yml
-# Uses the weighted (cdm+b + ncdm) matter power spectrum at z=0
-extract_sigma8() {
+extract_sigma8_and_omega_rad() {
     local hdf5_file="$1"
     local params_file="$2"
 
@@ -87,6 +85,7 @@ import numpy as np
 import h5py
 import yaml
 from pathlib import Path
+from classy import Class
 
 hdf5_file = sys.argv[1]
 params_file = sys.argv[2]
@@ -109,7 +108,17 @@ try:
 
     A_s = float(p["As"])
     n_s = float(p["ns"])
-    h   = float(p["H0"]) / 100
+    H0  = float(p["H0"])
+    h   = H0 / 100.0
+
+    Omega_b   = float(p["Ob"])
+    Omega_cdm = float(p["O_cdm"])
+    _mnu      = p["m_nu"] if isinstance(p["m_nu"], list) else [float(p["m_nu"])]
+    _w0       = float(p["w0"])
+    _wa       = float(p["wa"])
+
+    # TODO: T_ncdm = (4.0/11.0)**(1.0/3.0) * (3.046/len(_mnu))**(1.0/4.0)
+    T_ncdm = (4.0/11.0)**(1.0/3.0) * (3.046/3)**(1.0/4.0)
 
     # --- Read HDF5 data ---
     with h5py.File(hdf5_file, "r") as f:
@@ -124,13 +133,49 @@ try:
     Pk_hdf5_cb = (2 * np.pi**2 / k**3) * P_prim * delta_cb**2 * h**3
 
     k_hMpc = k / h
+
+    # --- Compute sigma8 from HDF5 transfer functions ---
     sigma8 = compute_sigma8(k_hMpc, Pk_hdf5_cb)
-    print(f"{sigma8:.10e}")
+
+    # --- Compute Omega_r from CLASS ---
+    cosmo_dict = {
+        'H0'            : H0,
+        'Omega_b'       : Omega_b,
+        'Omega_cdm'     : Omega_cdm,
+        'Omega_Lambda'  : 0.,
+        'w0_fld'        : _w0,
+        'wa_fld'        : _wa,
+        'N_ur'          : 0,
+        'N_ncdm'        : 1,
+        'deg_ncdm'      : 3,
+        'm_ncdm'        : 0.02,
+        'T_ncdm'        : T_ncdm,
+        'A_s'           : A_s,
+        'n_s'           : n_s,
+        'k_pivot'       : k_pivot,
+        'output'        : 'mPk',
+        'P_k_max_h/Mpc' : k_hMpc.max() * 1.1,
+        'z_pk'          : 0.0,
+    }
+
+    cosmo = Class()
+    cosmo.set(cosmo_dict)
+    cosmo.compute()
+
+    omega_rad = cosmo.Omega_r()
+
+    cosmo.struct_cleanup()
+    cosmo.empty()
+
+    # Print both values on one line, space-separated
+    print(f"{sigma8:.10e} {omega_rad:.10e}")
+
 except Exception as e:
     print("", file=sys.stderr)
-    print(f"  Warning: Failed to compute sigma8 from {hdf5_file}: {e}", file=sys.stderr)
+    print(f"  Warning: Failed to compute sigma8/OmegaRad from {hdf5_file}: {e}", file=sys.stderr)
 PYEOF
 }
+
 
 extract_omega_0() {
     local params_file="$1"
@@ -224,12 +269,14 @@ patch_cosmology_par() {
     if [ -f "$bary_file" ] && [ -n "$abs_class" ]; then
         local h_val omega_0 omega_b_val ns_val sigma8_val w0_val
 
-        omega_rad=$(extract_omega_rad "$abs_class")
+        _sigma8_omrad=$(extract_sigma8_and_omega_rad "$abs_class" "$params_file")
+        sigma8_val=$(echo "$_sigma8_omrad" | awk '{print $1}')
+        omega_rad=$(echo "$_sigma8_omrad" | awk '{print $2}')
+
         h_val=$(extract_py_param "$bary_file" "par.cosmo.h0")
         omega_0=$(extract_omega_0 "$params_file")
         omega_b_val=$(extract_py_param "$bary_file" "par.cosmo.Ob")
         ns_val=$(extract_py_param "$bary_file" "par.cosmo.ns")
-        sigma8_val=$(extract_sigma8 "$abs_class" "$params_file")
         w0_val=$(extract_w_0 "$params_file")
 
         cat >> "$par_file" <<EOF

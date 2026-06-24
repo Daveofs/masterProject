@@ -138,4 +138,4 @@ class MLP(nn.Module):
         h = h.squeeze(1)      # [B, D]
 
         # Return global residual mapping: Input identity + predicted adjustments
-        return x_residual + h
+        return h

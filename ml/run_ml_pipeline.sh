@@ -2,10 +2,10 @@
 #SBATCH --nodes=10
 #SBATCH --exclusive
 #SBATCH --job-name=flow-loo-harmonic
-#SBATCH --partition=normal
+#SBATCH --partition=debug
 #SBATCH --account=sk037
 #SBATCH --ntasks-per-node=1
-#SBATCH --time=00:15:00
+#SBATCH --time=00:30:00
 #SBATCH --gres=gpu:4
 #SBATCH --output=/capstor/scratch/cscs/damrein/outputs/logs/flow_matching/slurm-harmonic-pipeline-%j.out
 #SBATCH --error=/capstor/scratch/cscs/damrein/outputs/logs/flow_matching/slurm-harmonic-pipeline-%j.err

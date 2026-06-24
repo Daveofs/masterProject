@@ -32,8 +32,8 @@ fi
 
 # Map array task ID to zero-padded 6-digit cosmology index (1 -> 000001, 2 -> 000002, ...)
 COSMO_ID=$(printf '%06d' "${SLURM_ARRAY_TASK_ID}")
-OUTPUT_DIR=/capstor/scratch/cscs/damrein/cosmogrid_w0_test/cosmo_000011/run_0
-PARAM_FILE=/capstor/scratch/cscs/damrein/cosmogrid_w0_test/cosmo_000011/run_0/cosmology.par
+OUTPUT_DIR=/capstor/scratch/cscs/damrein/cosmogridv1_test3/cosmo_000001/run_0
+PARAM_FILE=/capstor/scratch/cscs/damrein/cosmogridv1_test3/cosmo_000001/run_0/cosmology.par
 
 mkdir -p "${OUTPUT_DIR}"
 cd "${OUTPUT_DIR}" # PKDGRAV writes output to the current directory, so cd there first

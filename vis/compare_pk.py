@@ -18,8 +18,8 @@ def load_k_p(path: Path):
     return data[:, 0], data[:, 1]
 
 
-f1 = Path("/cluster/scratch/damrein/outputs/ICs/000001_copy7/CosmoML.00080.pk")
-f2 = Path("/cluster/scratch/damrein/outputs/powerspectrum/final_snapshot_tipsy.pk")
+f1 = Path("/capstor/store/cscs/ska/sk037/jbucko/disco_files_grid00001/transfer_fiducial_cb.dat")
+f2 = Path("/capstor/scratch/cscs/damrein/cosmogridv1_test3/cosmo_000001/run_0/transfer_fiducial_cb.dat")
 
 for f in (f1, f2):
     if not f.exists():
@@ -46,7 +46,7 @@ ratio = p1i / p2i
 print("Median ratio (P1/P2):", float(np.median(ratio)))
 print("Mean ratio (P1/P2):", float(np.mean(ratio)))
 
-outdir = Path("/cluster/scratch/damrein/outputs/plots/powerspectrum")
+outdir = Path("/capstor/scratch/cscs/damrein/outputs/pk_comparison")
 outdir.mkdir(parents=True, exist_ok=True)
 
 plt.figure(figsize=(8,5))

@@ -287,6 +287,7 @@ def main() -> None:
         "--steps", str(args.ode_steps),
         "--device", apply_device,
         "--out", str(corrected_out),
+        "--diagnostic",
     ]
     run_cmd(apply_cmd, cwd=root_dir)
 
