@@ -14,16 +14,15 @@
 RUN_ID=0
 
 SCRATCH_DIR=/capstor/scratch/cscs/damrein
-PKDGRAV_BIN=/users/damrein/pkdgrav/pkdgrav3_dev-master/build/pkdgrav3
+PKDGRAV_BIN=/users/damrein/pkdgrav/pkdgrav_latest/pkdgrav3/build/pkdgrav3
 
-# Load the same module stack used to build pkdgrav3 so the binary is run
-# against the correct OpenMPI 4.1.6 runtime (not conda's OpenMPI 5.x).
-# Deactivate conda first so its LD_LIBRARY_PATH/PATH don't override the modules.
+
 CONDA_ROOT=/users/damrein/miniforge3
 if [[ -f "${CONDA_ROOT}/etc/profile.d/conda.sh" ]]; then
     source "${CONDA_ROOT}/etc/profile.d/conda.sh"
-    conda deactivate 2>/dev/null || true
+    conda activate pkdgrav
 fi
+
 
 #unset CPATH CPLUS_INCLUDE_PATH C_INCLUDE_PATH LIBRARY_PATH
 #module load stack/2024-06 gcc/12.2.0 openmpi/4.1.6

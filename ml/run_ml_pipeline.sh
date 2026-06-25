@@ -1,11 +1,11 @@
 #!/bin/bash
-#SBATCH --nodes=10
+#SBATCH --nodes=2
 #SBATCH --exclusive
 #SBATCH --job-name=flow-loo-harmonic
 #SBATCH --partition=debug
 #SBATCH --account=sk037
 #SBATCH --ntasks-per-node=1
-#SBATCH --time=00:30:00
+#SBATCH --time=00:15:00
 #SBATCH --gres=gpu:4
 #SBATCH --output=/capstor/scratch/cscs/damrein/outputs/logs/flow_matching/slurm-harmonic-pipeline-%j.out
 #SBATCH --error=/capstor/scratch/cscs/damrein/outputs/logs/flow_matching/slurm-harmonic-pipeline-%j.err
@@ -65,11 +65,11 @@ python ${SCRIPT_DIR}/ml/run_pipeline.py \
     --shared-tmp ${SHARED_TMP} \
     --srun-torchrun \
     --max-shells 1000 \
-    --batch-size 1 \
-    --epochs 10 \
-    --lr 1e-4 \
+    --batch-size 10 \
+    --epochs 2 \
+    --lr 1e-2 \
     --sigma 0.01 \
-    --hidden 32  \
+    --hidden 3000  \
     --lmax 3000 \
     --ode-steps 25 \
     --plot-nside 2048 \
