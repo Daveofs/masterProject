@@ -18,7 +18,7 @@ SCRATCH_DIR=/capstor/scratch/cscs/damrein
 CONDA_ROOT=/users/damrein/miniforge3
 CONDA_ENV=disco-dj
 
-DISCO_FILE="/capstor/scratch/cscs/damrein/outputs/disco_custom/disco_sim/gpu_grid_3743653/disco_shells_nside=2048.npz"
+DISCO_FILE="/capstor/scratch/cscs/damrein/outputs/disco_custom/disco_sim/gpu_grid_3749977/disco_shells_nside=2048.npz"
 # Set to "None" or leave empty to make it optional
 DISCO_FILE_1664=None
 COSMOGRID_FILE="/capstor/scratch/cscs/damrein/cosmogridv1_test3/cosmo_000001/run_0/compressed_shells.npz"
@@ -38,7 +38,7 @@ SHOW_THEORY=false
 SHOW_RESID=false
 
 # Custom legend labels
-LABEL_DISCO="DRF - Disco"
+LABEL_DISCO="DRF - Disco from latest pkdgrav IC"
 LABEL_DISCO_1664="Ignore"
 LABEL_COSMOGRID="CosmoGridV1"
 LABEL_THEORY="CCL theory"

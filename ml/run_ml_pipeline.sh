@@ -69,7 +69,7 @@ python ${SCRIPT_DIR}/ml/run_pipeline.py \
     --epochs 2 \
     --lr 1e-2 \
     --sigma 0.01 \
-    --hidden 3000  \
+    --hidden 512  \
     --lmax 3000 \
     --ode-steps 25 \
     --plot-nside 2048 \

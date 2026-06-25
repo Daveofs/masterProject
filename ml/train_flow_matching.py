@@ -80,7 +80,7 @@ def train(args):
     dim_in = sample_x0.shape[-1]
     cond_dim = sample_cond.shape[-1] if sample_cond.ndim > 0 else 1
 
-    model = MLP(dim_in=dim_in, cond_dim=cond_dim, hidden=args.hidden).to(device)
+    model = MLP(dim_in=dim_in, cond_dim=cond_dim, hidden=args.hidden, lmax=args.lmax).to(device)
 
     if is_distributed:
         model = DDP(model, device_ids=[local_rank], output_device=local_rank)
@@ -147,12 +147,12 @@ def train(args):
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
             opt.step()
+            scheduler.step()
 
             running += loss.item()
             step_count += 1
             loss_history.append(loss.item())
 
-        scheduler.step()
         avg_loss = running / max(step_count, 1)
 
         if is_main_process() and (ep + 1) % args.log_interval == 0:
@@ -175,6 +175,7 @@ def train(args):
             "sample_dim": dim_in,
             "cond_dim": cond_dim,
             "hidden": args.hidden,
+            "max_shell_idx": max(args.max_shells - 1, 1),
         }
         torch.save(metadata, out / "metadata.pth")
         print(f"Saved model + metadata to {out}")
