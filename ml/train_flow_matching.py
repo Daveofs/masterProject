@@ -125,10 +125,20 @@ def train(args):
 
         model.train()
         for x0, x1, cond in dl:
-            # Flatten variance by scaling inputs
-            x0 = (x0.to(device, non_blocking=True) * scale_vec)
-            x1 = (x1.to(device, non_blocking=True) * scale_vec)
+            # Step 1: spectral whitening (equalises dynamic range across ell values)
+            x0 = x0.to(device, non_blocking=True) * scale_vec
+            x1 = x1.to(device, non_blocking=True) * scale_vec
             cond = cond.to(device, non_blocking=True)
+
+            # Step 2: per-sample amplitude normalisation.
+            # ut_norm spans 9–169 across cosmologies: without this, high-amplitude
+            # shells dominate the MSE gradient by up to 324x, preventing convergence
+            # on low-amplitude shells.  Normalise both x0 and x1 by the same factor
+            # (x0's norm) so the model learns a RELATIVE velocity.  The scale is
+            # recoverable at inference because we store x0 before normalising.
+            sample_scale = x0.norm(dim=-1, keepdim=True).clamp(min=1e-8)
+            x0 = x0 / sample_scale
+            x1 = x1 / sample_scale
 
             B = x0.shape[0]
 
@@ -136,8 +146,8 @@ def train(args):
             mu_t = t * x1 + (1 - t) * x0
             eps = torch.randn_like(x0) * args.sigma
             xt = mu_t + eps
-            
-            # Target velocity is now in the "whitened" latent space
+
+            # Target velocity (in normalised whitened space — norm ~1-3, not 9-169)
             ut = x1 - x0
 
             pred = model(xt, t.squeeze(1), cond=cond)
@@ -175,7 +185,9 @@ def train(args):
             "sample_dim": dim_in,
             "cond_dim": cond_dim,
             "hidden": args.hidden,
-            "max_shell_idx": max(args.max_shells - 1, 1),
+            "max_shell_idx": ds.max_shell_idx,
+            "cond_mean": ds.cond_mean.tolist(),
+            "cond_std":  ds.cond_std.tolist(),
         }
         torch.save(metadata, out / "metadata.pth")
         print(f"Saved model + metadata to {out}")

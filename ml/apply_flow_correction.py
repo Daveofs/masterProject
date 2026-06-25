@@ -95,7 +95,13 @@ def main():
     indices = list(range(Nshells)) if args.shell_index < 0 else [int(args.shell_index)]
     
     raw_cond = load_clean_params(Path(args.params))[0]
-    cond_base = torch.from_numpy(raw_cond).float().to(device)
+    cond_base_raw = torch.from_numpy(raw_cond).float().to(device)
+
+    # Apply the same per-feature normalisation that was used during training.
+    # Without this the conditioning is out-of-distribution (e.g. bary_Mc ~5e12).
+    cond_mean = torch.tensor(metadata["cond_mean"], dtype=torch.float32, device=device)
+    cond_std  = torch.tensor(metadata["cond_std"],  dtype=torch.float32, device=device)
+    cond_base = (cond_base_raw - cond_mean) / cond_std
 
     # Load shell-index normalization constant from training metadata
     max_shell_idx = float(metadata.get("max_shell_idx", max(len(indices) - 1, 1)))
@@ -124,17 +130,22 @@ def main():
         batch_indices = indices[batch_start:batch_start + args.batch_size]
         B = len(batch_indices)
 
-        # Scale the inputs UP into the whitened domain for the neural network
-        x_batch = torch.stack([
+        # Step 1: spectral whitening — same as training
+        x_batch_raw = torch.stack([
             torch.from_numpy(alm_vectors[idx]) for idx in batch_indices
-        ]).to(device) * scale_vec  
+        ]).to(device) * scale_vec
+
+        # Step 2: per-sample amplitude normalisation — must mirror the training loop.
+        # The model was trained on unit-norm inputs; providing unnormalised inputs
+        # would move the ODE starting point out of the learned distribution.
+        sample_scale = x_batch_raw.norm(dim=-1, keepdim=True).clamp(min=1e-8)
+        x_curr = x_batch_raw / sample_scale
 
         cond_batch = torch.stack([
             torch.cat([cond_base, torch.tensor([idx / max_shell_idx], dtype=torch.float32, device=device)])
             for idx in batch_indices
         ])
 
-        x_curr = x_batch.clone()
         dt = 1.0 / args.steps
 
         with torch.no_grad():
@@ -150,8 +161,8 @@ def main():
                         
                 x_curr = x_curr + v * dt
 
-        # Scale the outputs DOWN back to the physical a_lm domain
-        x_curr = x_curr / scale_vec
+        # Reverse per-sample normalisation, then reverse spectral whitening
+        x_curr = (x_curr * sample_scale) / scale_vec
         x_out = x_curr.cpu().numpy()
         
         for i, idx in enumerate(batch_indices):

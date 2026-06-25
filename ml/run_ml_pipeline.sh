@@ -2,10 +2,10 @@
 #SBATCH --nodes=2
 #SBATCH --exclusive
 #SBATCH --job-name=flow-loo-harmonic
-#SBATCH --partition=debug
+#SBATCH --partition=normal
 #SBATCH --account=sk037
 #SBATCH --ntasks-per-node=1
-#SBATCH --time=00:15:00
+#SBATCH --time=02:00:00
 #SBATCH --gres=gpu:4
 #SBATCH --output=/capstor/scratch/cscs/damrein/outputs/logs/flow_matching/slurm-harmonic-pipeline-%j.out
 #SBATCH --error=/capstor/scratch/cscs/damrein/outputs/logs/flow_matching/slurm-harmonic-pipeline-%j.err
@@ -66,14 +66,15 @@ python ${SCRIPT_DIR}/ml/run_pipeline.py \
     --srun-torchrun \
     --max-shells 1000 \
     --batch-size 10 \
-    --epochs 2 \
-    --lr 1e-2 \
+    --epochs 200 \
+    --lr 5e-4 \
     --sigma 0.01 \
     --hidden 512  \
     --lmax 3000 \
     --ode-steps 25 \
     --plot-nside 2048 \
-    --device cuda:0 
+    --device cuda:0 \
+    --log-interval 10 
 
 
 echo "Harmonic Pipeline ${SLURM_JOB_ID} finished at $(date)"

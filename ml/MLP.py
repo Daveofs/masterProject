@@ -60,14 +60,21 @@ class MLP(nn.Module):
         self.register_buffer("ell_pos", ell_pos)
         self.register_buffer("mode_pos", mode_pos)
 
-        # No sinusoidal embedding — just raw t scalar
-        per_ell_in = 2 * M + 1 + cond_dim
+        # Normalized ell index lets the network know which angular scale it processes.
+        # Without it the network cannot distinguish ell=5 from ell=6 without counting zeros.
+        self.register_buffer("ell_index",
+                             torch.arange(lmax + 1, dtype=torch.float32) / max(lmax, 1))
 
+        # +1 for t scalar, +1 for ell/lmax index
+        per_ell_in = 2 * M + 2 + cond_dim
+
+        # SiLU (Swish) is zero-centred unlike ReLU, preventing the positive-output
+        # bias that causes the ODE to blow up when the model is under-trained.
         self.net = nn.Sequential(
             nn.Linear(per_ell_in, hidden),
-            nn.ReLU(),
+            nn.SiLU(),
             nn.Linear(hidden, hidden),
-            nn.ReLU(),
+            nn.SiLU(),
             nn.Linear(hidden, 2 * M),
         )
 
@@ -91,9 +98,10 @@ class MLP(nn.Module):
 
         x_ell = self._gather(x)                              # (B, L, 2*M)
 
-        # Broadcast scalar t to every ell row
-        t_exp = t.view(B, 1, 1).expand(B, L, 1)             # (B, L, 1)
-        parts = [x_ell, t_exp]
+        # Broadcast scalar t and ell/lmax index to every ell row
+        t_exp   = t.view(B, 1, 1).expand(B, L, 1)           # (B, L, 1)
+        ell_exp = self.ell_index.view(1, L, 1).expand(B, L, 1)  # (B, L, 1)
+        parts = [x_ell, t_exp, ell_exp]
         if cond is not None:
             parts.append(cond.unsqueeze(1).expand(B, L, -1))
 

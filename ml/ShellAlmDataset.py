@@ -98,7 +98,19 @@ class ShellAlmDataset(Dataset):
             print(f"[Dataset Mounted] Total items mapped on disk: {len(self.sample_addresses)}")
 
         # Only the tiny conditioning floats get loaded into actual RAM
-        self.cosmo_mat = torch.from_numpy(np.stack(cosmo_list))
+        cosmo_raw = torch.from_numpy(np.stack(cosmo_list))
+
+        # Normalize cosmo params to zero-mean unit-variance across the training set.
+        # Without this, parameters like bary_Mc (~5e12) cause catastrophic activation
+        # explosion through the MLP (loss ~10^22 instead of ~10^-6).
+        self.cond_mean = cosmo_raw.mean(0)
+        self.cond_std  = cosmo_raw.std(0).clamp(min=1e-8)
+        self.cosmo_mat = (cosmo_raw - self.cond_mean) / self.cond_std
+
+        if verbose:
+            print(f"[Dataset] Cond normalization: mean range [{self.cond_mean.min():.3g}, "
+                  f"{self.cond_mean.max():.3g}], std range [{self.cond_std.min():.3g}, "
+                  f"{self.cond_std.max():.3g}]")
 
         # Normalize shell index to [0, 1] — raw indices (0..999) vary by 3 orders
         # of magnitude vs cosmo params, completely dominating the context MLP gradient.
