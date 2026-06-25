@@ -2,11 +2,13 @@
 """Conditional Flow-Matching trainer for HEALPix shells in Spherical Harmonic (Alm) space."""
 
 import argparse
+import math
 import os
 from pathlib import Path
 import time
-
+from torch.optim.lr_scheduler import LambdaLR
 import numpy as np
+import healpy as hp
 import torch
 import torch.distributed as dist
 from torch import nn
@@ -24,7 +26,6 @@ def is_main_process():
         return dist.get_rank() == 0
     return True
 
-
 def setup_distributed():
     if "RANK" in os.environ and "WORLD_SIZE" in os.environ:
         rank = int(os.environ["RANK"])
@@ -39,11 +40,18 @@ def setup_distributed():
         print("[DDP] Not running distributed.")
         return 0, 0, 1
 
-
 def cleanup_distributed():
     if dist.is_initialized():
         dist.destroy_process_group()
 
+def get_alm_scale_vector(lmax, device):
+    """Generates a static vector to whiten the dynamic range of the a_lm spectrum."""
+    l_arr, _ = hp.Alm.getlm(lmax)
+    # Empirically boosts high-l targets so MSE loss doesn't ignore them.
+    # Base 1.0 prevents dividing by zero for the l=0 mode.
+    scale_complex = (l_arr / 100.0) ** 1.5 + 1.0 
+    scale_flat = np.concatenate([scale_complex, scale_complex]).astype(np.float32)
+    return torch.tensor(scale_flat, device=device)
 
 def train(args):
     local_rank, rank, world_size = setup_distributed()
@@ -77,9 +85,30 @@ def train(args):
     if is_distributed:
         model = DDP(model, device_ids=[local_rank], output_device=local_rank)
 
+    # opt = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-5)
+    # scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=args.epochs, eta_min=args.lr * 0.01)
+
+    def get_warmup_cosine_scheduler(optimizer, warmup_steps, total_steps):
+        def lr_lambda(current_step):
+            if current_step < warmup_steps:
+                return float(current_step) / float(max(1, warmup_steps))
+            progress = float(current_step - warmup_steps) / float(max(1, total_steps - warmup_steps))
+            return max(0.0, 0.5 * (1.0 + math.cos(math.pi * progress)))
+        return LambdaLR(optimizer, lr_lambda)
+
+    # ... inside train() function ...
+    # Set a slightly more aggressive base LR (e.g., 5e-4) but use the scheduler
     opt = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-5)
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=args.epochs, eta_min=args.lr * 0.01)
+
+    # Calculate total steps
+    total_steps = len(dl) * args.epochs
+    warmup_steps = int(total_steps * 0.1) # Warmup for first 10% of training
+
+    scheduler = get_warmup_cosine_scheduler(opt, warmup_steps, total_steps)
     mse = nn.MSELoss()
+
+    # Pre-calculate our spectral whitening vector and load to GPU
+    scale_vec = get_alm_scale_vector(args.lmax, device)
 
     if is_main_process():
         print(f"Model params: {sum(p.numel() for p in model.parameters()):,}")
@@ -96,23 +125,22 @@ def train(args):
 
         model.train()
         for x0, x1, cond in dl:
-            x0 = x0.to(device, non_blocking=True)
-            x1 = x1.to(device, non_blocking=True)
+            # Flatten variance by scaling inputs
+            x0 = (x0.to(device, non_blocking=True) * scale_vec)
+            x1 = (x1.to(device, non_blocking=True) * scale_vec)
             cond = cond.to(device, non_blocking=True)
 
             B = x0.shape[0]
 
-            x0_exp = x0.repeat_interleave(1, dim=0)
-            x1_exp = x1.repeat_interleave(1, dim=0)
-            cond_exp = cond.repeat_interleave(1, dim=0)
-
             t = torch.rand(B, 1, device=device)
-            mu_t = t * x1_exp + (1 - t) * x0_exp
-            eps = torch.randn_like(x0_exp) * args.sigma
+            mu_t = t * x1 + (1 - t) * x0
+            eps = torch.randn_like(x0) * args.sigma
             xt = mu_t + eps
-            ut = x1_exp - x0_exp
+            
+            # Target velocity is now in the "whitened" latent space
+            ut = x1 - x0
 
-            pred = model(xt, t.squeeze(1), cond=cond_exp)
+            pred = model(xt, t.squeeze(1), cond=cond)
             loss = mse(pred, ut)
 
             opt.zero_grad()
@@ -204,5 +232,4 @@ if __name__ == "__main__":
             dist.destroy_process_group()
         raise
     finally:
-        # Force-exit to kill any lingering torchrun agent threads
         os._exit(0)

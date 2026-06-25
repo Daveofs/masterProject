@@ -25,7 +25,7 @@ OUT_DIR=/capstor/scratch/cscs/damrein/outputs
 mkdir -p "${SNAP_DIR}" "${LOG_DIR}" "${OUT_DIR}"
 mkdir -p "${OUT_DIR}/disco_sim"
 
-ICS_FILE=/capstor/store/cscs/ska/sk037/jbucko/disco_files_grid00001/snapshot_converted_832.hdf5
+ICS_FILE=/capstor/scratch/cscs/damrein/cosmogridv1_test3/cosmo_000001/run_0/grid00001.00000.hdf5
 PARAM_YML=/capstor/scratch/cscs/damrein/cosmogridv1_test3/cosmo_000001/run_0/params.yml
 CLASS_PROCESSED=/capstor/scratch/cscs/damrein/cosmogridv1_test3/cosmo_000001/run_0/class_processed.hdf5
 CONDA_INIT=/users/damrein/miniforge3/etc/profile.d/conda.sh

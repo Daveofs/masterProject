@@ -66,10 +66,10 @@ python ${SCRIPT_DIR}/ml/run_pipeline.py \
     --srun-torchrun \
     --max-shells 1000 \
     --batch-size 1 \
-    --epochs 2 \
-    --lr 2e-4 \
+    --epochs 10 \
+    --lr 1e-4 \
     --sigma 0.01 \
-    --hidden 64 \
+    --hidden 32  \
     --lmax 3000 \
     --ode-steps 25 \
     --plot-nside 2048 \

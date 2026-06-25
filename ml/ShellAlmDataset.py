@@ -86,7 +86,7 @@ class ShellAlmDataset(Dataset):
 
                 self.sample_addresses.append((file_pointer_idx, i))
                 cosmo_list.append(cosmo_vec)
-                shell_idx_list.append(i)
+                shell_idx_list.append(i)  # raw; normalized below
 
                 total_collected += 1
 
@@ -99,7 +99,12 @@ class ShellAlmDataset(Dataset):
 
         # Only the tiny conditioning floats get loaded into actual RAM
         self.cosmo_mat = torch.from_numpy(np.stack(cosmo_list))
-        self.shell_indices = torch.tensor(shell_idx_list, dtype=torch.float32)
+
+        # Normalize shell index to [0, 1] — raw indices (0..999) vary by 3 orders
+        # of magnitude vs cosmo params, completely dominating the context MLP gradient.
+        raw = np.array(shell_idx_list, dtype=np.float32)
+        self.max_shell_idx = float(max(raw.max(), 1))
+        self.shell_indices = torch.from_numpy(raw / self.max_shell_idx)
 
     def __len__(self):
         return len(self.sample_addresses)
