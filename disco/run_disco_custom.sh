@@ -59,7 +59,6 @@ srun --ntasks=$((SLURM_NNODES * 4)) --ntasks-per-node=4 \
     --boxsize "${BOXSIZE}" \
     --numsteps "${NUMSTEPS}" \
     --run-mode gpu \
-    --precision double \
     --no-dump-xla \
     --name grid \
     --a-ini "${A_INI}" \

@@ -78,6 +78,15 @@ class ShellAlmDataset(Dataset):
             n_available = min(low_mmap.shape[0], high_mmap.shape[0])
 
             for i in range(n_available):
+                # Skip shells where low/high mean density is mismatched (>20%
+                # difference in a_00, the monopole, indicates a shell boundary
+                # mismatch between the two simulation outputs).
+                a00_low  = float(low_mmap[i, 0])
+                a00_high = float(high_mmap[i, 0])
+                if abs(a00_low) > 1e-10:
+                    ratio = a00_high / a00_low
+                    if ratio < 0.8 or ratio > 1.2:
+                        continue
 
                 self.sample_addresses.append((file_pointer_idx, i))
                 cosmo_list.append(cosmo_vec)

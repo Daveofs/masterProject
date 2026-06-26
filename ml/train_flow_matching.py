@@ -45,11 +45,15 @@ def cleanup_distributed():
         dist.destroy_process_group()
 
 def get_alm_scale_vector(lmax, device):
-    """Generates a static vector to whiten the dynamic range of the a_lm spectrum."""
+    """Generates a static vector to whiten the dynamic range of the a_lm spectrum.
+
+    Uses a capped sqrt scaling so high-ell modes are boosted but not overwhelmed.
+    (l/100)^0.5 + 1, capped at 8x, so ell=3000 → ~6.5x instead of 165x.
+    This prevents the model from spending all capacity on shot-noise-dominated
+    high-ell modes at the expense of the physically meaningful large scales.
+    """
     l_arr, _ = hp.Alm.getlm(lmax)
-    # Empirically boosts high-l targets so MSE loss doesn't ignore them.
-    # Base 1.0 prevents dividing by zero for the l=0 mode.
-    scale_complex = (l_arr / 100.0) ** 1.5 + 1.0 
+    scale_complex = np.clip((l_arr / 100.0) ** 0.5 + 1.0, 1.0, 8.0)
     scale_flat = np.concatenate([scale_complex, scale_complex]).astype(np.float32)
     return torch.tensor(scale_flat, device=device)
 
