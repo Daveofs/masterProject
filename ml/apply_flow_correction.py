@@ -173,14 +173,18 @@ def main():
     t2 = time.time()
     print(f"Computing inverse SHTs (alm2map) with {args.workers} workers...")
 
-    shells_corrected = shells.copy()
+    # Store corrected shells as float32 — alm2map returns a smooth continuous
+    # field (float64). Casting back to the original integer dtype (e.g. int32)
+    # truncates values in [0, 1) to 0, reducing the mean from ~0.14 to ~0.03
+    # and blowing up the overdensity Cl by ~(0.14/0.03)^2 ~ 20x.
+    shells_corrected = shells.astype(np.float32)
     inv_args = [(idx, results[idx], N_alm, nside_full) for idx in indices]
 
     with ProcessPoolExecutor(max_workers=args.workers) as pool:
         futures = [pool.submit(alm_vector_to_map, a) for a in inv_args]
         for f in as_completed(futures):
             idx, corrected_map = f.result()
-            shells_corrected[idx] = corrected_map.astype(shells.dtype)
+            shells_corrected[idx] = corrected_map.astype(np.float32)
 
     print(f"  Inverse SHTs done in {time.time() - t2:.1f}s")
 

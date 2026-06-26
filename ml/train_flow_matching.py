@@ -61,7 +61,6 @@ def train(args):
     ds = ShellAlmDataset(
         args.data_dir,
         lmax=args.lmax,
-        max_shells=args.max_shells,
         verbose=is_main_process(),
     )
 

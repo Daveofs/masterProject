@@ -64,12 +64,11 @@ python ${SCRIPT_DIR}/ml/run_pipeline.py \
     --apply-script apply_flow_correction.py \
     --shared-tmp ${SHARED_TMP} \
     --srun-torchrun \
-    --max-shells 1000 \
     --batch-size 10 \
-    --epochs 200 \
+    --epochs 50 \
     --lr 5e-4 \
     --sigma 0.01 \
-    --hidden 512  \
+    --hidden 1024  \
     --lmax 3000 \
     --ode-steps 25 \
     --plot-nside 2048 \

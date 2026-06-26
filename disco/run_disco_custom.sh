@@ -45,7 +45,7 @@ echo "simulation_run: ${SIMRUN_BIN}"
 METAINFO_FILE=/capstor/scratch/cscs/damrein/cosmogridv1/CosmoGridV1_metainfo.h5
 COSMO_KEY=cosmo_000001
 RES=832
-RES_PM=832
+RES_PM=1664
 BOXSIZE=900.0
 NUMSTEPS=100
 A_INI=0.01
@@ -59,7 +59,7 @@ srun --ntasks=$((SLURM_NNODES * 4)) --ntasks-per-node=4 \
     --boxsize "${BOXSIZE}" \
     --numsteps "${NUMSTEPS}" \
     --run-mode gpu \
-    --cosmo pkdgrav_grid00001 \
+    --precision double \
     --no-dump-xla \
     --name grid \
     --a-ini "${A_INI}" \

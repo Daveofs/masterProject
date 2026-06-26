@@ -215,7 +215,7 @@ def main() -> None:
     test_dir = data_root / args.test_cosmo
 
     all_cosmos = sorted(d for d in data_root.iterdir() if d.is_dir() and d.name.startswith("cosmo_"))
-    train_cosmos = [d for d in all_cosmos if d.name != args.test_cosmo]
+    train_cosmos = [d for d in all_cosmos]
     
     test_run_dirs = [r for r in sorted(test_dir.iterdir()) if r.is_dir() and r.name.startswith("run_")]
     test_run_dir = test_run_dirs[0] if test_run_dirs else test_dir
@@ -250,7 +250,6 @@ def main() -> None:
             str(train_script),
             "--data-dir", str(tmp_root),
             "--lmax", str(args.lmax),
-            "--max-shells", str(args.max_shells),
             "--batch-size", str(args.batch_size),
             "--epochs", str(args.epochs),
             "--lr", str(args.lr),

@@ -23,7 +23,6 @@ class ShellAlmDataset(Dataset):
         self,
         data_dir: Path,
         lmax: int = 1024,
-        max_shells: int = 0,
         verbose: bool = True,
     ):
         data_dir = Path(data_dir)
@@ -56,8 +55,6 @@ class ShellAlmDataset(Dataset):
         high_file_name = f"high_alms_lmax{lmax}.npy"
 
         for ld in tqdm(leaf_dirs, desc="Indexing .npy Memory Maps", disable=not verbose):
-            if max_shells and total_collected >= max_shells:
-                break
 
             params_yml = ld / "params.yml" if (ld / "params.yml").exists() else ld.parent / "params.yml"
             low_npy = ld / low_file_name
@@ -81,8 +78,6 @@ class ShellAlmDataset(Dataset):
             n_available = min(low_mmap.shape[0], high_mmap.shape[0])
 
             for i in range(n_available):
-                if max_shells and total_collected >= max_shells:
-                    break
 
                 self.sample_addresses.append((file_pointer_idx, i))
                 cosmo_list.append(cosmo_vec)
