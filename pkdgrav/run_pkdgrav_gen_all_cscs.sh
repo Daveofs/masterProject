@@ -28,11 +28,78 @@
 #SBATCH --error=/capstor/scratch/cscs/damrein/outputs/logs/pkdgrav/pkdgrav_gen_%A_%a.err
 
 # ---- Paths -------------------------------------------------------
-COSMOGRID_DIR="/capstor/scratch/cscs/damrein/cosmogridv1_test2"
+COSMOGRID_DIR="/capstor/scratch/cscs/damrein/cosmogridv1"
 PKDGRAV_BIN="/users/damrein/pkdgrav/pkdgrav3_dev-master/build/pkdgrav3"
 JOB_LIST="/users/damrein/masterProject/pkdgrav/job_list_gen_all.txt"
 LOG_DIR="/capstor/scratch/cscs/damrein/outputs/logs/pkdgrav"
 # ------------------------------------------------------------------
+
+# ============================================================
+# Before --build-list we define a mask for parameters
+# ============================================================
+
+OMEGA_M_MIN=0.23;  OMEGA_M_MAX=0.33
+SIGMA_8_MIN=0.75;  SIGMA_8_MAX=0.85
+W0_MIN=-1.2;       W0_MAX=-0.8
+H0_MIN=65.0;       H0_MAX=75.0
+OMEGA_B_MIN=0.046; OMEGA_B_MAX=0.051
+N_S_MIN=0.95;      N_S_MAX=0.98
+
+# Returns 0 (true) if params.yml values are inside the mask ranges, 1 otherwise.
+check_mask() {
+    local params_file="$1"
+    python3 - "$params_file" \
+        "$OMEGA_M_MIN" "$OMEGA_M_MAX" \
+        "$SIGMA_8_MIN" "$SIGMA_8_MAX" \
+        "$W0_MIN" "$W0_MAX" \
+        "$H0_MIN" "$H0_MAX" \
+        "$OMEGA_B_MIN" "$OMEGA_B_MAX" \
+        "$N_S_MIN" "$N_S_MAX" <<'PYEOF'
+import sys
+import yaml
+
+params_file = sys.argv[1]
+omega_m_min, omega_m_max = float(sys.argv[2]), float(sys.argv[3])
+sigma8_min,  sigma8_max  = float(sys.argv[4]), float(sys.argv[5])
+w0_min,      w0_max      = float(sys.argv[6]), float(sys.argv[7])
+h0_min,      h0_max      = float(sys.argv[8]), float(sys.argv[9])
+omega_b_min, omega_b_max = float(sys.argv[10]), float(sys.argv[11])
+ns_min,      ns_max      = float(sys.argv[12]), float(sys.argv[13])
+
+try:
+    with open(params_file) as f:
+        p = yaml.safe_load(f)
+
+    omega_m = float(p["Om"])
+    sigma8  = float(p["sigma8"])
+    w0      = float(p["w0"])
+    h0      = float(p["H0"])
+    omega_b = float(p["Ob"])
+    ns      = float(p["ns"])
+
+    # Check all ranges
+    if not (omega_m_min <= omega_m <= omega_m_max):
+        sys.exit(1)
+    if not (sigma8_min <= sigma8 <= sigma8_max):
+        sys.exit(1)
+    if not (w0_min <= w0 <= w0_max):
+        sys.exit(1)
+    if not (h0_min <= h0 <= h0_max):
+        sys.exit(1)
+    if not (omega_b_min <= omega_b <= omega_b_max):
+        sys.exit(1)
+    if not (ns_min <= ns <= ns_max):
+        sys.exit(1)
+
+    # All checks passed
+    sys.exit(0)
+
+except Exception as e:
+    print(f"  Warning: mask check failed for {params_file}: {e}", file=sys.stderr)
+    sys.exit(1)
+PYEOF
+}
+
 
 # ============================================================
 # --build-list : generate the job list (run on login node only)
@@ -41,14 +108,23 @@ if [[ "${1}" == "--build-list" ]]; then
     echo "Building job list -> ${JOB_LIST}"
     > "${JOB_LIST}"
     skipped=0
+    masked=0
     for cosmo_dir in "${COSMOGRID_DIR}"/cosmo_*/; do
         for run_dir in "${cosmo_dir}"run_*/; do
-            par_file="${run_dir}cosmology.par"
-            if [ ! -f "$par_file" ]; then
+            cos_file="${run_dir}cosmology.par"
+            par_file="${run_dir}params.yml"
+            if [ ! -f "$cos_file" ] || [ ! -f "$par_file" ]; then
                 continue
             fi
+
+             # Check mask: skip if parameters are outside desired ranges
+            if ! check_mask "$par_file"; then
+                (( masked++ )) || true
+                continue
+            fi
+
             # Skip if IC file already exists
-            ach_out=$(grep '^achOutName' "$par_file" | sed 's/.*= *"\(.*\)"/\1/')
+            ach_out=$(grep '^achOutName' "$cos_file" | sed 's/.*= *"\(.*\)"/\1/')
             if [ -n "$ach_out" ] && [ -f "${run_dir}${ach_out}.00000" ]; then
                 (( skipped++ )) || true
                 continue

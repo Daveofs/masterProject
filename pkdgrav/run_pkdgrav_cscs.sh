@@ -23,7 +23,6 @@ if [[ -f "${CONDA_ROOT}/etc/profile.d/conda.sh" ]]; then
     conda activate pkdgrav
 fi
 
-
 #unset CPATH CPLUS_INCLUDE_PATH C_INCLUDE_PATH LIBRARY_PATH
 #module load stack/2024-06 gcc/12.2.0 openmpi/4.1.6
 #module load fftw/3.3.10
@@ -31,8 +30,8 @@ fi
 
 # Map array task ID to zero-padded 6-digit cosmology index (1 -> 000001, 2 -> 000002, ...)
 COSMO_ID=$(printf '%06d' "${SLURM_ARRAY_TASK_ID}")
-OUTPUT_DIR=/capstor/scratch/cscs/damrein/cosmogridv1_test3/cosmo_000001/run_0
-PARAM_FILE=/capstor/scratch/cscs/damrein/cosmogridv1_test3/cosmo_000001/run_0/cosmology.par
+OUTPUT_DIR=/capstor/scratch/cscs/damrein/cosmogridv1_test5/cosmo_000001/run_0
+PARAM_FILE=/capstor/scratch/cscs/damrein/cosmogridv1_test5/cosmo_000001/run_0/cosmology.par
 
 mkdir -p "${OUTPUT_DIR}"
 cd "${OUTPUT_DIR}" # PKDGRAV writes output to the current directory, so cd there first

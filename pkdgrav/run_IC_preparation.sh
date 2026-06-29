@@ -1,11 +1,12 @@
 #!/bin/bash
 # For all cosmo_*/run_* directories:
+#   0. Delete all run_* directories except of run_0
 #   1. Unzip param_files.tar.gz if cosmology.par is missing
 #   2. Patch cosmology.par (achTfFile, bClass, cosmological params, bWriteIC, bParaWrite, nSteps4)
 #   3. Patch baryonification_params.py (transfct path)
 # Patching is idempotent: each change is only applied if still needed.
 
-COSMOGRID_DIR="/capstor/scratch/cscs/damrein/cosmogridv1_test3"
+COSMOGRID_DIR="/capstor/scratch/cscs/damrein/cosmogridv1_test5"
 
 # Activate conda environment
 source /users/damrein/miniforge3/bin/activate
@@ -259,12 +260,13 @@ patch_cosmology_par() {
         changed=1
     fi
 
-    for remove_param in nGridLin achLinSpecies achPkSpecies; do
+    for remove_param in nGridLin achLinSpecies achPkSpecies b2 b2LPT dTheta20 dTheta2 ; do
         if grep -qE "^${remove_param}\s*=" "$par_file"; then
             sed -i "/^${remove_param}\s*=/d" "$par_file"
             changed=1
         fi
     done
+
 
     if [ -f "$bary_file" ] && [ -n "$abs_class" ]; then
         local h_val omega_0 omega_b_val ns_val sigma8_val w0_val
@@ -323,50 +325,60 @@ patch_baryonification_params() {
     fi
 }
 
-# --- Loop over run directories inside COSMOGRID_DIR ---
+# --- Loop over cosmo_* directories inside COSMOGRID_DIR ---
 for cosmo_dir in "$COSMOGRID_DIR"/cosmo_*/; do
+    [ -d "$cosmo_dir" ] || continue
+
+    # Step 0: Delete all run_* directories except run_0
     for run_dir in "$cosmo_dir"/run_*/; do
-        # Ensure it's actually a directory
         [ -d "$run_dir" ] || continue
-
-        echo "Processing ${run_dir}..."
-
-        tarball="${run_dir}param_files.tar.gz"
-        cos_file="${run_dir}cosmology.par"
-        params_file="${run_dir}params.yml"
-        bary_file="${run_dir}baryonification_params.py"
-        abs_class="${run_dir}class_processed.hdf5"
-
-        run_id=$(basename "$run_dir")      
-        cosmo_id=$(basename "$cosmo_dir")
-        
-        if [[ "$cosmo_id" == cosmo_* ]]; then
-            out_name="CosmoML_${cosmo_id#cosmo_}_${run_id}"
-        else
-            out_name="CosmoML_${cosmo_id}_${run_id}"
-        fi
-
-        if [ ! -f "$tarball" ]; then
-            echo "  Warning: $tarball not found. Skipping."
-            continue
-        fi
-
-        # Step 1: unzip if not yet extracted
-        if [ ! -f "$cos_file" ]; then
-            tar -xzf "$tarball" -C "$run_dir"
-            echo "  Unzipped: $run_dir"
-        fi
-
-        # Step 2: patch cosmology.par
-        if [ -f "$cos_file" ]; then
-            patch_cosmology_par "$cos_file" "$abs_class" "$out_name" "$bary_file" "$params_file"
-        fi
-
-        # Step 3: patch baryonification_params.py (path adjustements)
-        if [ -f "$bary_file" ]; then
-            patch_baryonification_params "$bary_file" "$abs_class"
+        if [ "$(basename "$run_dir")" != "run_0" ]; then
+            echo "Deleting ${run_dir}..."
+            rm -rf "$run_dir"
         fi
     done
+
+    # Now process only run_0
+    run_dir="${cosmo_dir}run_0/"
+    [ -d "$run_dir" ] || continue
+
+    echo "Processing ${run_dir}..."
+
+    tarball="${run_dir}param_files.tar.gz"
+    cos_file="${run_dir}cosmology.par"
+    params_file="${run_dir}params.yml"
+    bary_file="${run_dir}baryonification_params.py"
+    abs_class="${run_dir}class_processed.hdf5"
+
+    run_id="run_0"
+    cosmo_id=$(basename "$cosmo_dir")
+    
+    if [[ "$cosmo_id" == cosmo_* ]]; then
+        out_name="CosmoML_${cosmo_id#cosmo_}_${run_id}"
+    else
+        out_name="CosmoML_${cosmo_id}_${run_id}"
+    fi
+
+    if [ ! -f "$tarball" ]; then
+        echo "  Warning: $tarball not found. Skipping."
+        continue
+    fi
+
+    # Step 1: unzip if not yet extracted
+    if [ ! -f "$cos_file" ]; then
+        tar -xzf "$tarball" -C "$run_dir"
+        echo "  Unzipped: $run_dir"
+    fi
+
+    # Step 2: patch cosmology.par
+    if [ -f "$cos_file" ]; then
+        patch_cosmology_par "$cos_file" "$abs_class" "$out_name" "$bary_file" "$params_file"
+    fi
+
+    # Step 3: patch baryonification_params.py (path adjustements)
+    if [ -f "$bary_file" ]; then
+        patch_baryonification_params "$bary_file" "$abs_class"
+    fi
 done
 
 echo "Done."

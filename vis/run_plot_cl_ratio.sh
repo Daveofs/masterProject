@@ -1,8 +1,8 @@
 #!/bin/bash
 #SBATCH --job-name=cl_ratio
 #SBATCH --account=sk037
-#SBATCH --partition=normal
-#SBATCH --time=01:00:00
+#SBATCH --partition=debug
+#SBATCH --time=00:30:00
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=64G
@@ -18,7 +18,7 @@ SCRATCH_DIR=/capstor/scratch/cscs/damrein
 CONDA_ROOT=/users/damrein/miniforge3
 CONDA_ENV=disco-dj
 
-DISCO_FILE="/capstor/scratch/cscs/damrein/outputs/disco_custom/disco_sim/gpu_grid_3755580/disco_shells_nside=2048.npz"
+DISCO_FILE="/capstor/scratch/cscs/damrein/outputs/disco_custom/disco_sim/gpu_grid_3780404/disco_shells_nside=2048.npz"
 # Set to "None" or leave empty to make it optional
 DISCO_FILE_1664=None
 COSMOGRID_FILE="/capstor/scratch/cscs/damrein/cosmogridv1_test3/cosmo_000001/run_0/compressed_shells.npz"

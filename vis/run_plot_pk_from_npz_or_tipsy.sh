@@ -18,22 +18,22 @@ SCRATCH_DIR=/capstor/scratch/cscs/damrein
 CONDA_ROOT=/users/damrein/miniforge3
 CONDA_ENV=disco-dj
 
-SNAPSHOT_A=/capstor/scratch/cscs/damrein/outputs/snapshots/final_multigpu_3536615.npz
-SNAPSHOT_B=/capstor/scratch/cscs/damrein/cosmogridv1_fiducial/run_0000/standard/CosmoML.00140
+SNAPSHOT_A=/capstor/scratch/cscs/damrein/cosmogridv1_test5/cosmo_000001/run_0/CosmoML_000001_run_0.00000
+SNAPSHOT_B=/capstor/store/cscs/ska/sk037/jbucko/disco_files_grid00001/grid00001.00000
 SNAPSHOT_C=/capstor/scratch/cscs/damrein/outputs/snapshots/final_multigpu_3536615.npz
 OUT_DIR=${SCRATCH_DIR}/outputs/pk_snapshot_comparison
 
-PY_SCRIPT=/users/damrein/masterProject/tools/plot_pk_from_npz.py
+PY_SCRIPT=/users/damrein/masterProject/vis/plot_pk_from_npz_or_tipsy.py
 
 LBOX=900
 NGRID=512
 THREADS=8
 
-LABEL_A="DISCO-DJ snapshot - backscaling with Omega_nu and hdf5 ICs"
-LABEL_B="PKDGRAV Tipsy - standard fiducial"
-LABEL_C="DISCO-DJ snapshot - same"
+LABEL_A="PKDGRAV Tipsy - David"
+LABEL_B="PKDGRAV Tipsy - Jozef"
+LABEL_C="Ignore"
 TITLE="Snapshot Power Spectrum Comparison"
-OUTPUT_NAME="pk_snapshot_backscaling_omega_nu_hdf5.png"
+OUTPUT_NAME="pk_pkdgrav_david_jozef.png"
 
 # ---------------------------------------------------------------------------
 # Environment
