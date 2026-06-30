@@ -32,7 +32,7 @@
 set -euo pipefail
 
 # ---- Paths -------------------------------------------------------
-COSMOGRID_DIR="/capstor/scratch/cscs/damrein/cosmogridv1_test2"
+COSMOGRID_DIR="/capstor/scratch/cscs/damrein/cosmogridv1"
 PROJECT_DIR="/users/damrein/masterProject/disco"
 JOB_LIST="${PROJECT_DIR}/job_list_disco_custom.txt"
 CONDA_ENV="disco_custom"
@@ -197,7 +197,7 @@ srun --ntasks=$((SLURM_NNODES * 4)) --ntasks-per-node=4 \
     --no-calculate-fof \
     --save-npz-snapshot \
     --grad-kernel-order 4 \
-    --n-order 1 \
+    --n-order 3 \
     --build-shells \
     --shells-metainfo "${METAINFO_FILE}" \
     --param-file "${PARAMS_YML}" \

@@ -6,7 +6,7 @@
 #   3. Patch baryonification_params.py (transfct path)
 # Patching is idempotent: each change is only applied if still needed.
 
-COSMOGRID_DIR="/capstor/scratch/cscs/damrein/cosmogridv1_test5"
+COSMOGRID_DIR="/capstor/scratch/cscs/damrein/cosmogridv1"
 
 # Activate conda environment
 source /users/damrein/miniforge3/bin/activate
@@ -281,6 +281,10 @@ patch_cosmology_par() {
         ns_val=$(extract_py_param "$bary_file" "par.cosmo.ns")
         w0_val=$(extract_w_0 "$params_file")
 
+        # 1. SCRUB OLD VALUES (Deletes the comment header + any of these exact keys)
+        sed -i -E '/^\s*(# Cosmological parameters|(dOmegaRad|h|dOmega0|dOmegaDE|dOmegab|dSpectral|dSigma8|w0|wa)\s*=)/d' "$par_file"
+
+        # 2. APPEND FRESH VALUES
         cat >> "$par_file" <<EOF
         
 # Cosmological parameters
@@ -294,7 +298,7 @@ dSigma8          = ${sigma8_val}
 w0               = ${w0_val}
 wa               = 0.0
 EOF
-            changed=1
+        changed=1
     fi
 
     if grep -qE '^nSteps4' "$par_file"; then

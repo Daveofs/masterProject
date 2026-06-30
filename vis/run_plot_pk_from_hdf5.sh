@@ -9,10 +9,10 @@ conda activate disco-dj
 cd "$(dirname "$0")"
 
 # --- Defaults (edit these variables if you need different inputs) ---
-PKDGRAV_FILE="/capstor/scratch/cscs/damrein/cosmogridv1_fiducial/run_0000/standard/CosmoML.00140.hdf5"
+PKDGRAV_FILE="/capstor/store/cscs/ska/sk037/grid_000001/CosmoML.00140.hdf5"
 PKDGRAV_KEY="PartType1/Coordinates"
 
-DISCO_BASE="/capstor/scratch/cscs/damrein/outputs/disco_custom/data/output/gpu_grid_3666779"
+DISCO_BASE="/capstor/scratch/cscs/damrein/outputs/disco_custom/disco_sim/gpu_grid_3783890"
 DISCO_KEY="PartType1/Coordinates"
 # Number of DISCO-DJ shards (depends on number of GPUS used in the run)
 DISCO_NSHARD=8 

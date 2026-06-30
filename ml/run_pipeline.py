@@ -180,10 +180,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--train-script", type=str, default="train_flow_matching.py")
     p.add_argument("--apply-script", type=str, default="apply_flow_correction.py")
     p.add_argument("--python", type=str, default=sys.executable)
-    
-    p.add_argument("--lmax", type=int, default=1024, help="Harmonic bandlimit degree.")
-    p.add_argument("--max-shells", type=int, default=20)
-    p.add_argument("--batch-size", type=int, default=4)
+    p.add_argument("--chunk-size", type=int, default=1_000)
     p.add_argument("--epochs", type=int, default=10)
     p.add_argument("--lr", type=float, default=1e-3)
     p.add_argument("--sigma", type=float, default=0.01)
@@ -249,8 +246,7 @@ def main() -> None:
         train_args = [
             str(train_script),
             "--data-dir", str(tmp_root),
-            "--lmax", str(args.lmax),
-            "--batch-size", str(args.batch_size),
+            "--chunk-size", str(args.chunk_size),
             "--epochs", str(args.epochs),
             "--lr", str(args.lr),
             "--sigma", str(args.sigma),
@@ -282,6 +278,7 @@ def main() -> None:
         args.python, str(apply_script),
         "--model", str(model_path),
         "--input", str(test_input),
+        "--chunk-size", str(args.chunk_size),
         "--params", str(test_params),
         "--steps", str(args.ode_steps),
         "--device", apply_device,

@@ -11,7 +11,7 @@
 #SBATCH --chdir=/capstor/scratch/cscs/damrein/outputs/class
 
 SCRIPT=/users/damrein/masterProject/pkdgrav/get_transfer_function.py
-COSMOGRID_DIR=/capstor/scratch/cscs/damrein/cosmogridv1_test5
+COSMOGRID_DIR=/capstor/scratch/cscs/damrein/cosmogridv1
 MAX_PARALLEL="${SLURM_NTASKS:-4}"
 
 # Activate miniforge3 base environment

@@ -1,14 +1,14 @@
 #!/bin/bash
 #SBATCH --nodes=2
 #SBATCH --exclusive
-#SBATCH --job-name=flow-loo-harmonic
-#SBATCH --partition=debug
+#SBATCH --job-name=flow-loo-patch
+#SBATCH --partition=normal
 #SBATCH --account=sk037
 #SBATCH --ntasks-per-node=1
-#SBATCH --time=00:30:00
+#SBATCH --time=08:00:00
 #SBATCH --gres=gpu:4
-#SBATCH --output=/capstor/scratch/cscs/damrein/outputs/logs/flow_matching/slurm-harmonic-pipeline-%j.out
-#SBATCH --error=/capstor/scratch/cscs/damrein/outputs/logs/flow_matching/slurm-harmonic-pipeline-%j.err
+#SBATCH --output=/capstor/scratch/cscs/damrein/outputs/logs/flow_matching/slurm-patch-pipeline-%j.out
+#SBATCH --error=/capstor/scratch/cscs/damrein/outputs/logs/flow_matching/slurm-patch-pipeline-%j.err
 #SBATCH --chdir=/capstor/scratch/cscs/damrein/outputs/flow_matching
 
 # ============================================================
@@ -33,10 +33,22 @@ echo "NNODES:      ${NNODES}"
 echo "WORLD_SIZE:  ${WORLD_SIZE}"
 echo "========================================"
 
-export NCCL_DEBUG=INFO
-export NCCL_IB_DISABLE=0
-export NCCL_NET_GDR_LEVEL=5
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+
+# Slingshot / OFI transport — NCCL was falling back to TCP Socket (10-20x slower).
+# First check which module provides the OFI plugin:  module avail 2>&1 | grep -i nccl
+# Then load it above the activate line, e.g.:  module load aws-ofi-nccl
+#                                          or:  module load cray-mpich cray-nccl
+export NCCL_IB_DISABLE=1              # skip InfiniBand probing (not present on Alps)
+export NCCL_SOCKET_IFNAME=hsn         # TCP fallback uses Slingshot HSN, not mgmt NIC
+export FI_CXI_ATS=0                   # required for HPE Cray Slingshot CXI fabric
+export FI_PROVIDER=cxi                # force CXI (Slingshot) libfabric provider
+export FI_MR_CACHE_MONITOR=memhooks  # avoids CXI MR cache stalls under fork
+
+export LD_LIBRARY_PATH=/opt/cray/pe/lib64:/opt/cray/libfabric/lib64:$LD_LIBRARY_PATH
+
+export NCCL_DEBUG=WARN                # was INFO — suppresses the per-rank startup noise
+export NCCL_CROSS_NIC=1
 
 # ============================================================
 # Paths
@@ -64,12 +76,11 @@ python ${SCRIPT_DIR}/ml/run_pipeline.py \
     --apply-script apply_flow_correction.py \
     --shared-tmp ${SHARED_TMP} \
     --srun-torchrun \
-    --batch-size 30 \
-    --epochs 20 \
+    --epochs 1 \
     --lr 5e-4 \
+    --chunk-size 2000000 \
     --sigma 0.01 \
-    --hidden 2048  \
-    --lmax 3000 \
+    --hidden 512  \
     --ode-steps 25 \
     --plot-nside 2048 \
     --device cuda:0 \

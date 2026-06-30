@@ -1,214 +1,248 @@
 #!/usr/bin/env python3
-"""Conditional Flow-Matching trainer for HEALPix shells in Spherical Harmonic (Alm) space."""
+"""
+Train patch-based pixel-space flow matching for HEALPix shell correction.
+
+Key differences from train_flow_matching.py
+--------------------------------------------
+- Operates in pixel space, not Alm space → better small-scale correction
+- Patch-based: each pixel's velocity predicted from its local neighborhood
+- Patch indices precomputed and cached on disk → cheap to reuse across epochs
+- Per-shell chunked processing to handle 50M+ pixel maps on GPU
+
+Usage
+-----
+Single GPU:
+  python train_patch_flow.py --data-dir /path/to/data --nside 2048 --epochs 20
+
+DDP (torchrun):
+  torchrun --nproc_per_node=4 train_patch_flow.py --data-dir /path/to/data
+"""
 
 import argparse
 import math
 import os
-from pathlib import Path
 import time
-from torch.optim.lr_scheduler import LambdaLR
+from pathlib import Path
+
 import numpy as np
-import healpy as hp
 import torch
 import torch.distributed as dist
 from torch import nn
 from torch.nn.parallel import DistributedDataParallel as DDP
+from torch.optim.lr_scheduler import LambdaLR
 from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
 import matplotlib.pyplot as plt
 
-from MLP import MLP
-from ShellAlmDataset import ShellAlmDataset
+from MLP import PatchMLP, ShellPixelDataset, get_or_build_patch_idx, patch_flow_loss
 
 
-def is_main_process():
-    if dist.is_initialized():
-        return dist.get_rank() == 0
-    return True
+def is_main():
+    return not dist.is_initialized() or dist.get_rank() == 0
+
 
 def setup_distributed():
     if "RANK" in os.environ and "WORLD_SIZE" in os.environ:
         rank = int(os.environ["RANK"])
         world_size = int(os.environ["WORLD_SIZE"])
         local_rank = int(os.environ["LOCAL_RANK"])
-        dist.init_process_group(backend="nccl", rank=rank, world_size=world_size)
+        # Set device BEFORE init_process_group so NCCL uses local_rank, not global rank.
+        # Wrong order caused "Guessing device ID" warnings and multi-node hangs.
         torch.cuda.set_device(local_rank)
-        if is_main_process():
-            print(f"[DDP] Initialized: world_size={world_size}, backend=nccl")
+        dist.init_process_group(
+            backend="nccl",
+            device_id=torch.device(f"cuda:{local_rank}"),
+        )
         return local_rank, rank, world_size
-    else:
-        print("[DDP] Not running distributed.")
-        return 0, 0, 1
+    return 0, 0, 1
 
-def cleanup_distributed():
-    if dist.is_initialized():
-        dist.destroy_process_group()
 
-def get_alm_scale_vector(lmax, device):
-    """Generates a static vector to whiten the dynamic range of the a_lm spectrum.
+def cosine_warmup_scheduler(optimizer, warmup_steps, total_steps):
+    def lr_lambda(step):
+        if step < warmup_steps:
+            return step / max(1, warmup_steps)
+        progress = (step - warmup_steps) / max(1, total_steps - warmup_steps)
+        return max(0.0, 0.5 * (1.0 + math.cos(math.pi * progress)))
+    return LambdaLR(optimizer, lr_lambda)
 
-    Uses a capped sqrt scaling so high-ell modes are boosted but not overwhelmed.
-    (l/100)^0.5 + 1, capped at 8x, so ell=3000 → ~6.5x instead of 165x.
-    This prevents the model from spending all capacity on shot-noise-dominated
-    high-ell modes at the expense of the physically meaningful large scales.
-    """
-    l_arr, _ = hp.Alm.getlm(lmax)
-    scale_complex = np.clip((l_arr / 100.0) ** 0.5 + 1.0, 1.0, 8.0)
-    scale_flat = np.concatenate([scale_complex, scale_complex]).astype(np.float32)
-    return torch.tensor(scale_flat, device=device)
 
 def train(args):
     local_rank, rank, world_size = setup_distributed()
-    is_distributed = world_size > 1
+    is_dist = world_size > 1
     device = torch.device(f"cuda:{local_rank}" if torch.cuda.is_available() else "cpu")
 
-    ds = ShellAlmDataset(
-        args.data_dir,
-        lmax=args.lmax,
-        verbose=is_main_process(),
+    # ------------------------------------------------------------------
+    # Dataset
+    # ------------------------------------------------------------------
+    ds = ShellPixelDataset(
+        data_dir=args.data_dir,
+        nside_target=args.nside,
+        verbose=is_main(),
     )
 
-    sampler = DistributedSampler(ds, num_replicas=world_size, rank=rank, shuffle=True) if is_distributed else None
+    sampler = DistributedSampler(ds, num_replicas=world_size, rank=rank, shuffle=True) \
+        if is_dist else None
     dl = DataLoader(
         ds,
-        batch_size=min(args.batch_size, len(ds)),
+        batch_size=1,            # one shell at a time — each shell is ~200MB
         shuffle=(sampler is None),
         sampler=sampler,
-        num_workers=args.num_workers,
+        num_workers=2,
         pin_memory=True,
-        drop_last=False,
     )
-    
+
+    # ------------------------------------------------------------------
+    # Patch indices (build once, cache to disk)
+    # ------------------------------------------------------------------
+    if is_main():
+        patch_idx = get_or_build_patch_idx(
+            nside=args.nside,
+            depth=args.patch_depth,
+            cache_dir=args.cache_dir,
+        )
+        # Broadcast path to other ranks in distributed setting
+        patch_idx_path = str(
+            Path(args.cache_dir) / f"patch_idx_nside{args.nside}_depth{args.patch_depth}.npy"
+        )
+
+    if is_dist:
+        dist.barrier()  # wait for rank-0 to finish building
+        if not is_main():
+            patch_idx = np.load(
+                Path(args.cache_dir) / f"patch_idx_nside{args.nside}_depth{args.patch_depth}.npy"
+            )
+
+    patch_size = patch_idx.shape[1]
+    patch_idx_t = torch.from_numpy(patch_idx).long().to(device)
+
+    if is_main():
+        print(f"[Train] nside={args.nside} | patch_size={patch_size} | "
+              f"shells={len(ds)} | device={device}")
+
+    # ------------------------------------------------------------------
+    # Model
+    # ------------------------------------------------------------------
     sample_x0, _, sample_cond = ds[0]
-    dim_in = sample_x0.shape[-1]
-    cond_dim = sample_cond.shape[-1] if sample_cond.ndim > 0 else 1
+    cond_dim = sample_cond.shape[0]
 
-    model = MLP(dim_in=dim_in, cond_dim=cond_dim, hidden=args.hidden, lmax=args.lmax).to(device)
+    model = PatchMLP(
+        patch_size=patch_size,
+        cond_dim=cond_dim,
+        hidden=args.hidden,
+        n_layers=args.n_layers,
+    ).to(device)
 
-    if is_distributed:
+    if is_dist:
         model = DDP(model, device_ids=[local_rank], output_device=local_rank)
 
-    # opt = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-5)
-    # scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=args.epochs, eta_min=args.lr * 0.01)
+    if is_main():
+        n_params = sum(p.numel() for p in model.parameters())
+        print(f"[Train] PatchMLP params: {n_params:,} | cond_dim={cond_dim} | "
+              f"patch_size={patch_size} | hidden={args.hidden}")
 
-    def get_warmup_cosine_scheduler(optimizer, warmup_steps, total_steps):
-        def lr_lambda(current_step):
-            if current_step < warmup_steps:
-                return float(current_step) / float(max(1, warmup_steps))
-            progress = float(current_step - warmup_steps) / float(max(1, total_steps - warmup_steps))
-            return max(0.0, 0.5 * (1.0 + math.cos(math.pi * progress)))
-        return LambdaLR(optimizer, lr_lambda)
-
-    # ... inside train() function ...
-    # Set a slightly more aggressive base LR (e.g., 5e-4) but use the scheduler
     opt = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-5)
-
-    # Calculate total steps
     total_steps = len(dl) * args.epochs
-    warmup_steps = int(total_steps * 0.1) # Warmup for first 10% of training
+    warmup_steps = int(total_steps * 0.05)
+    scheduler = cosine_warmup_scheduler(opt, warmup_steps, total_steps)
 
-    scheduler = get_warmup_cosine_scheduler(opt, warmup_steps, total_steps)
-    mse = nn.MSELoss()
-
-    # Pre-calculate our spectral whitening vector and load to GPU
-    scale_vec = get_alm_scale_vector(args.lmax, device)
-
-    if is_main_process():
-        print(f"Model params: {sum(p.numel() for p in model.parameters()):,}")
-        print(f"N_alms (dim_in): {dim_in} | Cond dim: {cond_dim} | Hidden: {args.hidden}")
-
+    # ------------------------------------------------------------------
+    # Training loop
+    # ------------------------------------------------------------------
     loss_history = []
+
     for ep in range(args.epochs):
         t0 = time.time()
-        running = 0.0
-        step_count = 0
-
         if sampler is not None:
             sampler.set_epoch(ep)
 
         model.train()
-        for x0, x1, cond in dl:
-            # Step 1: spectral whitening (equalises dynamic range across ell values)
-            x0 = x0.to(device, non_blocking=True) * scale_vec
-            x1 = x1.to(device, non_blocking=True) * scale_vec
-            cond = cond.to(device, non_blocking=True)
+        epoch_loss = 0.0
 
-            # Step 2: per-sample amplitude normalisation.
-            # ut_norm spans 9–169 across cosmologies: without this, high-amplitude
-            # shells dominate the MSE gradient by up to 324x, preventing convergence
-            # on low-amplitude shells.  Normalise both x0 and x1 by the same factor
-            # (x0's norm) so the model learns a RELATIVE velocity.  The scale is
-            # recoverable at inference because we store x0 before normalising.
-            sample_scale = x0.norm(dim=-1, keepdim=True).clamp(min=1e-8)
-            x0 = x0 / sample_scale
-            x1 = x1 / sample_scale
+        for step, (x0, x1, cond) in enumerate(dl):
+            # x0, x1: (1, Npix) → (Npix,)
+            x0 = x0.squeeze(0).to(device, non_blocking=True)
+            x1 = x1.squeeze(0).to(device, non_blocking=True)
+            cond = cond.squeeze(0).to(device, non_blocking=True)
 
-            B = x0.shape[0]
+            # Sample random flow time
+            t = float(torch.rand(1).item())
 
-            t = torch.rand(B, 1, device=device)
-            mu_t = t * x1 + (1 - t) * x0
-            eps = torch.randn_like(x0) * args.sigma
-            xt = mu_t + eps
-
-            # Target velocity (in normalised whitened space — norm ~1-3, not 9-169)
-            ut = x1 - x0
-
-            pred = model(xt, t.squeeze(1), cond=cond)
-            loss = mse(pred, ut)
-
+            # Compute chunked loss (backward is called inside patch_flow_loss
+            # per chunk for gradient accumulation — returns a plain float)
             opt.zero_grad()
-            loss.backward()
+            loss_val = patch_flow_loss(
+                model=model,
+                x0=x0,
+                x1=x1,
+                cond=cond,
+                patch_idx_t=patch_idx_t,
+                t=t,
+                sigma=args.sigma,
+                chunk_size=args.chunk_size,
+                device=device,
+                use_amp=torch.cuda.is_available(),
+            )
+
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
             opt.step()
             scheduler.step()
 
-            running += loss.item()
-            step_count += 1
-            loss_history.append(loss.item())
+            epoch_loss += loss_val
+            loss_history.append(loss_val)
 
-        avg_loss = running / max(step_count, 1)
+            if is_main() and (step + 1) % args.log_interval == 0:
+                lr_now = scheduler.get_last_lr()[0]
+                print(f"  Ep {ep+1}/{args.epochs} | step {step+1}/{len(dl)} | "
+                      f"loss={loss_val:.6f} | lr={lr_now:.2e}")
 
-        if is_main_process() and (ep + 1) % args.log_interval == 0:
-            lr_now = scheduler.get_last_lr()[0]
-            print(f"Epoch {ep+1}/{args.epochs} | loss: {avg_loss:.6f} | lr: {lr_now:.2e} | {time.time()-t0:.1f}s")
+        if is_main():
+            avg = epoch_loss / max(len(dl), 1)
+            print(f"Epoch {ep+1}/{args.epochs} | avg_loss={avg:.6f} | "
+                  f"elapsed={time.time()-t0:.1f}s")
 
-
-    # ===== SYNC ALL RANKS before rank-0 I/O =====
-    if is_distributed:
+    # ------------------------------------------------------------------
+    # Save
+    # ------------------------------------------------------------------
+    if is_dist:
         dist.barrier()
 
-    if is_main_process():
+    if is_main():
         out = Path(args.out_dir)
         out.mkdir(parents=True, exist_ok=True)
-        state_dict = model.module.state_dict() if is_distributed else model.state_dict()
-        torch.save(state_dict, out / "flow_mlp.pth")
+
+        state = model.module.state_dict() if is_dist else model.state_dict()
+        torch.save(state, out / "patch_flow_mlp.pth")
 
         metadata = {
-            "lmax": args.lmax,
-            "sample_dim": dim_in,
+            "nside": args.nside,
+            "patch_depth": args.patch_depth,
+            "patch_size": patch_size,
             "cond_dim": cond_dim,
             "hidden": args.hidden,
+            "n_layers": args.n_layers,
             "max_shell_idx": ds.max_shell_idx,
             "cond_mean": ds.cond_mean.tolist(),
-            "cond_std":  ds.cond_std.tolist(),
+            "cond_std": ds.cond_std.tolist(),
         }
-        torch.save(metadata, out / "metadata.pth")
-        print(f"Saved model + metadata to {out}")
+        torch.save(metadata, out / "patch_metadata.pth")
+        print(f"[Train] Saved model + metadata to {out}")
 
+        # Loss plot
         try:
             fig, axes = plt.subplots(1, 2, figsize=(14, 5))
-            axes[0].plot(loss_history, linewidth=0.5, alpha=0.7)
+            axes[0].plot(loss_history, lw=0.5, alpha=0.7)
             axes[0].set_yscale("log")
             axes[0].set_xlabel("Step")
             axes[0].set_ylabel("MSE")
             axes[0].set_title("Per-step loss")
             axes[0].grid(True, alpha=0.3)
 
-            spe = max(len(loss_history) // args.epochs, 1)
+            spe = max(len(loss_history) // max(args.epochs, 1), 1)
             epoch_losses = [
-                np.mean(loss_history[i * spe : (i + 1) * spe]) for i in range(args.epochs)
+                np.mean(loss_history[i * spe:(i + 1) * spe])
+                for i in range(args.epochs)
             ]
-            axes[1].plot(range(1, args.epochs + 1), epoch_losses, "o-", markersize=2)
+            axes[1].plot(range(1, args.epochs + 1), epoch_losses, "o-", markersize=3)
             axes[1].set_yscale("log")
             axes[1].set_xlabel("Epoch")
             axes[1].set_ylabel("Avg MSE")
@@ -216,34 +250,39 @@ def train(args):
             axes[1].grid(True, alpha=0.3)
 
             fig.tight_layout()
-            fig.savefig(out / "loss.png", dpi=150)
+            fig.savefig(out / "patch_loss.png", dpi=150)
             plt.close(fig)
-            np.save(out / "loss.npy", np.array(loss_history))
+            np.save(out / "patch_loss.npy", np.array(loss_history))
         except Exception as e:
             print(f"Loss plot error: {e}")
 
-    cleanup_distributed()
+    if is_dist:
+        dist.destroy_process_group()
 
 
-if __name__ == "__main__": 
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--data-dir", type=str, default="/Users/david/testData")
-    parser.add_argument("--lmax", type=int, default=1024)
-    parser.add_argument("--max-shells", type=int, default=1000)
-    parser.add_argument("--batch-size", type=int, default=8)
-    parser.add_argument("--epochs", type=int, default=30)
-    parser.add_argument("--lr", type=float, default=1e-4)
-    parser.add_argument("--sigma", type=float, default=0.01)
-    parser.add_argument("--hidden", type=int, default=1024)
-    parser.add_argument("--num-workers", type=int, default=4)
-    parser.add_argument("--out-dir", type=str, default="./models")
-    parser.add_argument("--log-interval", type=int, default=1)
+if __name__ == "__main__":
+    p = argparse.ArgumentParser()
+    p.add_argument("--data-dir", type=str, required=True)
+    p.add_argument("--nside", type=int, default=2048)
+    p.add_argument("--patch-depth", type=int, default=1,
+                   help="Neighborhood depth. 1→9 pixels, 2→25 pixels")
+    p.add_argument("--cache-dir", type=str, default="/capstor/scratch/cscs/damrein/healpy_patch_cache",
+                   help="Directory to cache precomputed patch index arrays")
+    p.add_argument("--hidden", type=int, default=256)
+    p.add_argument("--n-layers", type=int, default=4)
+    p.add_argument("--epochs", type=int, default=20)
+    p.add_argument("--lr", type=float, default=5e-4)
+    p.add_argument("--sigma", type=float, default=0.01)
+    p.add_argument("--chunk-size", type=int, default=1_000,
+                   help="Pixels per GPU batch during chunked forward pass")
+    p.add_argument("--log-interval", type=int, default=5)
+    p.add_argument("--out-dir", type=str, default="./patch_model")
+    args = p.parse_args()
 
-    args = parser.parse_args()
     try:
         train(args)
     except Exception as e:
-        print(f"Training crashed with error: {e}")
+        print(f"Training crashed: {e}")
         if dist.is_initialized():
             dist.destroy_process_group()
         raise

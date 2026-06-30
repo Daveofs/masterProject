@@ -1,0 +1,5 @@
+/capstor/scratch/cscs/damrein/cosmogridv1/cosmo_000001/run_0/
+/capstor/scratch/cscs/damrein/cosmogridv1/cosmo_000012/run_0/
+/capstor/scratch/cscs/damrein/cosmogridv1/cosmo_000062/run_0/
+/capstor/scratch/cscs/damrein/cosmogridv1/cosmo_000116/run_0/
+/capstor/scratch/cscs/damrein/cosmogridv1/cosmo_000122/run_0/

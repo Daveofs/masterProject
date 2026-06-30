@@ -29,7 +29,7 @@
 
 # ---- Paths -------------------------------------------------------
 COSMOGRID_DIR="/capstor/scratch/cscs/damrein/cosmogridv1"
-PKDGRAV_BIN="/users/damrein/pkdgrav/pkdgrav3_dev-master/build/pkdgrav3"
+PKDGRAV_BIN="/users/damrein/pkdgrav/pkdgrav_latest/pkdgrav3/build/pkdgrav3"
 JOB_LIST="/users/damrein/masterProject/pkdgrav/job_list_gen_all.txt"
 LOG_DIR="/capstor/scratch/cscs/damrein/outputs/logs/pkdgrav"
 # ------------------------------------------------------------------
@@ -38,12 +38,12 @@ LOG_DIR="/capstor/scratch/cscs/damrein/outputs/logs/pkdgrav"
 # Before --build-list we define a mask for parameters
 # ============================================================
 
-OMEGA_M_MIN=0.23;  OMEGA_M_MAX=0.33
-SIGMA_8_MIN=0.75;  SIGMA_8_MAX=0.85
-W0_MIN=-1.2;       W0_MAX=-0.8
-H0_MIN=65.0;       H0_MAX=75.0
-OMEGA_B_MIN=0.046; OMEGA_B_MAX=0.051
-N_S_MIN=0.95;      N_S_MAX=0.98
+OMEGA_M_MIN=0.1;  OMEGA_M_MAX=0.6
+SIGMA_8_MIN=0.5;  SIGMA_8_MAX=1.0
+W0_MIN=-1.5;       W0_MAX=-0.5
+H0_MIN=60.0;       H0_MAX=80.0
+OMEGA_B_MIN=0.040; OMEGA_B_MAX=0.060
+N_S_MIN=0.90;      N_S_MAX=1.0
 
 # Returns 0 (true) if params.yml values are inside the mask ranges, 1 otherwise.
 check_mask() {
@@ -71,7 +71,7 @@ try:
         p = yaml.safe_load(f)
 
     omega_m = float(p["Om"])
-    sigma8  = float(p["sigma8"])
+    sigma8  = float(p["s8"])
     w0      = float(p["w0"])
     h0      = float(p["H0"])
     omega_b = float(p["Ob"])
@@ -79,16 +79,22 @@ try:
 
     # Check all ranges
     if not (omega_m_min <= omega_m <= omega_m_max):
+        print(f"  Mask check failed: Om={omega_m} not in [{omega_m_min}, {omega_m_max}]")
         sys.exit(1)
     if not (sigma8_min <= sigma8 <= sigma8_max):
+        print(f"  Mask check failed: sigma8={sigma8} not in [{sigma8_min}, {sigma8_max}]")
         sys.exit(1)
     if not (w0_min <= w0 <= w0_max):
+        print(f"  Mask check failed: w0={w0} not in [{w0_min}, {w0_max}]")
         sys.exit(1)
     if not (h0_min <= h0 <= h0_max):
+        print(f"  Mask check failed: H0={h0} not in [{h0_min}, {h0_max}]")
         sys.exit(1)
     if not (omega_b_min <= omega_b <= omega_b_max):
+        print(f"  Mask check failed: Ob={omega_b} not in [{omega_b_min}, {omega_b_max}]")
         sys.exit(1)
     if not (ns_min <= ns <= ns_max):
+        print(f"  Mask check failed: ns={ns} not in [{ns_min}, {ns_max}]")
         sys.exit(1)
 
     # All checks passed
@@ -111,6 +117,8 @@ if [[ "${1}" == "--build-list" ]]; then
     masked=0
     for cosmo_dir in "${COSMOGRID_DIR}"/cosmo_*/; do
         for run_dir in "${cosmo_dir}"run_*/; do
+
+            echo "Checking ${run_dir} ..."
             cos_file="${run_dir}cosmology.par"
             par_file="${run_dir}params.yml"
             if [ ! -f "$cos_file" ] || [ ! -f "$par_file" ]; then
@@ -134,9 +142,10 @@ if [[ "${1}" == "--build-list" ]]; then
     done
     N=$(wc -l < "${JOB_LIST}")
     echo "Job list built: ${N} entries to run, ${skipped} skipped (IC already exists)"
+    echo "  ${masked} entries skipped due to mask"
     echo ""
     if [ "${N}" -eq 0 ]; then
-        echo "Nothing to submit — all ICs already exist."
+        echo "Nothing to submit."
     else
         echo "Submit with:"
         echo "  sbatch --array=0-$(( N - 1 )) $(realpath "${BASH_SOURCE[0]}")"

@@ -23,9 +23,8 @@ SNAP_DIR=/capstor/scratch/cscs/damrein/outputs/snapshots
 LOG_DIR=/capstor/scratch/cscs/damrein/outputs/logs/disco_custom
 OUT_DIR=/capstor/scratch/cscs/damrein/outputs
 mkdir -p "${SNAP_DIR}" "${LOG_DIR}" "${OUT_DIR}"
-mkdir -p "${OUT_DIR}/disco_sim"
 
-ICS_FILE=/capstor/scratch/cscs/damrein/cosmogridv1_test5/cosmo_000001/run_0/CosmoML_000001_run_0.00000.hdf5
+ICS_FILE=//capstor/store/cscs/ska/sk037/jbucko/disco_files_grid00001/snapshot_converted_832.hdf5
 PARAM_YML=/capstor/scratch/cscs/damrein/cosmogridv1_test5/cosmo_000001/run_0/params.yml
 CLASS_PROCESSED=/capstor/scratch/cscs/damrein/cosmogridv1_test5/cosmo_000001/run_0/class_processed.hdf5
 CONDA_INIT=/users/damrein/miniforge3/etc/profile.d/conda.sh
@@ -66,8 +65,9 @@ srun --ntasks=$((SLURM_NNODES * 4)) --ntasks-per-node=4 \
     --a-end "${A_END}" \
     --no-calculate-fof \
     --save-npz-snapshot \
-    --grad-kernel-order 0 \
-    --n-order 1 \
+    --precision double \
+    --grad-kernel-order 4 \
+    --n-order 3 \
     --build-shells \
     --shells-metainfo "${METAINFO_FILE}" \
     --param-file "${PARAM_YML}" \
