@@ -104,12 +104,52 @@ def prepare_laplacian(L: sp.spmatrix, lmax: Optional[float] = None,
     return torch.sparse_coo_tensor(idx, val, (M, M)).coalesce()
 
 
+def laplacian_to_gather(L: sp.spmatrix, lmax: Optional[float] = None,
+                        scale: float = 0.75):
+    """Rescaled Laplacian as (idx, w) gather tensors for a FAST dense conv.
+
+    The HEALPix graph Laplacian has <=9 nonzeros per row (8 neighbors + self), so
+    ``L @ x`` can be computed as a dense neighbor gather + weighted sum:
+
+        (L x)[i] = sum_k  w[i, k] * x[idx[i, k]]
+
+    Unlike torch.sparse.mm this is a coalesced dense op: it runs under bf16
+    autocast and is ~an order of magnitude faster on GPU. Rows with fewer
+    neighbors are padded with (idx=0, w=0).
+
+    Returns
+    -------
+    idx : torch.LongTensor (M, nmax)   neighbor indices per node
+    w   : torch.FloatTensor (M, nmax)  rescaled Laplacian weights per neighbor
+    """
+    L = sp.csr_matrix(L, copy=True)
+    if lmax is None:
+        lmax = 1.02 * eigsh(L, k=1, which="LM", return_eigenvectors=False)[0]
+    M = L.shape[0]
+    L = (L * (2.0 * scale / lmax)
+         - sp.identity(M, format="csr", dtype=L.dtype) * scale).tocsr()
+    counts = np.diff(L.indptr)
+    nmax = int(counts.max())
+    idx = np.zeros((M, nmax), dtype=np.int64)
+    w = np.zeros((M, nmax), dtype=np.float32)
+    rows = np.repeat(np.arange(M), counts)
+    pos = np.arange(L.nnz) - np.repeat(L.indptr[:-1], counts)
+    idx[rows, pos] = L.indices
+    w[rows, pos] = L.data
+    return torch.from_numpy(idx), torch.from_numpy(w)
+
+
 # ---------------------------------------------------------------------------
 # Chebyshev graph convolution (port of deepsphere chebyshev5)
 # ---------------------------------------------------------------------------
 
 class ChebConv(nn.Module):
-    """Chebyshev spectral graph convolution of order K on a fixed graph."""
+    """Chebyshev spectral graph convolution of order K on a fixed graph.
+
+    The Laplacian is applied via a dense neighbor GATHER (see laplacian_to_gather)
+    instead of torch.sparse.mm: same math, ~10x faster on GPU, and it supports
+    bf16 autocast (torch.sparse.mm has no bf16 CUDA kernel).
+    """
 
     def __init__(self, in_channels: int, out_channels: int, K: int, bias: bool = True):
         super().__init__()
@@ -118,24 +158,29 @@ class ChebConv(nn.Module):
         nn.init.normal_(self.weight, std=1.0 / math.sqrt(in_channels * (K + 0.5) / 2))
         self.bias = nn.Parameter(torch.zeros(out_channels)) if bias else None
 
-    def forward(self, x: torch.Tensor, L: torch.Tensor) -> torch.Tensor:
-        # x: (B, M, Fin) ; L: sparse (M, M)
+    def forward(self, x: torch.Tensor, idx: torch.Tensor, w: torch.Tensor) -> torch.Tensor:
+        # x: (B, M, Fin) ; idx: (M, n) neighbor indices ; w: (M, n) weights
         B, M, Fin = x.shape
         K = self.K
-        x0 = x.permute(1, 0, 2).reshape(M, B * Fin)     # (M, B*Fin)
+        x0 = x.permute(1, 0, 2).reshape(M, B * Fin)          # (M, B*Fin)
+        wq = w.to(x0.dtype).unsqueeze(-1)                     # (M, n, 1)
+
+        def lap(y):                                           # y: (M, B*Fin)
+            return (y[idx] * wq).sum(1)                       # gather -> (M, B*Fin)
+
         stack = [x0]
         if K > 1:
-            x1 = torch.sparse.mm(L, x0)
+            x1 = lap(x0)
             stack.append(x1)
             for _ in range(2, K):
-                x2 = 2 * torch.sparse.mm(L, x1) - x0
+                x2 = 2 * lap(x1) - x0
                 stack.append(x2)
                 x0, x1 = x1, x2
-        x = torch.stack(stack, 0)                        # (K, M, B*Fin)
-        x = x.reshape(K, M, B, Fin).permute(2, 1, 3, 0)  # (B, M, Fin, K)
-        x = x.reshape(B * M, Fin * K) @ self.weight      # (B*M, Fout)
+        x = torch.stack(stack, 0)                             # (K, M, B*Fin)
+        x = x.reshape(K, M, B, Fin).permute(2, 1, 3, 0)       # (B, M, Fin, K)
+        x = x.reshape(B * M, Fin * K) @ self.weight.to(x.dtype)
         x = x.reshape(B, M, self.out_channels)
-        return x + self.bias if self.bias is not None else x
+        return x + self.bias.to(x.dtype) if self.bias is not None else x
 
 
 def sinusoidal_embedding(t: torch.Tensor, dim: int) -> torch.Tensor:
@@ -168,14 +213,14 @@ class SphereFlowNet(nn.Module):
     def __init__(self, laplacian: sp.spmatrix, cond_dim: int = 12, hidden: int = 64,
                  n_layers: int = 6, K: int = 5, time_embed: int = 64):
         super().__init__()
-        # L is a sparse tensor kept as a plain attribute (NOT a buffer): it is
-        # deterministic + identical on every rank, and DDP cannot broadcast sparse
-        # buffers. _apply() below moves it with .to()/.cuda().
-        self.L = prepare_laplacian(laplacian)
-        self.npix = self.L.shape[0]
+        # Gather-form Laplacian (dense tensors -> DDP/bf16 friendly buffers).
+        idx, w = laplacian_to_gather(laplacian)
+        self.register_buffer("L_idx", idx)
+        self.register_buffer("L_w", w)
+        self.npix = idx.shape[0]
         self.hidden = hidden
 
-        self.in_proj = ChebConv(2, hidden, K)            # [xt, delta_low] -> hidden
+        self.in_proj = ChebConv(2, hidden, K)            # [xt, cond_map] -> hidden
         self.blocks = nn.ModuleList([ChebConv(hidden, hidden, K)
                                      for _ in range(n_layers)])
         self.out_proj = ChebConv(hidden, 1, K)
@@ -188,12 +233,6 @@ class SphereFlowNet(nn.Module):
         self.n_layers = n_layers
         self.act = nn.SiLU()
 
-    def _apply(self, fn, *args, **kwargs):
-        # Move the (non-buffer) sparse Laplacian along with params/buffers.
-        super()._apply(fn, *args, **kwargs)
-        self.L = fn(self.L)
-        return self
-
     def forward(self, xt: torch.Tensor, t: torch.Tensor, delta_low: torch.Tensor,
                 cosmo: torch.Tensor) -> torch.Tensor:
         # xt, delta_low: (B, M) ; t: (B,) ; cosmo: (B, cond_dim)
@@ -204,19 +243,20 @@ class SphereFlowNet(nn.Module):
         if t.dim() == 0:
             t = t[None]
         B = xt.shape[0]
+        idx, w = self.L_idx, self.L_w
 
         h = torch.stack([xt, delta_low], -1)             # (B, M, 2)
-        h = self.act(self.in_proj(h, self.L))
+        h = self.act(self.in_proj(h, idx, w))
 
         c = self.cond_mlp(torch.cat([sinusoidal_embedding(t, self.time_embed),
                                      cosmo], -1))
         c = c.view(B, self.n_layers, 2, self.hidden)
 
         for i, block in enumerate(self.blocks):
-            y = block(h, self.L)
+            y = block(h, idx, w)
             scale, shift = c[:, i, 0, :].unsqueeze(1), c[:, i, 1, :].unsqueeze(1)
             h = h + self.act(y * (1 + scale) + shift)    # residual + FiLM
-        return self.out_proj(h, self.L).squeeze(-1)      # (B, M)
+        return self.out_proj(h, idx, w).squeeze(-1)      # (B, M)
 
 
 # ---------------------------------------------------------------------------
