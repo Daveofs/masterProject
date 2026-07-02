@@ -1,540 +1,763 @@
-"""HEALPix Patch-Based Flow Matching Model for pixel-space small-scale correction.
+"""DeepSphere map-correction: DISCO-DJ low-res shells -> CosmoGrid high-res shells.
 
-Motivation
-----------
-The SH-space MLP (MLP.py) operates on global alm coefficients and struggles to
-correct small-scale power because:
-  1. High-ell alms mix contributions from the whole sky — a local patch error
-     contaminates hundreds of alm coefficients simultaneously.
-  2. The per-ell architecture has no spatial locality inductive bias.
+This module uses the *exact* graph-CNN from deepsphere-cosmo-tf1
+(``deepsphere.models.deepsphere`` / ``cgcnn``) — no reimplementation — configured
+as a **fully-convolutional, constant-resolution** network so it maps a full
+HEALPix shell to a corrected full HEALPix shell (map -> map regression).
 
-This model instead operates in pixel space, extracting local HEALPix patches
-(a central pixel + its nested neighbors up to some depth), running a shared
-MLP over each patch, and predicting the velocity field pixel-by-pixel.
+How the correction task maps onto deepsphere(cgcnn)
+---------------------------------------------------
+``cgcnn`` is normally a classifier/regressor (map -> a few scalars): it pools the
+sphere down and applies a global ``statistics`` layer. We disable all of that:
 
-Key design choices
-------------------
-- Uses hp.get_all_neighbours() recursively to build a spatially contiguous
-  patch around each pixel. For nside=2048, a depth-2 neighborhood contains
-  ~49 pixels (~0.07 deg^2) — capturing sub-arcminute structure.
-- Processes patches in large batches (100k+) to saturate GPU memory bandwidth.
-- Conditioning (cosmo params + shell index) is appended to every patch vector,
-  same interface as MLP.py.
-- Weight sharing: the same MLP is applied to ALL patches on the sky, giving
-  full translation-equivariance on the sphere (modulo HEALPix discretization).
+    * p          = [1, 1, ...]   -> no pooling (constant nside through the net)
+    * statistics = None          -> no global pooling of spatial info
+    * M          = []            -> no fully-connected head
+    * F[-1]      = 1             -> single output channel (one value per pixel)
+    * loss       = 'l2'          -> per-pixel regression
 
-Memory scaling
---------------
-nside=2048: Npix = 50,331,648 pixels/shell
-  Patch size p=7 (depth 1):  input dim = 7 + 7 + C,   ~350 MB/shell in float32
-  Patch size p=49 (depth 2): input dim = 49 + 49 + C, ~2.4 GB/shell  (process in chunks)
-  Patch size p=7, chunk=1M pixels: ~28 MB working memory — fully feasible.
+With this config ``cgcnn._inference`` returns a (batch, Npix) tensor — the
+corrected map — and the l2 loss compares it against the high-res target map.
 
-nside=8192 (0.5B pixels): Npix = 805,306,368
-  Process in chunks of 1M pixels, each chunk ~28 MB — feasible with chunked inference.
+The Chebyshev graph convolutions, weight init, Laplacian rescaling, batch-norm,
+training loop, checkpointing, etc. are all the original DeepSphere code.
+
+Note: deepsphere is TensorFlow (TF1 API via tensorflow.compat.v1). Importing this
+module's model functions pulls in TensorFlow. The data loaders are pure numpy.
 
 Usage
 -----
-  model = PatchMLP(patch_size=7, cond_dim=12, hidden=256)
-  # x shape: (Npix,) float32 density map
-  # corrected = apply_patch_flow(model, x_low, x_high, cond, nside, steps=25)
+    from MLP import load_shell_pairs, build_model, train
+
+    X, Y, norm = load_shell_pairs("/path/to/grid", nside=512)
+    model = build_model(nside=512, n_layers=5)
+    train(model, X, Y, val_frac=0.1)
 """
 
 from __future__ import annotations
-import contextlib
-import math
+
+import os
+import sys
+import time
+from pathlib import Path
 from typing import Optional
+
+# DeepSphere uses the TF1 API (tf.compat.v1 + tf.layers.batch_normalization),
+# which was removed under Keras 3 (TF >= 2.16). On such TF we route tf.keras to
+# the tf_keras (Keras 2) shim. But only do this if tf_keras is actually installed
+# — e.g. the NGC TF 2.15 container has native Keras 2 and NO tf_keras package, and
+# forcing the flag there breaks Keras import. Must be set before TF is imported.
+import importlib.util as _ilu
+if _ilu.find_spec("tf_keras") is not None:
+    os.environ.setdefault("TF_USE_LEGACY_KERAS", "1")
 
 import numpy as np
 import healpy as hp
-import torch
-from torch import nn
 
 
 # ---------------------------------------------------------------------------
-# Patch index builder
+# DeepSphere import plumbing
 # ---------------------------------------------------------------------------
 
-def build_patch_indices(nside: int, depth: int = 1) -> np.ndarray:
+# Location of the deepsphere-cosmo-tf1 checkout. Override with $DEEPSPHERE_PATH.
+DEEPSPHERE_PATH = os.environ.get(
+    "DEEPSPHERE_PATH", "/users/damrein/deepsphere-cosmo-tf1"
+)
+
+
+def _ensure_deepsphere_on_path():
+    if DEEPSPHERE_PATH not in sys.path:
+        sys.path.insert(0, DEEPSPHERE_PATH)
+
+
+def _load_deepsphere():
+    """Import the deepsphere TF model (this pulls in TensorFlow)."""
+    _ensure_deepsphere_on_path()
+    try:
+        from deepsphere import models
+        from deepsphere.data import LabeledDataset
+    except ImportError as e:
+        raise ImportError(
+            f"Could not import deepsphere from {DEEPSPHERE_PATH!r}. "
+            "Set $DEEPSPHERE_PATH to your deepsphere-cosmo-tf1 checkout."
+        ) from e
+    return models, LabeledDataset
+
+
+# ---------------------------------------------------------------------------
+# Data loading: pair low-res (DISCO) and high-res (CosmoGrid) shells
+# ---------------------------------------------------------------------------
+
+def _read_shells(npz_path: Path, key: str = "shells") -> np.ndarray:
+    """Load a (n_shells, Npix) array of HEALPix maps from an .npz file."""
+    data = np.load(str(npz_path))
+    arr = data[key]
+    return np.asarray(arr)
+
+
+# ---------------------------------------------------------------------------
+# Partial-sphere patching (for high nside via DeepSphere's `order` mechanism)
+# ---------------------------------------------------------------------------
+#
+# A full-sphere graph at nside=2048 has 50M nodes -> a single Chebyshev conv is
+# infeasible. DeepSphere's solution (utils.nside2indexes) is to split the sphere
+# into ``12*order**2`` equal patches of ``(nside/order)**2`` pixels. In NESTED
+# ordering the children of each low-res (nside=order) superpixel are contiguous,
+# so the split is a pure reshape, and — by HEALPix symmetry — every patch has the
+# same internal graph, so ONE Laplacian (built on the first patch) is shared by
+# all. Each patch becomes an independent training sample.
+#
+# Trade-off: graph edges crossing patch boundaries are dropped, so the receptive
+# field is truncated at patch borders (negligible for order small relative to
+# nside, i.e. large patches). This is the original DeepSphere behaviour.
+
+def n_patches(order: int) -> int:
+    return 12 * order * order
+
+
+def resolve_F_hidden(F_hidden, n_layers: int) -> list:
+    """Resolve the hidden feature widths, matching get_correction_params' default."""
+    if F_hidden is None:
+        F_hidden = [16, 32, 64, 32][: max(n_layers - 1, 1)]
+        while len(F_hidden) < n_layers - 1:
+            F_hidden.append(F_hidden[-1])
+    return list(F_hidden)
+
+
+def safe_gpu_batch(nside: int, order: int, F_hidden, margin: float = 0.9) -> int:
+    """Largest batch size that keeps TF's GPU sparse matmul under its 2^31 limit.
+
+    TF's SparseTensorDenseMatMul GPU kernel requires output.shape[1]*nnz(L) < 2^31.
+    In chebyshev5 that is nnz(L) * (max_Fin * batch). The HEALPix graph has ~9
+    nonzeros per node, so nnz(L) ~= 9 * patch_npix. Returns the max batch (>=1)
+    satisfying max_Fin * batch * nnz(L) < margin * 2^31.
     """
-    Build a (Npix, patch_size) integer array: for each pixel, the indices of
-    its local neighborhood (itself + neighbors up to `depth` hops).
+    patch_npix = hp.nside2npix(nside) // n_patches(order)
+    nnz = 9 * patch_npix
+    max_F = max(list(F_hidden) + [1]) if F_hidden else 1
+    limit = int(margin * (2 ** 31))
+    return max(limit // (max_F * nnz), 1)
 
-    Uses HEALPix ring ordering. Boundary pixels (neighbors == -1) are clamped
-    to the pixel itself (zero-padding equivalent on the sphere).
+
+def _gpu_batch_for(nside, order, F_hidden, n_layers, margin=0.9):
+    """safe_gpu_batch with F_hidden resolved to the model's actual widths."""
+    return safe_gpu_batch(nside, order, resolve_F_hidden(F_hidden, n_layers), margin)
+
+
+def map_to_patches(maps: np.ndarray, order: int) -> np.ndarray:
+    """(N, Npix) NESTED maps -> (N * 12*order^2, patch_npix) patches."""
+    if order <= 1:
+        return maps
+    N, npix = maps.shape
+    npatch = n_patches(order)
+    patch_npix = npix // npatch
+    return maps.reshape(N, npatch, patch_npix).reshape(N * npatch, patch_npix)
+
+
+def patches_to_maps(patches: np.ndarray, order: int, n_maps: int) -> np.ndarray:
+    """(n_maps * 12*order^2, patch_npix) patches -> (n_maps, Npix) NESTED maps."""
+    if order <= 1:
+        return patches
+    npatch = n_patches(order)
+    patch_npix = patches.shape[1]
+    return patches.reshape(n_maps, npatch, patch_npix).reshape(n_maps, npatch * patch_npix)
+
+
+# ---------------------------------------------------------------------------
+# Per-shell overdensity normalization
+# ---------------------------------------------------------------------------
+#
+# HEALPix density shells span ~5 orders of magnitude in amplitude across redshift
+# (near shells are dense, far shells nearly empty). A single global (mean, std)
+# is dominated by the dense shells and makes faint shells unrecoverable. Instead
+# we normalize each shell to the dimensionless overdensity
+#
+#     delta = rho / mean(rho) - 1        (per shell, mass-conserving)
+#
+# which is comparable across all shells/redshifts. Both low and high are expressed
+# relative to the LOW shell mean, so a corrected map inverts with that same mean:
+#
+#     rho_corrected = mean_low * (1 + delta_pred)
+#
+# A single global delta_scale (std of delta over a sample) rescales inputs to ~unit
+# range for the network. delta itself is scale-free, so one global scale is fine.
+
+def _shell_means(maps: np.ndarray) -> np.ndarray:
+    """Per-shell means with zeros guarded to 1 (keepdims for broadcasting)."""
+    m = maps.mean(axis=-1, keepdims=True)
+    return np.where(m == 0, 1.0, m)
+
+
+def overdensity_forward(low: np.ndarray, high: np.ndarray, delta_scale: float,
+                        residual: bool):
+    """Physical (low, high) shells -> normalized (X, Y) in overdensity space.
+
+    Both are taken relative to the per-shell LOW mean. Y is the correction
+    (delta_high - delta_low) if residual else delta_high, divided by delta_scale.
+    """
+    m = _shell_means(low)
+    dlow = low / m - 1.0
+    dhigh = high / m - 1.0
+    X = (dlow / delta_scale).astype(np.float32)
+    Y = ((dhigh - dlow) if residual else dhigh) / delta_scale
+    return X, Y.astype(np.float32)
+
+
+def estimate_delta_scale(low_maps: np.ndarray) -> float:
+    """Global std of the per-shell overdensity, used to rescale to ~unit range."""
+    d = low_maps / _shell_means(low_maps) - 1.0
+    return float(d.std() + 1e-12)
+
+
+def load_shell_pairs(
+    data_dir,
+    nside: int,
+    low_name: str = "shells_nside=512.npz",
+    high_name: str = "compressed_shells.npz",
+    nest: bool = True,
+    order: int = 1,
+    max_pairs: Optional[int] = None,
+    standardize: bool = True,
+    residual: bool = False,
+    verbose: bool = True,
+):
+    """Load paired (low, high) HEALPix shells across cosmologies.
+
+    Walks ``data_dir`` for cosmology subdirectories (``cosmo_*`` or ``run_*``),
+    each holding a low-res shell stack (DISCO-DJ) and a high-res stack
+    (CosmoGrid). Returns flat arrays of per-shell maps ready for LabeledDataset.
 
     Parameters
     ----------
+    data_dir : path
+        Root directory containing cosmology subdirectories.
     nside : int
-        HEALPix resolution parameter.
-    depth : int
-        Neighborhood depth.
-        depth=1 → 1 + 8 = 9 pixels (including self and 8 neighbors, clamped for boundary)
-        depth=2 → up to 25 pixels
-        In practice fewer unique neighbors due to HEALPix topology.
+        Target HEALPix nside. Maps at a different nside are ud_grade'd to it.
+    low_name, high_name : str
+        Filenames of the low- and high-res shell ``.npz`` stacks within each run.
+    nest : bool
+        HEALPix ordering of the stored maps (must match the Laplacian; deepsphere
+        builds its graph in NESTED ordering by default).
+    order : int
+        Partial-sphere split factor. order=1 keeps full-sphere maps; order>1
+        splits each map into 12*order**2 patches of (nside/order)**2 pixels so
+        high nside (e.g. 2048) is tractable. Patches become independent samples.
+    max_pairs : int, optional
+        Cap on the number of (low, high) shell pairs (useful for quick tests).
+        Applied to whole maps BEFORE patch splitting.
+    standardize : bool
+        Standardize low maps to zero-mean/unit-std using global statistics.
+    residual : bool
+        If True, the target Y is the (standardized) high-minus-low residual, so
+        the model learns a correction added on top of the low map. Otherwise Y is
+        the (standardized) high map directly.
 
     Returns
     -------
-    patch_idx : np.ndarray of shape (Npix, patch_size), dtype=int32
+    X : (N, Npix) float32 — low-res input maps (standardized if requested)
+    Y : (N, Npix) float32 — targets (high map or residual, standardized)
+    norm : dict — normalization statistics needed to invert at inference time
     """
-    Npix = hp.nside2npix(nside)
-    print(f"[PatchIndex] Building depth-{depth} patches for nside={nside} (Npix={Npix:,})...")
+    data_dir = Path(data_dir)
+    npix = hp.nside2npix(nside)
 
-    # Start with center pixels
-    current_ring = {i: {i} for i in range(Npix)}  # pixel -> set of patch members
+    subdirs = sorted(
+        d for d in data_dir.iterdir()
+        if d.is_dir() and (d.name.startswith("cosmo_") or d.name.startswith("run_"))
+    )
+    if not subdirs:
+        subdirs = [data_dir]
 
-    all_indices_per_pixel: list[set] = [set() for _ in range(Npix)]
-    for i in range(Npix):
-        all_indices_per_pixel[i].add(i)
+    low_maps: list[np.ndarray] = []
+    high_maps: list[np.ndarray] = []
 
-    frontier = list(range(Npix))
-    for d in range(depth):
-        print(f"  Depth {d+1}/{depth}...")
-        # For each pixel in frontier, fetch its neighbors
-        # hp.get_all_neighbours returns shape (8,) per pixel
-        # We process in bulk
-        new_frontier_sets = [set() for _ in range(Npix)]
-        # batch neighbor lookup
-        chunk = 100_000
-        for start in range(0, Npix, chunk):
-            end = min(start + chunk, Npix)
-            pix_chunk = np.arange(start, end)
-            nbrs = hp.get_all_neighbours(nside, pix_chunk)  # (8, chunk)
-            for local_i, pix in enumerate(pix_chunk):
-                new_nbrs = nbrs[:, local_i]
-                valid = new_nbrs[new_nbrs >= 0]
-                new_members = valid[~np.isin(valid, list(all_indices_per_pixel[pix]))]
-                all_indices_per_pixel[pix].update(new_members.tolist())
-                new_frontier_sets[pix].update(new_members.tolist())
+    def _to_nside(m: np.ndarray) -> np.ndarray:
+        m = m.astype(np.float32)
+        if m.shape[0] != npix:
+            order_in = "NESTED" if nest else "RING"
+            m = hp.ud_grade(m, nside, order_in=order_in, order_out=order_in)
+        return m.astype(np.float32)
 
-    # Find max patch size (should be uniform except near poles)
-    patch_sizes = [len(s) for s in all_indices_per_pixel]
-    max_patch = max(patch_sizes)
-    print(f"  Patch sizes: min={min(patch_sizes)}, max={max_patch}, "
-          f"median={int(np.median(patch_sizes))}")
+    n_pairs = 0
+    for sd in subdirs:
+        # Allow either flat (run dir) or nested (cosmo/run) layouts.
+        run_dirs = [r for r in sorted(sd.iterdir())
+                    if r.is_dir() and r.name.startswith("run_")] if sd.is_dir() else []
+        leaf_dirs = run_dirs if run_dirs else [sd]
+        for ld in leaf_dirs:
+            low_npz, high_npz = ld / low_name, ld / high_name
+            if not (low_npz.exists() and high_npz.exists()):
+                continue
+            low_stack = _read_shells(low_npz)
+            high_stack = _read_shells(high_npz)
+            n_shells = min(low_stack.shape[0], high_stack.shape[0])
+            for i in range(n_shells):
+                low_maps.append(_to_nside(low_stack[i]))
+                high_maps.append(_to_nside(high_stack[i]))
+                n_pairs += 1
+                if max_pairs is not None and n_pairs >= max_pairs:
+                    break
+            if max_pairs is not None and n_pairs >= max_pairs:
+                break
+        if max_pairs is not None and n_pairs >= max_pairs:
+            break
 
-    # Pack into array, clamping boundary pixels to center pixel
-    patch_idx = np.zeros((Npix, max_patch), dtype=np.int32)
-    for i, nbr_set in enumerate(all_indices_per_pixel):
-        nbr_list = sorted(nbr_set)
-        patch_idx[i, :len(nbr_list)] = nbr_list
-        # Fill remaining with self (clamp/pad)
-        patch_idx[i, len(nbr_list):] = i
+    if n_pairs == 0:
+        raise RuntimeError(
+            f"No (low, high) shell pairs found under {data_dir} "
+            f"(looking for {low_name!r} + {high_name!r})."
+        )
 
-    print(f"  Done. patch_idx shape: {patch_idx.shape}")
-    return patch_idx
+    X = np.stack(low_maps).astype(np.float32)   # (N, Npix)
+    H = np.stack(high_maps).astype(np.float32)  # (N, Npix)
+    if verbose:
+        print(f"[load_shell_pairs] {n_pairs} shell pairs | nside={nside} | "
+              f"Npix={npix:,} | X={X.shape} H={H.shape}")
+
+    # Per-shell overdensity normalization (scale-free across redshift).
+    delta_scale = estimate_delta_scale(X)
+    norm: dict = {"nside": nside, "nest": nest, "residual": residual,
+                  "mode": "overdensity", "delta_scale": delta_scale, "order": order,
+                  "npix": npix, "patch_npix": npix // n_patches(order)}
+    X, Y = overdensity_forward(X, H, delta_scale, residual)
+    if verbose:
+        print(f"[load_shell_pairs] overdensity norm | delta_scale={delta_scale:.4g} | "
+              f"residual={residual}")
+
+    # Split full-sphere maps into patches so high nside is tractable (order>1).
+    if order > 1:
+        X = map_to_patches(X, order)
+        Y = map_to_patches(Y, order)
+        if verbose:
+            print(f"[load_shell_pairs] order={order}: split into "
+                  f"{X.shape[0]:,} patches of {X.shape[1]:,} pixels each")
+
+    return X, Y, norm
 
 
-def build_patch_indices_fast(nside: int, depth: int = 1) -> np.ndarray:
+def invert_prediction(pred: np.ndarray, x_low: np.ndarray, norm: dict) -> np.ndarray:
+    """Map a model prediction back to a physical corrected map using ``norm``.
+
+    x_low is the PHYSICAL low map(s) (per-shell mean is recovered from it). pred is
+    the network output in scaled-overdensity space. Inversion is mass-conserving:
+    rho = mean_low * (1 + delta_pred), with delta_pred = delta_low + pred*scale for
+    residual mode, else pred*scale.
     """
-    Faster version using vectorized BFS over HEALPix neighbor graph.
-    Returns (Npix, fixed_patch_size) index array.
-
-    For depth=1: patch_size = 9  (self + 8 neighbors, duplicates=self for missing)
-    For depth=2: patch_size = 25 (approximate — BFS up to 2 hops)
-    """
-    Npix = hp.nside2npix(nside)
-
-    # Depth-1: just use direct neighbor lookup
-    if depth == 1:
-        all_pix = np.arange(Npix)
-        nbrs = hp.get_all_neighbours(nside, all_pix)  # (8, Npix)
-        # Replace -1 (missing neighbor) with the pixel itself (self-padding)
-        for d in range(8):
-            mask = nbrs[d] < 0
-            nbrs[d, mask] = all_pix[mask]
-        # patch = [self, n0, n1, ..., n7]  shape (Npix, 9)
-        patch_idx = np.concatenate(
-            [all_pix[:, None], nbrs.T], axis=1
-        ).astype(np.int32)
-        return patch_idx
-
-    # Depth >= 2: iterative BFS
-    # Start from depth-1
-    patch_idx_d1 = build_patch_indices_fast(nside, depth=1)  # (Npix, 9)
-
-    # For each pixel, collect unique neighbors of its depth-1 set
-    patch_sets = [set(row.tolist()) for row in patch_idx_d1]
-    for _ in range(depth - 1):
-        new_sets = []
-        chunk = 50_000
-        all_pix_arr = np.arange(Npix)
-        for start in range(0, Npix, chunk):
-            end = min(start + chunk, Npix)
-            pix_chunk = all_pix_arr[start:end]
-            nbrs = hp.get_all_neighbours(nside, pix_chunk)  # (8, chunk_size)
-            for local_i, pix in enumerate(pix_chunk):
-                new_set = set(patch_sets[pix])
-                for d in range(8):
-                    n = nbrs[d, local_i]
-                    if n >= 0:
-                        new_set.add(int(n))
-                new_sets.append(new_set)
-        patch_sets[start:end] = new_sets  # type: ignore
-
-    max_patch = max(len(s) for s in patch_sets)
-    patch_idx = np.zeros((Npix, max_patch), dtype=np.int32)
-    for i, s in enumerate(patch_sets):
-        lst = sorted(s)
-        patch_idx[i, :len(lst)] = lst
-        patch_idx[i, len(lst):] = i
-    return patch_idx
+    scale = norm["delta_scale"]
+    m = _shell_means(x_low)                 # per-shell low mean, (…,1)
+    dpred = pred * scale
+    if norm.get("residual", False):
+        dpred = (x_low / m - 1.0) + dpred   # add back the low overdensity
+    return m * (1.0 + dpred)
 
 
 # ---------------------------------------------------------------------------
-# Model
+# Model: the exact deepsphere(cgcnn), configured for map -> map regression
 # ---------------------------------------------------------------------------
 
-class PatchMLP(nn.Module):
+def get_correction_params(
+    nside: int,
+    order: int = 1,
+    n_layers: int = 5,
+    F_hidden: Optional[list] = None,
+    K: int = 5,
+    batch_norm: bool = True,
+    num_epochs: int = 40,
+    batch_size: int = 8,
+    learning_rate: float = 2e-4,
+    total_steps: Optional[int] = None,
+    lr_final_frac: float = 0.05,
+    regularization: float = 0.0,
+    eval_frequency: int = 50,
+    distributed: bool = False,
+    dir_name: str = "deepsphere_correction",
+    verbose: bool = True,
+) -> dict:
+    """Build the kwargs dict for ``models.deepsphere`` in map->map mode.
+
+    Fully-convolutional, constant-resolution config: no pooling, no statistics
+    layer, no fully-connected head, single output channel, l2 loss. The result is
+    a per-pixel regression model (corrected map = f(low map)).
     """
-    Shared-weight patch MLP for HEALPix flow matching in pixel space.
+    import tensorflow.compat.v1 as tf  # same API deepsphere itself uses
 
-    For each pixel i, the input is:
-        [x_low[patch_i],        # patch_size floats: low-res density values
-         x_curr[patch_i],       # patch_size floats: current state (interpolated)
-         t,                     # scalar: flow time in [0, 1]
-         cond]                  # C floats: cosmo params + shell index
+    # Optimizer factory. For multi-GPU we wrap Adam in Horovod's DistributedOptimizer
+    # (deepsphere's training() calls optimizer.compute_gradients -> Horovod inserts
+    # the gradient allreduce) and linearly scale the LR by the number of workers.
+    if distributed:
+        import horovod.tensorflow as hvd
+        _size = hvd.size()
 
-    Output: scalar velocity field correction at pixel i.
+        def _make_optimizer(lr):
+            base = tf.train.AdamOptimizer(lr * _size, beta1=0.9, beta2=0.999, epsilon=1e-8)
+            return hvd.DistributedOptimizer(base)
+    else:
+        def _make_optimizer(lr):
+            return tf.train.AdamOptimizer(lr, beta1=0.9, beta2=0.999, epsilon=1e-8)
 
-    The model is applied identically to every pixel (weight sharing), so it
-    generalizes across sky positions and can be applied in chunks without
-    reloading weights.
+    F_hidden = resolve_F_hidden(F_hidden, n_layers)
+    assert len(F_hidden) == n_layers - 1, \
+        f"F_hidden must have n_layers-1={n_layers-1} entries, got {len(F_hidden)}"
+
+    F = list(F_hidden) + [1]            # last layer outputs 1 channel per pixel
+    K_list = [K] * n_layers
+    bn = [batch_norm] * n_layers
+    # No pooling => every level is the same nside, so build_laplacians derives
+    # pooling factors p=[1, 1, ...] on its own. deepsphere() computes (L, p) from
+    # nsides internally, so p must NOT be passed here. We need
+    # len(nsides) == n_conv_layers + 1.
+    nsides = [nside] * (n_layers + 1)
+
+    # Partial-sphere: build the graph on a single patch of (nside/order)^2 pixels.
+    # Every patch shares this Laplacian (HEALPix symmetry). order=1 -> full sphere.
+    indexes = None
+    if order > 1:
+        _ensure_deepsphere_on_path()
+        from deepsphere import utils as ds_utils
+        indexes = ds_utils.nside2indexes(nsides, order)
+
+    params = dict(
+        nsides=nsides,
+        indexes=indexes,               # None=full sphere; else one patch's nodes
+        F=F,
+        K=K_list,
+        batch_norm=bn,
+        M=[],                          # no fully-connected head
+        conv="chebyshev5",
+        pool="average",               # unused (p=1) but must be valid
+        activation="relu",
+        statistics=None,               # keep spatial resolution -> map output
+        loss="l2",                     # per-pixel regression
+        regularization=regularization,
+        dropout=1,
+        num_epochs=num_epochs,
+        batch_size=batch_size,
+        eval_frequency=eval_frequency,
+        # Smooth exponential decay across the WHOLE run: lr -> lr*lr_final_frac at
+        # the final step. (The original deepsphere used decay_steps=1/rate=0.999,
+        # which collapses the LR to ~0 within a few thousand steps and stalls
+        # training — wrong for the many-step regime here.)
+        scheduler=lambda step: tf.train.exponential_decay(
+            learning_rate, step,
+            decay_steps=max(total_steps or 1, 1), decay_rate=lr_final_frac),
+        optimizer=_make_optimizer,
+        dir_name=dir_name,
+    )
+    if verbose:
+        patch_npix = hp.nside2npix(nside) // n_patches(order)
+        scope = "full sphere" if order == 1 else \
+            f"order={order} -> {n_patches(order)} patches of {patch_npix:,} px"
+        lr_end = learning_rate * lr_final_frac
+        print(f"[get_correction_params] nside={nside} | {scope} | layers={n_layers} | "
+              f"F={F} | K={K} | loss=l2 | lr {learning_rate:.1e}->{lr_end:.1e} "
+              f"over {total_steps or '?'} steps")
+    return params
+
+
+def build_model(nside: int, **kwargs):
+    """Instantiate the exact deepsphere(cgcnn) model for map->map correction."""
+    models, _ = _load_deepsphere()
+    params = get_correction_params(nside, **kwargs)
+    return models.deepsphere(**params)
+
+
+# ---------------------------------------------------------------------------
+# Training (uses deepsphere's own fit() loop)
+# ---------------------------------------------------------------------------
+
+def train(model, X: np.ndarray, Y: np.ndarray, val_frac: float = 0.1,
+          shuffle: bool = True, seed: int = 0):
+    """Train via deepsphere's native ``fit``.
 
     Parameters
     ----------
-    patch_size : int
-        Number of pixels in each local patch (including center).
-    cond_dim : int
-        Dimension of conditioning vector (cosmo params + 1 shell index scalar).
-    hidden : int
-        Hidden layer width.
-    n_layers : int
-        Depth of MLP (default: 4 gives a good balance for small-scale detail).
+    model : deepsphere(cgcnn) instance from ``build_model``.
+    X : (N, Npix) low-res input maps.
+    Y : (N, Npix) target maps (high or residual).
+    val_frac : fraction of samples held out for validation.
+    """
+    _, LabeledDataset = _load_deepsphere()
+
+    N = X.shape[0]
+    rng = np.random.RandomState(seed)
+    perm = rng.permutation(N) if shuffle else np.arange(N)
+    n_val = max(int(round(val_frac * N)), 1) if val_frac > 0 else 0
+    val_idx, train_idx = perm[:n_val], perm[n_val:]
+
+    training = LabeledDataset(X[train_idx], Y[train_idx])
+    validation = LabeledDataset(X[val_idx], Y[val_idx]) if n_val > 0 else None
+
+    print(f"[train] train={len(train_idx)} val={len(val_idx)} samples")
+    # deepsphere.fit returns:
+    #   accuracies_validation, losses_validation, losses_training, t_step
+    acc_val, loss_val, loss_train, t_step = model.fit(training, validation)
+    return acc_val, loss_val, loss_train, t_step
+
+
+@np.errstate(all="ignore")
+def predict_maps(model, X: np.ndarray, x_low_phys: np.ndarray, norm: dict) -> np.ndarray:
+    """Run the model on standardized inputs X and return physical corrected maps."""
+    pred = model.predict(X)
+    pred = np.asarray(pred)
+    return invert_prediction(pred, x_low_phys, norm)
+
+
+# ===========================================================================
+# Streaming dataset: scale to 20k-170k shells without preloading everything
+# ===========================================================================
+#
+# deepsphere's in-memory LabeledDataset holds every map in RAM, which is
+# impossible at high shell counts (one nside=2048 shell = 201 MB). This streaming
+# dataset reads ONE .npz file pair at a time (each file = all shells of a run,
+# e.g. 69 shells), splits it into patches, yields patch batches, then moves on.
+# Peak RAM is bounded by a single file pair (~30 GB at nside=2048) regardless of
+# how many files (= how many shells) the full dataset spans.
+#
+# It is duck-typed to what cgcnn.fit() needs: ``.N``, ``.shuffled``,
+# ``.iter(batch_size)`` (an endless generator of equal-size (X, Y) batches) and
+# ``.get_all_data()`` (only call this on a SMALL validation set — it loads all).
+
+def _peek_shells_shape(npz_path, key: str = "shells"):
+    """Read a (n_shells, Npix) array's shape from an .npz WITHOUT loading it."""
+    import zipfile
+    import numpy.lib.format as fmt
+    with zipfile.ZipFile(str(npz_path)) as z:
+        name = key if key.endswith(".npy") else key + ".npy"
+        with z.open(name) as f:
+            version = fmt.read_magic(f)
+            shape, _fortran, _dtype = fmt._read_array_header(f, version)
+    return shape
+
+
+def build_file_pairs(data_root, test_cosmo: Optional[str] = None,
+                     low_name: str = "shells_nside=2048.npz",
+                     high_name: str = "compressed_shells.npz",
+                     include_only_test: bool = False) -> list:
+    """Enumerate (low_npz, high_npz) file pairs across the cosmology grid.
+
+    Each pair corresponds to one run directory (= all its shells). For
+    leave-one-out training, pass test_cosmo to exclude it (include_only_test=False)
+    or to select ONLY it (include_only_test=True, e.g. to build a validation set).
+    """
+    data_root = Path(data_root)
+    cosmos = sorted(d for d in data_root.iterdir()
+                    if d.is_dir() and d.name.startswith("cosmo_"))
+    if not cosmos:
+        cosmos = [data_root]
+
+    pairs = []
+    for c in cosmos:
+        is_test = (test_cosmo is not None and c.name == test_cosmo)
+        if include_only_test and not is_test:
+            continue
+        if (not include_only_test) and is_test:
+            continue
+        run_dirs = [r for r in sorted(c.iterdir())
+                    if r.is_dir() and r.name.startswith("run_")] if c.is_dir() else []
+        for ld in (run_dirs if run_dirs else [c]):
+            low, high = ld / low_name, ld / high_name
+            if low.exists() and high.exists():
+                pairs.append((low, high))
+    return pairs
+
+
+class StreamingShellDataset:
+    """Disk-streaming, patch-yielding dataset for deepsphere(cgcnn).fit().
+
+    Streams one .npz file pair at a time (each = all shells of a run), so peak RAM
+    is one file pair regardless of total dataset size. Standardization uses global
+    stats estimated from a small sample of files (or supplied via ``norm``).
     """
 
-    def __init__(
-        self,
-        patch_size: int = 9,
-        cond_dim: int = 12,
-        hidden: int = 256,
-        n_layers: int = 4,
-    ):
-        super().__init__()
-        self.patch_size = patch_size
-        self.cond_dim = cond_dim
+    def __init__(self, file_pairs, nside, order: int = 1, nest: bool = True,
+                 residual: bool = False, norm: Optional[dict] = None,
+                 shuffle: bool = True, seed: int = 0,
+                 stat_sample_files: int = 2, max_eval_patches: int = 0,
+                 verbose: bool = True):
+        self.file_pairs = list(file_pairs)
+        if not self.file_pairs:
+            raise RuntimeError("StreamingShellDataset: no file pairs given.")
+        self.nside = nside
+        self.npix = hp.nside2npix(nside)
+        self.order = order
+        self.nest = nest
+        self.residual = residual
+        self._shuffle = shuffle
+        self._rng = np.random.RandomState(seed)
+        # Cap on patches returned by get_all_data (validation); 0 = no cap.
+        self.max_eval_patches = max_eval_patches
+        self.verbose = verbose
 
-        # Input: (low_patch, curr_patch, t, cond)
-        # We feed both the original low-res patch AND the current ODE state
-        # so the model can learn residual corrections on top of the current trajectory
-        dim_in = 2 * patch_size + 1 + cond_dim
+        # Total #patches across all files (peek headers — cheap, no data loaded).
+        self._shells_per_file = []
+        for low, _high in self.file_pairs:
+            n = _peek_shells_shape(low)[0]
+            self._shells_per_file.append(int(n))
+        total_shells = int(sum(self._shells_per_file))
+        self._N = total_shells * n_patches(order)
 
-        layers: list[nn.Module] = [nn.Linear(dim_in, hidden), nn.SiLU()]
-        for _ in range(n_layers - 2):
-            layers += [nn.Linear(hidden, hidden), nn.SiLU()]
-        layers += [nn.Linear(hidden, 1)]  # predict scalar velocity per pixel
+        # Global normalization stats.
+        if norm is not None:
+            self.norm = norm
+        else:
+            self.norm = self._estimate_norm(stat_sample_files)
+        self.norm.setdefault("order", order)
+        self.norm.setdefault("nside", nside)
+        self.norm.setdefault("residual", residual)
+        self.norm.setdefault("mode", "overdensity")
+        self.norm.setdefault("nest", nest)
 
-        self.net = nn.Sequential(*layers)
+        if verbose:
+            print(f"[StreamingShellDataset] {len(self.file_pairs)} files | "
+                  f"{total_shells} shells | order={order} -> {self._N:,} patches | "
+                  f"delta_scale={self.norm.get('delta_scale'):.4g} residual={residual}")
 
-    def forward(
-        self,
-        x_low_patches: torch.Tensor,   # (B, patch_size)
-        x_curr_patches: torch.Tensor,  # (B, patch_size)
-        t: torch.Tensor,               # (B,) or (B, 1)
-        cond: torch.Tensor,            # (B, cond_dim)
-    ) -> torch.Tensor:
+    # --- interface expected by cgcnn.fit ---
+    @property
+    def N(self):
+        return self._N
+
+    @property
+    def shuffled(self):
+        return self._shuffle
+
+    def get_all_data(self):
+        """Load ALL file pairs into memory as patches. Use only on small splits.
+
+        If ``max_eval_patches`` is set, a random subset of that many patches is
+        returned — validation over the full split would otherwise be very costly
+        (it runs at every eval_frequency during fit()).
         """
-        Parameters
-        ----------
-        x_low_patches : (B, patch_size) — low-res input density patches
-        x_curr_patches : (B, patch_size) — current ODE state patches
-        t : (B,) — flow time
-        cond : (B, cond_dim) — conditioning
+        Xs, Ys = [], []
+        for fi in range(len(self.file_pairs)):
+            Xm, Ym = self._load_file_pair(fi)
+            Xs.append(map_to_patches(Xm, self.order))
+            Ys.append(map_to_patches(Ym, self.order))
+        X, Y = np.concatenate(Xs), np.concatenate(Ys)
+        if self.max_eval_patches and X.shape[0] > self.max_eval_patches:
+            sel = np.random.RandomState(0).choice(
+                X.shape[0], self.max_eval_patches, replace=False)
+            X, Y = X[sel], Y[sel]
+        return X, Y
 
-        Returns
-        -------
-        velocity : (B,) — scalar velocity at the center pixel of each patch
-        """
-        if t.dim() == 1:
-            t = t.unsqueeze(1)  # (B, 1)
-        inp = torch.cat([x_low_patches, x_curr_patches, t, cond], dim=-1)
-        return self.net(inp).squeeze(-1)  # (B,)
+    def iter(self, batch_size=1):
+        return self.__iter__(batch_size)
+
+    def __iter__(self, batch_size=1):
+        order_files = np.arange(len(self.file_pairs))
+        while True:  # endless: fit() decides how many steps to pull
+            if self._shuffle:
+                self._rng.shuffle(order_files)
+            for fi in order_files:
+                Xm, Ym = self._load_file_pair(int(fi))
+                Xp = map_to_patches(Xm, self.order)
+                Yp = map_to_patches(Ym, self.order)
+                idx = np.arange(Xp.shape[0])
+                if self._shuffle:
+                    self._rng.shuffle(idx)
+                for b in range(0, len(idx) - batch_size + 1, batch_size):
+                    bi = idx[b:b + batch_size]
+                    yield Xp[bi], Yp[bi]
+
+    # --- internals ---
+    def _estimate_norm(self, n_files: int) -> dict:
+        # Estimate the single global delta_scale from a few files' low shells.
+        sample = self.file_pairs[: max(n_files, 1)]
+        lows = [self._read_maps(low) for low, _high in sample]
+        X = np.concatenate(lows)
+        return {"nside": self.nside, "nest": self.nest, "residual": self.residual,
+                "mode": "overdensity", "order": self.order, "npix": self.npix,
+                "patch_npix": self.npix // n_patches(self.order),
+                "delta_scale": estimate_delta_scale(X)}
+
+    def _read_maps(self, npz_path) -> np.ndarray:
+        """Load a (n_shells, npix) stack, resampling to target nside if needed."""
+        maps = np.asarray(np.load(str(npz_path))["shells"], dtype=np.float32)
+        if maps.shape[1] != self.npix:
+            order_str = "NESTED" if self.nest else "RING"
+            maps = np.stack([
+                hp.ud_grade(m, self.nside, order_in=order_str, order_out=order_str)
+                for m in maps
+            ]).astype(np.float32)
+        return maps
+
+    def _load_file_pair(self, fi: int):
+        """Return per-shell overdensity-normalized (X_maps, Y_maps) for one file."""
+        low, high = self.file_pairs[fi]
+        X = self._read_maps(low)
+        H = self._read_maps(high)
+        return overdensity_forward(X, H, self.norm["delta_scale"], self.residual)
 
 
-# ---------------------------------------------------------------------------
-# Dataset utility: precompute .npy patch-index files per nside
-# ---------------------------------------------------------------------------
+def train_streaming(model, train_ds: "StreamingShellDataset",
+                    val_ds: "StreamingShellDataset"):
+    """Train deepsphere(cgcnn) on streaming datasets (train + small in-memory val).
 
-def get_or_build_patch_idx(
-    nside: int,
-    depth: int = 1,
-    cache_dir: str = "/tmp/healpy_patch_cache",
-) -> np.ndarray:
+    The validation set is loaded fully (get_all_data) by fit(), so keep it small
+    (a couple of files). Training streams file-by-file and never preloads.
     """
-    Load patch indices from disk cache or build and cache them.
+    print(f"[train_streaming] train patches={train_ds.N:,} | "
+          f"val patches={val_ds.N:,}")
+    return model.fit(train_ds, val_ds)
 
-    For nside=2048 depth=1: ~200 MB on disk, ~200 MB RAM.
-    For nside=2048 depth=2: ~1.1 GB on disk.
 
-    The cache is worth building once — it's reused across all training epochs.
+def train_horovod(model, train_ds: "StreamingShellDataset", num_epochs: int,
+                  batch_size: int, hvd, log_every: int = 50):
+    """Data-parallel training of deepsphere(cgcnn) with Horovod.
+
+    Bypasses deepsphere.fit() to run a custom synchronous SGD loop: pin each rank
+    to its local GPU, broadcast rank-0's initial weights, then stream this rank's
+    data shard and run the (Horovod-wrapped) op_train, which all-reduces gradients
+    every step. Only rank 0 logs and writes the checkpoint that predict() restores.
+
+    The model must have been built with ``distributed=True`` so its optimizer is a
+    hvd.DistributedOptimizer. ``train_ds`` should already be this rank's shard.
     """
     import os
-    os.makedirs(cache_dir, exist_ok=True)
-    cache_path = os.path.join(cache_dir, f"patch_idx_nside{nside}_depth{depth}.npy")
-    if os.path.exists(cache_path):
-        print(f"[PatchIndex] Loading cached patch indices from {cache_path}")
-        return np.load(cache_path)
-    patch_idx = build_patch_indices_fast(nside, depth=depth)
-    np.save(cache_path, patch_idx)
-    print(f"[PatchIndex] Saved patch indices to {cache_path}")
-    return patch_idx
+    import tensorflow.compat.v1 as tf
 
+    rank, size = hvd.rank(), hvd.size()
 
-# ---------------------------------------------------------------------------
-# Training loss
-# ---------------------------------------------------------------------------
+    # Broadcast op must live in the model's graph (references its variables).
+    # deepsphere.build_graph() calls graph.finalize(); temporarily un-finalize so
+    # we can append the broadcast op (finalize is only a guard against accidental
+    # graph growth — safe to lift here).
+    model.graph._unsafe_unfinalize()
+    with model.graph.as_default():
+        bcast = hvd.broadcast_global_variables(0)
 
-def patch_flow_loss(model, x0, x1, cond, patch_idx_t, t, sigma, chunk_size, device,
-                    use_amp: bool = False):
-    npix = x0.shape[0]
+    config = tf.ConfigProto()
+    config.gpu_options.allow_growth = True
+    config.gpu_options.visible_device_list = str(hvd.local_rank())
 
-    with torch.no_grad():
-        noise = torch.randn_like(x0)
-        xt = (1 - t) * x0 + t * x1 + sigma * noise
-        target = x1 - x0  # velocity field
+    num_steps = max(int(num_epochs * train_ds.N / batch_size), 1)
+    if rank == 0:
+        print(f"[train_horovod] {size} workers | {num_steps:,} steps/worker | "
+              f"batch/worker={batch_size} (effective {batch_size * size}) | "
+              f"shard patches={train_ds.N:,}", flush=True)
 
-    chunk_starts = list(range(0, npix, chunk_size))
-    n_chunks = len(chunk_starts)
-    total_loss = 0.0  # plain float, NOT a tensor
-
-    # In DDP, no_sync() suppresses the allreduce on every intermediate backward.
-    # Only the final chunk triggers the gradient sync — reduces network traffic
-    # from O(n_chunks) allreduces to O(1) per shell.
-    no_sync_ctx = model.no_sync if hasattr(model, 'no_sync') else contextlib.nullcontext
-
-    for ci, i in enumerate(chunk_starts):
-        end = min(i + chunk_size, npix)
-        idx = patch_idx_t[i:end]                          # (C, patch_size)
-
-        patches_x0 = x0[idx]                              # (C, patch_size) — low-res input
-        patches_xt = xt[idx]                              # (C, patch_size) — current ODE state
-        target_chunk = target[i:end]                      # (C,)
-
-        t_vec = torch.full((end - i, 1), t, device=device)
-        cond_expand = cond.unsqueeze(0).expand(end - i, -1)
-
-        # BF16 autocast: halves activation memory → allows larger chunk_size.
-        # No GradScaler needed — BF16 has the same exponent range as FP32.
-        with torch.autocast("cuda", dtype=torch.bfloat16, enabled=use_amp):
-            pred = model(patches_x0, patches_xt, t_vec, cond_expand)
-
-        chunk_loss = ((pred.float() - target_chunk) ** 2).mean() / n_chunks
-
-        is_last = (ci == n_chunks - 1)
-        ctx = contextlib.nullcontext() if is_last else no_sync_ctx()
-        with ctx:
-            chunk_loss.backward()
-        total_loss += chunk_loss.item()
-
-    return total_loss  # return float for logging
-
-
-
-# ---------------------------------------------------------------------------
-# Inference: ODE integration in pixel space
-# ---------------------------------------------------------------------------
-
-@torch.no_grad()
-def apply_patch_flow(
-    model: PatchMLP,
-    x_low: np.ndarray,          # (Npix,) float32 input (low-res) shell
-    cond: torch.Tensor,         # (C,) conditioning
-    patch_idx: np.ndarray,      # (Npix, patch_size) int32
-    steps: int = 25,
-    chunk_size: int = 1_000_000,
-    device: torch.device = torch.device("cpu"),
-    diagnostic: bool = False,
-) -> np.ndarray:
-    """
-    Euler integration of the learned velocity field in pixel space.
-
-    Parameters
-    ----------
-    x_low : (Npix,) float32 — low-res input density map
-    cond : (C,) — conditioning vector (already normalized)
-    patch_idx : (Npix, patch_size) int32 — precomputed patch indices
-    steps : int — Euler integration steps
-    chunk_size : int — pixels per GPU batch
-
-    Returns
-    -------
-    x_corrected : (Npix,) float32 — corrected density map
-    """
-    Npix = x_low.shape[0]
-    patch_idx_t = torch.from_numpy(patch_idx).long().to(device)
-
-    x0_t = torch.from_numpy(x_low.astype(np.float32)).to(device)
-    x_curr = x0_t.clone()
-
-    dt = 1.0 / steps
-    cond_exp = cond.unsqueeze(0)  # (1, C)
-
-    for step in range(steps):
-        t_val = step * dt
-        v_field = torch.zeros(Npix, dtype=torch.float32, device=device)
-
-        for start in range(0, Npix, chunk_size):
-            end = min(start + chunk_size, Npix)
-            B = end - start
-
-            patch_rows = patch_idx_t[start:end]          # (B, patch_size)
-            x0_patches   = x0_t[patch_rows]              # (B, patch_size)
-            xcurr_patches = x_curr[patch_rows]           # (B, patch_size)
-
-            t_chunk = torch.full((B,), t_val, dtype=torch.float32, device=device)
-            cond_chunk = cond_exp.expand(B, -1)
-
-            v_chunk = model(x0_patches, xcurr_patches, t_chunk, cond_chunk)
-            v_field[start:end] = v_chunk
-
-        if diagnostic and step % 5 == 0:
-            print(f"  Step {step:02d}/{steps} | "
-                  f"x_curr mean={x_curr.mean():.4f} std={x_curr.std():.4f} | "
-                  f"v mean={v_field.mean():.4f} std={v_field.std():.4f}")
-
-        x_curr = x_curr + v_field * dt
-
-    return x_curr.cpu().numpy()
-
-
-# ---------------------------------------------------------------------------
-# ShellPixelDataset: pixel-space analogue of ShellAlmDataset
-# ---------------------------------------------------------------------------
-
-class ShellPixelDataset(torch.utils.data.Dataset):
-    """
-    Dataset that streams HEALPix shells from .npz files in pixel space.
-
-    Each item is (x0_shell, x1_shell, cond) where x0/x1 are full pixel maps
-    (Npix,) float32. The DataLoader is responsible for computing patches on-the-fly
-    during the forward pass, which avoids storing all patches in RAM.
-
-    This dataset is designed for shells_nside=2048.npz (low-res) and
-    compressed_shells.npz (high-res reference).
-
-    Parameters
-    ----------
-    data_dir : Path
-        Root directory with cosmo_* subdirectories.
-    nside_target : int
-        Target nside for the output maps (used to downgrade high-res reference
-        if needed).
-    """
-
-    def __init__(
-        self,
-        data_dir,
-        nside_target: int = 2048,
-        verbose: bool = True,
-    ):
-        from pathlib import Path
-        import yaml
-
-        data_dir = Path(data_dir)
-        self.nside_target = nside_target
-
-        self.low_paths: list[tuple[Path, int]] = []  # (npz_path, shell_idx)
-        self.high_paths: list[tuple[Path, int]] = []
-        self.cond_list: list[np.ndarray] = []
-
-        subdirs = sorted(d for d in data_dir.iterdir()
-                         if d.is_dir() and d.name.startswith("cosmo_"))
-        if not subdirs:
-            subdirs = [data_dir]
-
-        def load_clean_params(p):
-            params = yaml.safe_load(p.read_text())
-            valid_keys = sorted(k for k, v in params.items()
-                                if _try_float(v) is not None)
-            return np.array([float(params[k]) for k in valid_keys], dtype=np.float32)
-
-        def _try_float(v):
-            try:
-                return float(v)
-            except (ValueError, TypeError):
-                return None
-
-        total = 0
-        for sd in subdirs:
-            run_dirs = [r for r in sorted(sd.iterdir())
-                        if r.is_dir() and r.name.startswith("run_")]
-            leaf_dirs = run_dirs if run_dirs else [sd]
-            for ld in leaf_dirs:
-                params_yml = ld / "params.yml" if (ld / "params.yml").exists() \
-                             else ld.parent / "params.yml"
-                low_npz = ld / "shells_nside=2048.npz"
-                high_npz = ld / "compressed_shells.npz"
-                if not (params_yml.exists() and low_npz.exists() and high_npz.exists()):
-                    continue
-                cosmo_vec = load_clean_params(params_yml)
-
-                # Peek at shell count
-                low_data = np.load(low_npz, mmap_mode='r')
-                high_data = np.load(high_npz, mmap_mode='r')
-                n_shells = min(low_data["shells"].shape[0], high_data["shells"].shape[0])
-
-                for i in range(n_shells):
-                    self.low_paths.append((low_npz, i))
-                    self.high_paths.append((high_npz, i))
-                    self.cond_list.append(cosmo_vec)
-                    total += 1
-
-        assert total > 0, "No shells found!"
-        if verbose:
-            print(f"[ShellPixelDataset] {total} shells indexed across {len(subdirs)} cosmologies")
-
-        # Normalize conditioning
-        cond_arr = np.stack(self.cond_list)
-        self.cond_mean = cond_arr.mean(0)
-        self.cond_std = np.clip(cond_arr.std(0), 1e-8, None)
-        self.cond_norm = ((cond_arr - self.cond_mean) / self.cond_std).astype(np.float32)
-
-        # Shell index normalization
-        self.max_shell_idx = float(max(
-            [idx for _, idx in self.low_paths] + [1]
-        ))
-
-        # Per-worker mmap cache; populated lazily after DataLoader fork.
-        self._npz_cache: dict = {}
-
-    def _load_npz(self, path):
-        # No mmap_mode: compressed npz files can't be mmapped anyway, and keeping
-        # a ZipFile handle open under concurrent Lustre reads causes CRC errors.
-        key = str(path)
-        if key not in self._npz_cache:
-            self._npz_cache[key] = np.load(str(path))
-        return self._npz_cache[key]
-
-    def __len__(self):
-        return len(self.low_paths)
-
-    def __getitem__(self, idx):
-        low_npz, shell_i = self.low_paths[idx]
-        high_npz, _ = self.high_paths[idx]
-
-        low_data = self._load_npz(low_npz)
-        high_data = self._load_npz(high_npz)
-
-        x0 = low_data["shells"][shell_i].astype(np.float32)
-        x1 = high_data["shells"][shell_i].astype(np.float32)
-
-        # Downgrade x1 if it's at higher resolution
-        nside_x1 = hp.npix2nside(x1.shape[0])
-        if nside_x1 != self.nside_target:
-            x1 = hp.ud_grade(x1, self.nside_target).astype(np.float32)
-
-        cond_vec = self.cond_norm[idx]
-        shell_idx_norm = np.float32(shell_i / self.max_shell_idx)
-        cond = np.concatenate([cond_vec, [shell_idx_norm]])
-
-        return torch.from_numpy(x0), torch.from_numpy(x1), torch.from_numpy(cond)
+    losses = []
+    with tf.Session(graph=model.graph, config=config) as sess:
+        sess.run(model.op_init)
+        sess.run(bcast)                     # sync all workers to rank-0 weights
+        train_iter = train_ds.iter(batch_size)
+        t0 = time.time()
+        for step in range(1, num_steps + 1):
+            xb, yb = next(train_iter)
+            _, loss = sess.run(
+                [model.op_train, model.op_loss],
+                feed_dict={model.ph_data: xb, model.ph_labels: yb,
+                           model.ph_training: True})
+            if rank == 0 and step % log_every == 0:
+                rate = step / (time.time() - t0)
+                print(f"  step {step:,}/{num_steps:,} | loss={loss:.4e} | "
+                      f"{rate:.1f} steps/s", flush=True)
+                losses.append(float(loss))
+        # Rank 0 saves a checkpoint so the apply stage's predict() can restore it.
+        if rank == 0:
+            ckpt_dir = model._get_path('checkpoints')
+            os.makedirs(ckpt_dir, exist_ok=True)
+            model.op_saver.save(sess, os.path.join(ckpt_dir, 'model'),
+                                global_step=num_steps)
+            print(f"[train_horovod] saved checkpoint to {ckpt_dir}", flush=True)
+    return losses

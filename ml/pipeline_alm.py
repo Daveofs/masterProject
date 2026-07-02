@@ -8,7 +8,6 @@ import sys
 import tempfile
 import os
 from pathlib import Path
-import torch
 import healpy as hp
 import numpy as np
 import matplotlib.pyplot as plt
@@ -180,13 +179,14 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--train-script", type=str, default="train_flow_matching.py")
     p.add_argument("--apply-script", type=str, default="apply_flow_correction.py")
     p.add_argument("--python", type=str, default=sys.executable)
-    p.add_argument("--chunk-size", type=int, default=1_000)
-    p.add_argument("--epochs", type=int, default=10)
-    p.add_argument("--lr", type=float, default=1e-3)
-    p.add_argument("--sigma", type=float, default=0.01)
-    p.add_argument("--hidden", type=int, default=1024)
-    p.add_argument("--ode-steps", type=int, default=10, help="Euler integration steps.")
-    p.add_argument("--log-interval", type=int, default=5)
+    p.add_argument("--lmax", type=int, default=3000)
+    p.add_argument("--epochs", type=int, default=30)
+    p.add_argument("--batch-size", type=int, default=8)
+    p.add_argument("--lr", type=float, default=5e-4)
+    p.add_argument("--sigma", type=float, default=0.0)
+    p.add_argument("--hidden", type=int, default=256)
+    p.add_argument("--ode-steps", type=int, default=25, help="Euler integration steps.")
+    p.add_argument("--log-interval", type=int, default=10)
 
     p.add_argument("--shell-index", type=int, default=5)
     p.add_argument("--device", type=str, default="cpu")
@@ -246,8 +246,9 @@ def main() -> None:
         train_args = [
             str(train_script),
             "--data-dir", str(tmp_root),
-            "--chunk-size", str(args.chunk_size),
+            "--lmax", str(args.lmax),
             "--epochs", str(args.epochs),
+            "--batch-size", str(args.batch_size),
             "--lr", str(args.lr),
             "--sigma", str(args.sigma),
             "--hidden", str(args.hidden),
@@ -259,9 +260,17 @@ def main() -> None:
             nnodes, gpus = os.environ.get("SLURM_NNODES", "1"), os.environ.get("GPUS_PER_NODE", "4")
             addr, port = os.environ.get("MASTER_ADDR", "127.0.0.1"), os.environ.get("MASTER_PORT", "29500")
             job_id = os.environ.get("SLURM_JOB_ID", "0")
-            
-            cmd_str = f"torchrun --nnodes={nnodes} --nproc_per_node={gpus} --rdzv_id={job_id} --rdzv_backend=c10d --rdzv_endpoint={addr}:{port} " + " ".join(train_args)
-            train_cmd = ["srun", "bash", "-c", cmd_str]
+            venv = os.environ.get("SPHEREFLOW_VENV",
+                                  "/capstor/scratch/cscs/damrein/venvs/sphereflow")
+            uenv_img = os.environ.get("PYTORCH_UENV", "pytorch/v2.9.1:v2")
+            # Run inside the pytorch uenv venv; use 'python -m torch.distributed.run'
+            # so DDP workers spawn with the venv python (torch + healpy).
+            inner = (f"source {venv}/bin/activate && "
+                     f"python -m torch.distributed.run --nnodes={nnodes} "
+                     f"--nproc_per_node={gpus} --rdzv_id={job_id} --rdzv_backend=c10d "
+                     f"--rdzv_endpoint={addr}:{port} " + " ".join(train_args))
+            train_cmd = ["srun", "uenv", "run", uenv_img, "--view=default", "--",
+                         "bash", "-c", inner]
         else:
             train_cmd = [args.python] + train_args
 
@@ -271,20 +280,28 @@ def main() -> None:
     print("Applying trained model to test cosmology")
     print("=" * 80 + "\n")
 
-    model_path = model_out / "flow_mlp.pth"
-    apply_device = "cuda:0" if args.srun_torchrun and torch.cuda.is_available() else args.device
-
-    apply_cmd = [
-        args.python, str(apply_script),
-        "--model", str(model_path),
-        "--input", str(test_input),
-        "--chunk-size", str(args.chunk_size),
-        "--params", str(test_params),
+    # apply loads flow_mlp.pth + flow_meta.npz from the model DIRECTORY and reads
+    # the preprocessed low_alms_lmax{lmax}.npy from the test run dir. It needs
+    # torch+healpy, so run it inside the pytorch uenv venv (single GPU).
+    apply_args = [
+        str(apply_script),
+        "--model", str(model_out),
+        "--run-dir", str(test_run_dir),
+        "--low-npz", test_input.name,
+        "--nside", str(args.plot_nside),
         "--steps", str(args.ode_steps),
-        "--device", apply_device,
+        "--batch-size", str(args.batch_size),
         "--out", str(corrected_out),
-        "--diagnostic",
     ]
+    if args.srun_torchrun:
+        venv = os.environ.get("SPHEREFLOW_VENV",
+                              "/capstor/scratch/cscs/damrein/venvs/sphereflow")
+        uenv_img = os.environ.get("PYTORCH_UENV", "pytorch/v2.9.1:v2")
+        inner_apply = f"source {venv}/bin/activate && python " + " ".join(apply_args)
+        apply_cmd = ["srun", "--nodes=1", "--ntasks=1", "uenv", "run", uenv_img,
+                     "--view=default", "--", "bash", "-c", inner_apply]
+    else:
+        apply_cmd = [args.python] + apply_args
     run_cmd(apply_cmd, cwd=root_dir)
 
     orig_data, corr_data = np.load(test_input, allow_pickle=False), np.load(corrected_out, allow_pickle=False)

@@ -1,20 +1,28 @@
 #!/bin/bash
 #SBATCH --nodes=2
 #SBATCH --exclusive
-#SBATCH --job-name=flow-loo-patch
+#SBATCH --job-name=harmonic_flow
 #SBATCH --partition=normal
 #SBATCH --account=sk037
 #SBATCH --ntasks-per-node=1
 #SBATCH --time=08:00:00
 #SBATCH --gres=gpu:4
-#SBATCH --output=/capstor/scratch/cscs/damrein/outputs/logs/flow_matching/slurm-patch-pipeline-%j.out
-#SBATCH --error=/capstor/scratch/cscs/damrein/outputs/logs/flow_matching/slurm-patch-pipeline-%j.err
+#SBATCH --output=/capstor/scratch/cscs/damrein/outputs/logs/flow_matching/harmonic-flow-pipeline-%j.out
+#SBATCH --error=/capstor/scratch/cscs/damrein/outputs/logs/flow_matching/harmonic-flow-pipeline-%j.err
 #SBATCH --chdir=/capstor/scratch/cscs/damrein/outputs/flow_matching
 
 # ============================================================
-# Environment setup
+# Environment setup.
+# The orchestrator (pipeline_alm.py) runs in the conda env (numpy/healpy/matplotlib
+# only — no torch). It launches the DDP training via 'srun uenv run ...
+# torch.distributed.run' and apply via 'srun uenv run ...' internally. The
+# orchestrator must NOT itself be inside a uenv session (uenv cannot be nested).
 # ============================================================
-source /users/damrein/miniforge3/bin/activate
+export UENV_REPO_PATH=/capstor/scratch/cscs/damrein/.uenv-images
+export PYTORCH_UENV=pytorch/v2.9.1:v2
+export SPHEREFLOW_VENV=/capstor/scratch/cscs/damrein/venvs/sphereflow
+source /users/damrein/miniforge3/etc/profile.d/conda.sh
+conda activate deepSphere
 
 # ============================================================
 # Multi-node / multi-GPU config
@@ -65,10 +73,13 @@ mkdir -p /capstor/scratch/cscs/damrein/outputs/logs/flow_matching
 # ============================================================
 # Launch Harmonic Pipeline Wrapper
 # ============================================================
-# Executes run_pipeline.py on the head node; triggers srun + torchrun 
+# Executes pipeline_alm.py on the head node; triggers srun + torchrun 
 # for the DDP Alm training phase.
 
-python ${SCRIPT_DIR}/ml/run_pipeline.py \
+# Orchestrator runs in the conda env (NOT uenv). It internally does
+# 'srun uenv run ... torch.distributed.run' for training and 'srun uenv run ...'
+# for apply — those are the only uenv sessions (no nesting).
+python ${SCRIPT_DIR}/ml/pipeline_alm.py \
     --data-root ${DATA_DIR} \
     --test-cosmo cosmo_000001 \
     --out-root ${OUT_ROOT} \
@@ -76,15 +87,16 @@ python ${SCRIPT_DIR}/ml/run_pipeline.py \
     --apply-script apply_flow_correction.py \
     --shared-tmp ${SHARED_TMP} \
     --srun-torchrun \
-    --epochs 1 \
+    --lmax 3000 \
+    --epochs 30 \
+    --batch-size 8 \
     --lr 5e-4 \
-    --chunk-size 2000000 \
-    --sigma 0.01 \
-    --hidden 512  \
+    --sigma 0.0 \
+    --hidden 256 \
     --ode-steps 25 \
     --plot-nside 2048 \
     --device cuda:0 \
-    --log-interval 10 
+    --log-interval 10
 
 
 echo "Harmonic Pipeline ${SLURM_JOB_ID} finished at $(date)"

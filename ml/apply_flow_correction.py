@@ -1,173 +1,102 @@
 #!/usr/bin/env python3
-"""
-Apply trained patch-based flow correction to HEALPix shells.
+"""Apply the trained alm flow-matching model to correct a test cosmology's shells.
 
-Pixel-space analogue of apply_flow_correction.py.
-Operates entirely in pixel space — no SHT required.
+Loads low alms (preprocessed low_alms_lmax{lmax}.npy), whitens with the training
+per-ell scale, integrates the flow ODE low->high in whitened space, unwhitens, and
+alm2map's back to corrected density shells. Saves a corrected .npz mirroring the
+input shell layout.
 
-Usage
------
-  python apply_patch_correction.py \
-      --model ./patch_model/patch_flow_mlp.pth \
-      --input shells_nside=2048.npz \
-      --params params.yml \
-      --steps 25 \
-      --device cuda:0 \
-      --out corrected.npz
+  python apply_flow_correction.py --model <flow_model_dir> --run-dir <test run dir> \
+      --nside 2048 --steps 25 --out corrected.npz
 """
 
+from __future__ import annotations
 import argparse
-import time
 from pathlib import Path
 
 import numpy as np
-import yaml
+import healpy as hp
 import torch
+import yaml
 
-from MLP import PatchMLP, apply_patch_flow, get_or_build_patch_idx
-
-
-def load_clean_params(params_path: Path):
-    params = yaml.safe_load(params_path.read_text())
-    valid_keys = sorted(
-        k for k, v in params.items()
-        if _try_float(v) is not None
-    )
-    return np.array([float(params[k]) for k in valid_keys], dtype=np.float32)
+import flow_matching_alm as fm
 
 
-def _try_float(v):
+def load_model(model_dir, device):
+    meta = dict(np.load(Path(model_dir) / "flow_meta.npz", allow_pickle=True))
+    lmax = int(meta["lmax"])
+    model = fm.MLP(int(meta["dim_in"]), cond_dim=int(meta["cond_dim"]),
+                   hidden=int(meta["hidden"]), lmax=lmax).to(device)
+    model.load_state_dict(torch.load(Path(model_dir) / "flow_mlp.pth", map_location=device))
+    model.eval()
+    return model, meta
+
+
+def cond_vector(params_yml, shell_idx, meta):
+    p = yaml.safe_load(Path(params_yml).read_text())
+    keys = sorted(k for k, v in p.items() if _is_num(v))
+    v = np.array([float(p[k]) for k in keys], dtype=np.float32)
+    cmean, cstd = meta["cond_mean"], meta["cond_std"]
+    n = len(cmean)
+    v = np.pad(v, (0, max(n - len(v), 0)))[:n]
+    v = (v - cmean) / cstd
+    shell_norm = np.float32(shell_idx / float(meta["max_shell_idx"]))
+    return np.concatenate([v, [shell_norm]]).astype(np.float32)
+
+
+def _is_num(v):
     try:
-        return float(v)
+        float(v); return True
     except (ValueError, TypeError):
-        return None
-
-
-def parse_args():
-    p = argparse.ArgumentParser()
-    p.add_argument("--model", type=str, required=True)
-    p.add_argument("--input", type=str, required=True)
-    p.add_argument("--params", type=str, required=True)
-    p.add_argument("--shell-index", type=int, default=-1,
-                   help="Single shell to correct (-1 = all)")
-    p.add_argument("--steps", type=int, default=25)
-    p.add_argument("--device", type=str, default="cpu")
-    p.add_argument("--out", type=str, default="")
-    p.add_argument("--chunk-size", type=int, default=1_000)
-    p.add_argument("--cache-dir", type=str, default="/capstor/scratch/cscs/damrein/healpy_patch_cache")
-    p.add_argument("--diagnostic", action="store_true")
-    return p.parse_args()
+        return False
 
 
 def main():
-    args = parse_args()
-    model_path = Path(args.model)
-    input_path = Path(args.input)
-    out_path = Path(args.out) if args.out else \
-        input_path.with_name(input_path.stem + "_patch_corrected.npz")
+    p = argparse.ArgumentParser()
+    p.add_argument("--model", required=True, help="dir with flow_mlp.pth + flow_meta.npz")
+    p.add_argument("--run-dir", required=True, help="test run dir (low_alms + params.yml)")
+    p.add_argument("--low-npz", default="shells_nside=2048.npz",
+                   help="original low shells (for output layout + nside)")
+    p.add_argument("--nside", type=int, default=2048)
+    p.add_argument("--steps", type=int, default=25)
+    p.add_argument("--batch-size", type=int, default=8)
+    p.add_argument("--out", required=True)
+    args = p.parse_args()
 
-    device = torch.device(args.device)
-    print(f"Using device: {device}")
+    dev = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model, meta = load_model(args.model, dev)
+    lmax = int(meta["lmax"])
+    scale = torch.from_numpy(meta["whiten_scale"]).to(dev)
 
-    # ------------------------------------------------------------------
-    # Load metadata + model
-    # ------------------------------------------------------------------
-    meta_path = model_path.with_name("patch_metadata.pth")
-    metadata = torch.load(meta_path, map_location="cpu")
+    run = Path(args.run_dir)
+    low_alms = np.load(run / f"low_alms_lmax{lmax}.npy")          # (n_shells, 2*N_alm)
+    params_yml = run / "params.yml" if (run / "params.yml").exists() else run.parent / "params.yml"
+    n_shells = low_alms.shape[0]
+    npix = hp.nside2npix(args.nside)
 
-    nside       = metadata["nside"]
-    patch_depth = metadata["patch_depth"]
-    patch_size  = metadata["patch_size"]
-    cond_dim    = metadata["cond_dim"]
-    hidden      = metadata["hidden"]
-    n_layers    = metadata["n_layers"]
+    corrected = np.zeros((n_shells, npix), dtype=np.float32)
+    for start in range(0, n_shells, args.batch_size):
+        end = min(start + args.batch_size, n_shells)
+        x0 = torch.from_numpy(low_alms[start:end].astype(np.float32)).to(dev) / scale
+        cond = torch.from_numpy(np.stack([
+            cond_vector(params_yml, i, meta) for i in range(start, end)])).to(dev)
+        xc = fm.integrate(model, x0, cond, steps=args.steps) * scale   # unwhiten
+        xc = xc.cpu().numpy()
+        N_alm = (lmax + 1) * (lmax + 2) // 2
+        for j in range(end - start):
+            alm = (xc[j, :N_alm] + 1j * xc[j, N_alm:]).astype(np.complex128)
+            corrected[start + j] = hp.alm2map(alm, nside=args.nside, lmax=lmax).astype(np.float32)
+        print(f"  corrected shells {start}-{end-1}/{n_shells}", flush=True)
 
-    print(f"Metadata: nside={nside} | patch_size={patch_size} | "
-          f"cond_dim={cond_dim} | hidden={hidden} | layers={n_layers}")
-
-    model = PatchMLP(
-        patch_size=patch_size,
-        cond_dim=cond_dim,
-        hidden=hidden,
-        n_layers=n_layers,
-    )
-    model.load_state_dict(torch.load(model_path, map_location="cpu"))
-    model.to(device).eval()
-
-    if any(torch.isnan(p).any() for p in model.parameters()):
-        raise ValueError("FATAL: Model contains NaN weights — retrain required.")
-
-    try:
-        model = torch.compile(model, mode="reduce-overhead")
-    except Exception:
-        pass
-
-    # ------------------------------------------------------------------
-    # Patch indices
-    # ------------------------------------------------------------------
-    t0 = time.time()
-    print(f"Loading/building patch indices (nside={nside}, depth={patch_depth})...")
-    patch_idx = get_or_build_patch_idx(nside, depth=patch_depth, cache_dir=args.cache_dir)
-    print(f"  Patch indices ready in {time.time()-t0:.1f}s")
-
-    # ------------------------------------------------------------------
-    # Conditioning
-    # ------------------------------------------------------------------
-    raw_cond = load_clean_params(Path(args.params))
-    cond_mean = torch.tensor(metadata["cond_mean"], dtype=torch.float32)
-    cond_std  = torch.tensor(metadata["cond_std"],  dtype=torch.float32)
-    cond_norm = (torch.from_numpy(raw_cond) - cond_mean) / cond_std
-
-    max_shell_idx = float(metadata.get("max_shell_idx", 1))
-
-    # ------------------------------------------------------------------
-    # Load shells
-    # ------------------------------------------------------------------
-    data = dict(np.load(input_path, allow_pickle=False))
-    shells = data["shells"]
-    Nshells = shells.shape[0]
-
-    indices = list(range(Nshells)) if args.shell_index < 0 else [int(args.shell_index)]
-    shells_corrected = shells.astype(np.float32)
-
-    # ------------------------------------------------------------------
-    # Apply correction shell by shell
-    # ------------------------------------------------------------------
-    t1 = time.time()
-    for i, idx in enumerate(indices):
-        shell_idx_norm = torch.tensor([idx / max_shell_idx], dtype=torch.float32)
-        cond = torch.cat([cond_norm, shell_idx_norm]).to(device)
-
-        x_low = shells[idx].astype(np.float32)
-
-        print(f"[{i+1}/{len(indices)}] Shell {idx}  "
-              f"(mean={x_low.mean():.4f}, std={x_low.std():.4f})")
-
-        x_corr = apply_patch_flow(
-            model=model,
-            x_low=x_low,
-            cond=cond,
-            patch_idx=patch_idx,
-            steps=args.steps,
-            chunk_size=args.chunk_size,
-            device=device,
-            diagnostic=args.diagnostic,
-        )
-        shells_corrected[idx] = x_corr
-
-    print(f"\nAll shells corrected in {time.time()-t1:.1f}s")
-
-    # ------------------------------------------------------------------
-    # Save
-    # ------------------------------------------------------------------
-    out_dict = {k: data[k] for k in data}
-    out_dict["shells"] = shells_corrected
-    out_dict["corrected_index"] = np.asarray(indices, dtype=np.int64)
-
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    np.savez(out_path, **out_dict)
-    print(f"Saved corrected output to: {out_path}")
-    print(f"Total time: {time.time()-t0:.1f}s")
+    # Preserve any metadata (e.g. 'info') from the original low .npz.
+    out = Path(args.out); out.parent.mkdir(parents=True, exist_ok=True)
+    low_npz = run / args.low_npz
+    extra = {}
+    if low_npz.exists():
+        d = np.load(low_npz, allow_pickle=False)
+        extra = {k: d[k] for k in d.files if k != "shells"}
+    np.savez(out, shells=corrected, **extra)
+    print(f"[apply] saved corrected shells to {out}", flush=True)
 
 
 if __name__ == "__main__":
