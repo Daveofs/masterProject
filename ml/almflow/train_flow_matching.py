@@ -24,8 +24,8 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
 
-from ShellAlmDataset import ShellAlmDataset
-import flow_matching_alm as fm
+from masterProject.ml.almflow.ShellAlmDataset import ShellAlmDataset
+import masterProject.ml.almflow.flow_matching_alm as fm
 
 
 def is_main():

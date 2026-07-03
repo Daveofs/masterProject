@@ -23,7 +23,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import torch
 
-import sphere_flow as sf
+import masterProject.ml.sphereflow.sphere_flow as sf
 
 
 def load_model(model_dir, device):

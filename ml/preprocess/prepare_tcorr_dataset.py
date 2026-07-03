@@ -26,7 +26,7 @@ from pathlib import Path
 import numpy as np
 import healpy as hp
 
-from transfer_function import ell_of_flat_index
+from masterProject.ml.transfer.transfer_function import ell_of_flat_index
 
 
 def process_run(task):

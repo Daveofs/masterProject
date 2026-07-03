@@ -35,7 +35,7 @@ DATA=/capstor/scratch/cscs/damrein/cosmogridv1
 LMAX=3000
 TEST_COSMO=cosmo_000122
 # How to build T(ell, shell): "fit" (train-averaged) or "emulate" (MLP emulator).
-METHOD=${METHOD:-fit}
+METHOD=${METHOD:-emulate}
 # Emulator hyperparameters (METHOD=emulate only).
 HIDDEN=${HIDDEN:-256,256,128}
 MAX_ITER=${MAX_ITER:-200}
@@ -61,26 +61,26 @@ python preprocess_alms.py \
 # ---- 2. Build T(ell, shell) via the chosen method (test cosmology left out) ----
 if [ "$METHOD" = "emulate" ]; then
     echo "[stage 2] training MLP emulator (hidden=$HIDDEN, max_iter=$MAX_ITER, sample_frac=$SAMPLE_FRAC)"
-    python transfer_function.py train \
+    python transfer/transfer_function.py train \
         --data-dir "$DATA" --lmax $LMAX \
         --test-cosmo $TEST_COSMO $FIT_FLAGS \
         --hidden "$HIDDEN" --max-iter $MAX_ITER --sample-frac $SAMPLE_FRAC \
         --out "$OUT/emulator.pkl"
     echo "[stage 2b] emulating T for $TEST_COSMO"
-    python transfer_function.py emulate \
+    python transfer/transfer_function.py emulate \
         --emulator "$OUT/emulator.pkl" \
         --run-dir "$DATA/$TEST_COSMO/run_0" \
         --out "$OUT/transfer.npz"
 else
     echo "[stage 2] fitting T(ell, shell) (train-averaged)"
-    python transfer_function.py fit \
+    python transfer/transfer_function.py fit \
         --data-dir "$DATA" --lmax $LMAX \
         --test-cosmo $TEST_COSMO $FIT_FLAGS --out "$OUT/transfer.npz"
 fi
 
 # ---- 3. Apply to the held-out test cosmology + Cl plots ----
 echo "[stage 3] applying to $TEST_COSMO"
-python transfer_function.py apply \
+python transfer/transfer_function.py apply \
     --transfer "$OUT/transfer.npz" \
     --run-dir "$DATA/$TEST_COSMO/run_0" \
     --nside 2048 --ell-min 0 \

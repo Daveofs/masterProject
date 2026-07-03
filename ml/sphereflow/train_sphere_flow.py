@@ -35,7 +35,7 @@ import torch
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 
-import sphere_flow as sf
+import masterProject.ml.sphereflow.sphere_flow as sf
 
 
 def is_main():

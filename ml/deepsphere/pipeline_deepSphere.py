@@ -63,7 +63,7 @@ if _ilu.find_spec("tf_keras") is not None:
 
 # MLP.py provides the deepsphere wiring: load_shell_pairs / build_model / train /
 # predict_maps / invert_prediction.
-import MLP
+import masterProject.ml.deepsphere.MLP as MLP
 
 
 # ===========================================================================

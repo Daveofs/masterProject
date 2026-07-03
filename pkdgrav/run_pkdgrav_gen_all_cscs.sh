@@ -124,12 +124,12 @@ if [[ "${1}" == "--build-list" ]]; then
             if [ ! -f "$cos_file" ] || [ ! -f "$par_file" ]; then
                 continue
             fi
-
-             # Check mask: skip if parameters are outside desired ranges
-            if ! check_mask "$par_file"; then
-                (( masked++ )) || true
-                continue
-            fi
+            # TODO: Uncomment this
+            # Check mask: skip if parameters are outside desired ranges
+            # if ! check_mask "$par_file"; then
+            #     (( masked++ )) || true
+            #     continue
+            # fi
 
             # Skip if IC file already exists
             ach_out=$(grep '^achOutName' "$cos_file" | sed 's/.*= *"\(.*\)"/\1/')
