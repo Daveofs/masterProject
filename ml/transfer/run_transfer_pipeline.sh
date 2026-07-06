@@ -52,7 +52,7 @@ echo "==== transfer-function pipeline | data=$DATA | lmax=$LMAX | test=$TEST_COS
 
 # ---- 1. Preprocess alms (skips runs already done). 5 workers x 14 OMP threads. ----
 echo "[stage 1] preprocessing alms"
-python preprocess_alms.py \
+python preprocess/preprocess_alms.py \
     --data-dir "$DATA" \
     --low-glob "disco_sim/*/disco_shells_nside=2048.npz" \
     --high-npz compressed_shells.npz \

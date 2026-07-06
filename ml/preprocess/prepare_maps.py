@@ -18,6 +18,7 @@ purely on maps. CPU-only, parallel over runs.
 from __future__ import annotations
 import argparse
 import glob
+import os
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 
@@ -33,6 +34,37 @@ def _to_nside(stack, nside):
                      for m in stack]).astype(np.float32)
 
 
+def _is_valid_npy(path: Path) -> bool:
+    """True if path is a complete, readable .npy (catches truncated leftovers
+    from before _atomic_save existed, or any other partial-write case)."""
+    if not path.exists():
+        return False
+    try:
+        arr = np.load(path, mmap_mode="r")
+        _ = arr.shape  # touch metadata; mmap raises ValueError if file is short
+        return True
+    except Exception:
+        return False
+
+
+def _atomic_save(out_path: Path, arr: np.ndarray):
+    """np.save to a temp file then os.rename into place.
+
+    np.save is NOT atomic: if the job is killed/times out mid-write, a partial
+    file is left at the final name. Since process_run's "already done" check is
+    just out_path.exists(), a truncated file then poisons every future run
+    (silently skipped as done -> ValueError: mmap length is greater than file
+    size at training time). os.rename on the same filesystem is atomic, so
+    readers only ever see a complete file at the final path.
+    """
+    # NOTE: np.save silently APPENDS .npy to any filename not already ending in
+    # .npy — so the temp name must itself end in .npy, or np.save writes to a
+    # different path than the one we then try to os.replace() from.
+    tmp_path = out_path.with_name(out_path.stem + f".tmp{os.getpid()}.npy")
+    np.save(tmp_path, arr)
+    os.replace(tmp_path, out_path)
+
+
 def process_run(task):
     ld, nside, low_glob, high_npz = task
     ld = Path(ld)
@@ -40,16 +72,23 @@ def process_run(task):
     out_high = ld / f"high_shells_nside={nside}.npy"
     msgs = []
     try:
-        if not out_low.exists():
-            hits = sorted(glob.glob(str(ld / low_glob)))
+        if not _is_valid_npy(out_low):
+            if out_low.exists():
+                msgs.append("low: found TRUNCATED, reprocessing")
+            hits = glob.glob(str(ld / low_glob))
             if not hits:
                 return f"[skip] {ld.name}: no DISCO shells ({low_glob})"
-            lo = np.load(hits[0], allow_pickle=False)["shells"]
-            np.save(out_low, _to_nside(lo, nside))
+            # Potentially several gpu_grid_* runs exist (e.g. restarts/reruns)
+            # -> Pick most recent
+            latest = max(hits, key=lambda h: Path(h).stat().st_mtime)
+            lo = np.load(latest, allow_pickle=False)["shells"]
+            _atomic_save(out_low, _to_nside(lo, nside))
             msgs.append(f"low({lo.shape[0]})")
-        if not out_high.exists():
+        if not _is_valid_npy(out_high):
+            if out_high.exists():
+                msgs.append("high: found TRUNCATED, reprocessing")
             hi = np.load(ld / high_npz, allow_pickle=False)["shells"]
-            np.save(out_high, _to_nside(hi, nside))
+            _atomic_save(out_high, _to_nside(hi, nside))
             msgs.append(f"high({hi.shape[0]})")
         return f"[ok] {ld}: {', '.join(msgs) if msgs else 'already prepared'}"
     except Exception as e:

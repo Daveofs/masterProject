@@ -16,11 +16,15 @@ from tqdm import tqdm
 
 def _resolve_low(ld, low_name, low_glob):
     """Resolve the low (DISCO) shells path: a glob (real cosmogridv1 layout with
-    disco_sim/<gpu_grid_*>/disco_shells_nside=2048.npz) or a plain filename."""
+    disco_sim/<gpu_grid_*>/disco_shells_nside=2048.npz) or a plain filename.
+    When multiple gpu_grid_* runs exist (e.g. restarts/reruns), pick the most
+    recently modified one rather than the alphabetically first."""
     if low_glob:
         import glob as _g
-        hits = sorted(_g.glob(str(ld / low_glob)))
-        return Path(hits[0]) if hits else None
+        hits = _g.glob(str(ld / low_glob))
+        if not hits:
+            return None
+        return Path(max(hits, key=lambda h: Path(h).stat().st_mtime))
     p = ld / low_name
     return p if p.exists() else None
 
@@ -34,7 +38,7 @@ def process_single_run(task_args):
     out_high_path = ld / f"high_alms_lmax{lmax}.npy"
 
     if out_low_path.exists() and out_high_path.exists():
-        return f"[Skipped] {ld.name} (Already transformed)"
+       return f"[Skipped] {ld.name} (Already transformed)"
 
     try:
         low_path = _resolve_low(ld, low_name, low_glob)

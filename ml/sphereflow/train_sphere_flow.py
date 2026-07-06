@@ -35,7 +35,7 @@ import torch
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 
-import masterProject.ml.sphereflow.sphere_flow as sf
+import sphere_flow as sf
 
 
 def is_main():
@@ -44,9 +44,15 @@ def is_main():
 
 def setup_ddp():
     if "RANK" in os.environ and "WORLD_SIZE" in os.environ:
+        from datetime import timedelta
         local = int(os.environ["LOCAL_RANK"])
         torch.cuda.set_device(local)
-        dist.init_process_group("nccl", device_id=torch.device(f"cuda:{local}"))
+        # Collective timeout. Data is now RUN-MAJOR (one big sequential read per
+        # run feeds ~1600 steps), so per-step Lustre stragglers are gone -> a long
+        # timeout just wastes 30 min per hang while debugging. 10 min still tolerates
+        # the one-time 14 GB run load; a genuinely hung/desynced rank fails 3x faster.
+        dist.init_process_group("nccl", device_id=torch.device(f"cuda:{local}"),
+                                timeout=timedelta(minutes=10))
         return local, int(os.environ["RANK"]), int(os.environ["WORLD_SIZE"])
     return 0, 0, 1
 
@@ -116,56 +122,86 @@ class ResidualStreamer:
         self.formulation = formulation
         self.rng = np.random.RandomState(seed)
         self.seed = seed
-        self._mm = {}
-        # (run_idx, shell_idx, n_shells_in_run) sample list
-        self.samples = []
-        for ri, (tc, hi, _v) in enumerate(runs):
-            n = min(np.load(tc, mmap_mode="r").shape[0],
-                    np.load(hi, mmap_mode="r").shape[0])
-            self.samples += [(ri, si, n) for si in range(n)]
+        # Per-run shell counts (peek headers only — no data read).
+        self._n = [min(np.load(tc, mmap_mode="r").shape[0],
+                       np.load(hi, mmap_mode="r").shape[0])
+                   for tc, hi, _v in runs]
 
     @property
     def n_shells(self):
-        return len(self.samples)
+        return int(sum(self._n))
 
-    def _mmap(self, path):
-        k = str(path)
-        if k not in self._mm:
-            self._mm[k] = np.load(k, mmap_mode="r")
-        return self._mm[k]
-
-    def _shell_xy(self, ri, si, n_run):
-        tc_path, hi_path, cosmo = self.runs[ri]
-        tc = np.asarray(self._mmap(tc_path)[si], dtype=np.float32)
-        hi = np.asarray(self._mmap(hi_path)[si], dtype=np.float32)
+    def _process_shell(self, tc, hi, si, n_run, cosmo):
+        """Build (x1_patches, cond_patches, cvec) from one shell already in RAM."""
         d_tc, _ = sf.to_overdensity(tc[None]); d_hi, _ = sf.to_overdensity(hi[None])
         cond = sf.signal_forward(d_tc, self.sig_scale, self.soft)
         sig_hi = sf.signal_forward(d_hi, self.sig_scale, self.soft)
-        if self.formulation == "direct":
-            x1 = sig_hi
-        else:
-            x1 = (sig_hi - cond) / self.resid_scale
+        x1 = sig_hi if self.formulation == "direct" \
+            else (sig_hi - cond) / self.resid_scale
         shell_norm = np.float32(si / max(n_run - 1, 1))
         cvec = np.concatenate([cosmo, [shell_norm]]).astype(np.float32)
         return (sf.map_to_patches(x1, self.order),
                 sf.map_to_patches(cond, self.order), cvec)
 
-    def batches(self, batch_size, device):
+    def batches(self, batch_size, device, prefetch=4):
         import threading
         import queue as _q
-        q = _q.Queue(maxsize=3)
+        import gc
+        # RUN-MAJOR streaming: load ONE run's file pair fully into RAM with a
+        # SEQUENTIAL np.load (fast), then serve all its shells from RAM before
+        # moving to the next run. The previous global random shuffle of shells
+        # across all 44 runs made the mmap thrash between 14 GB files -> Lustre
+        # random-seek contention dominated (~90% of wall). Each run's ~69 shells
+        # feed ~1600 steps of compute, so the one-time 14 GB sequential read per
+        # run is negligible and overlaps the queue drain. RAM: ~one run pair
+        # (~28 GB) + a few processed shells (bounded queue).
+        q = _q.Queue(maxsize=prefetch)
         prod_rng = np.random.RandomState(self.seed + 991)
 
         def producer():
-            order = np.arange(len(self.samples))
-            while True:
-                prod_rng.shuffle(order)
-                for k in order:
-                    q.put(self._shell_xy(*self.samples[k]))
+            # A daemon thread that raises is SILENT: its exception is swallowed and
+            # the consumer's q.get() blocks forever -> at scale that shows up only as
+            # a 30-min NCCL collective timeout on every OTHER rank (impossible to
+            # diagnose). So: skip a shell/run that fails to process (logged), and if
+            # something unrecoverable happens, push the exception to the queue so the
+            # consumer RAISES it with a real traceback instead of hanging.
+            run_order = np.arange(len(self.runs))
+            try:
+                while True:
+                    prod_rng.shuffle(run_order)
+                    for ri in run_order:
+                        tc_path, hi_path, cosmo = self.runs[ri]
+                        try:
+                            low = np.load(tc_path)      # full SEQUENTIAL read into RAM
+                            high = np.load(hi_path)
+                        except Exception as e:
+                            print(f"[streamer WARN] seed={self.seed} skipping run "
+                                  f"{tc_path}: load failed: {e}", flush=True)
+                            continue
+                        n = min(low.shape[0], high.shape[0])
+                        shells = prod_rng.permutation(n)
+                        for si in shells:
+                            try:
+                                item = self._process_shell(
+                                    np.asarray(low[si], np.float32),
+                                    np.asarray(high[si], np.float32), int(si), n, cosmo)
+                            except Exception as e:
+                                print(f"[streamer WARN] seed={self.seed} skipping shell "
+                                      f"{si} of {tc_path}: {e}", flush=True)
+                                continue
+                            q.put(item)
+                        del low, high
+                        gc.collect()
+            except Exception as e:            # unrecoverable: hand the error to consumer
+                import traceback as _tb
+                q.put(("__PRODUCER_ERROR__", f"{e}\n{_tb.format_exc()}"))
 
         threading.Thread(target=producer, daemon=True).start()
         while True:
-            x1p, cp, cvec = q.get()
+            item = q.get()
+            if isinstance(item, tuple) and len(item) == 2 and item[0] == "__PRODUCER_ERROR__":
+                raise RuntimeError(f"data producer thread died:\n{item[1]}")
+            x1p, cp, cvec = item
             idx = self.rng.permutation(x1p.shape[0])
             if self.patch_frac < 1.0:
                 idx = idx[: max(int(len(idx) * self.patch_frac), batch_size)]
@@ -232,12 +268,28 @@ def train(args):
     L = sf.healpix_laplacian(args.nside, order=args.order)
     net = sf.SphereFlowNet(L, cond_dim=cond_dim, hidden=args.hidden,
                            n_layers=args.n_layers, K=args.K).to(dev)
+
+    # ---- resume from checkpoint (transient fabric/NCCL failures at scale keep
+    # killing multi-hour jobs; with checkpoints a crash costs minutes, not the
+    # run). Model state is loaded BEFORE compile/DDP so the keys match the raw
+    # module; optimizer/scheduler state is loaded after they are created below.
+    Path(args.out_dir).mkdir(parents=True, exist_ok=True)
+    ckpt_path = Path(args.out_dir) / "checkpoint.pt"
+    ckpt = None
+    if ckpt_path.exists() and not args.fresh:
+        ckpt = torch.load(ckpt_path, map_location=dev)
+        net.load_state_dict(ckpt["model"])
+        if is_main():
+            print(f"[resume] loaded {ckpt_path} at step {ckpt['step']:,}", flush=True)
+
     if args.compile:
         net = torch.compile(net)
     if world > 1:
         net = DDP(net, device_ids=[local], broadcast_buffers=False)
     # NOTE: the loss must go through `net` (the DDP wrapper) so gradient allreduce
     # fires — v1 passed the unwrapped module and silently trained per-rank models.
+    raw_mod = net.module if world > 1 else net
+    raw_mod = getattr(raw_mod, "_orig_mod", raw_mod)   # unwrap torch.compile
 
     opt = torch.optim.AdamW(net.parameters(), lr=args.lr, weight_decay=1e-5)
     streamer = ResidualStreamer(my_runs, args.nside, args.order, sig_scale,
@@ -249,25 +301,86 @@ def train(args):
     total_steps = steps_per_epoch * args.epochs
     sched = torch.optim.lr_scheduler.LambdaLR(
         opt, lambda s: 0.5 * (1 + math.cos(math.pi * min(s / total_steps, 1.0))))
+
+    start_step, loss_hist, ema = 0, [], None
+    if ckpt is not None:
+        opt.load_state_dict(ckpt["opt"])
+        sched.load_state_dict(ckpt["sched"])
+        start_step = int(ckpt["step"])
+        ema = ckpt.get("ema", None)
+        loss_hist = list(ckpt.get("loss_hist", []))
+
     if is_main():
         print(f"[train] {streamer.n_shells} shells/rank | ~{steps_per_epoch:,} steps/epoch "
               f"x {args.epochs} = {total_steps:,} | batch/gpu={args.batch_size} | "
-              f"patch_frac={args.patch_frac} | compile={args.compile}", flush=True)
+              f"patch_frac={args.patch_frac} | compile={args.compile} | "
+              f"start_step={start_step:,}", flush=True)
+
+    def save_ckpt(step):
+        # atomic: torch.save to tmp then rename (a killed job must never leave a
+        # truncated checkpoint at the final name — same lesson as prepare_maps).
+        tmp = ckpt_path.with_suffix(f".tmp{os.getpid()}")
+        torch.save({"step": step, "model": raw_mod.state_dict(),
+                    "opt": opt.state_dict(), "sched": sched.state_dict(),
+                    "ema": ema, "loss_hist": loss_hist}, tmp)
+        os.replace(tmp, ckpt_path)
 
     net.train()
     it = streamer.batches(args.batch_size, dev)
-    t0, loss_hist, ema = time.time(), [], None
-    for step in range(1, total_steps + 1):
+    t0 = time.time()
+    last_t, last_step = t0, start_step   # for WINDOWED (instantaneous) steps/s
+    # DIAGNOSTIC heartbeat: a whole node (highest ranks) deterministically stops
+    # participating in the collective at ~step 13,254 regardless of data/compile/
+    # checkpoint. Print per-RANK, per-PHASE around that window so the hang's exact
+    # location (data load / forward / finite all-reduce / backward) is visible.
+    HB_LO = int(os.environ.get("HB_LO", "0"))
+    HB_HI = int(os.environ.get("HB_HI", "0"))
+    def hb(phase):
+        if HB_LO <= step <= HB_HI:
+            print(f"[hb] rank{rank} step{step} {phase}", flush=True)
+    for step in range(start_step + 1, total_steps + 1):
+        hb("A:pre-data")
         x1, cond, cosmo = next(it)
+        hb("B:got-data")
         opt.zero_grad()
         with torch.autocast("cuda", dtype=torch.bfloat16, enabled=args.amp):
             loss = sf.flow_matching_loss(net, x1, cond, cosmo)
-        if not torch.isfinite(loss):
+        hb("C:loss-done")
+        # Non-finite guard MUST be collective: each rank trains on its OWN data
+        # stream (seed=rank), so at a given step one rank can get a non-finite
+        # loss while the others are fine. If that single rank `continue`s and
+        # skips loss.backward(), it never enters the DDP gradient all-reduce that
+        # the other ranks DO enter -> they block forever on the missing peer ->
+        # ncclSystemError (this was the deterministic "step 13,254" crash that the
+        # PTLTE_NOT_FOUND flood was merely a symptom of). Agree across ALL ranks:
+        # if ANY rank is non-finite, EVERY rank skips backward this step together.
+        finite = torch.isfinite(loss).to(torch.float32).detach()   # 1.0 / 0.0, on GPU
+        hb("D:pre-finite-allreduce")
+        if world > 1:
+            dist.all_reduce(finite, op=dist.ReduceOp.MIN)   # 0 if any rank non-finite
+        hb("E:post-finite-allreduce")
+        if finite.item() < 1.0:
             opt.zero_grad(set_to_none=True); sched.step()
             if is_main():
-                print(f"  step {step}: non-finite, skipped", flush=True)
+                print(f"  step {step}: non-finite loss on >=1 rank, skipped (all ranks)",
+                      flush=True)
             continue
         loss.backward()
+        hb("F:backward-done")
+        if HB_LO <= step <= HB_HI:
+            # per-rank loss + pre-clip grad norm. Accessing p.grad forces a sync on
+            # the (async) gradient all-reduce, so: if a rank PRINTS this, its grads
+            # arrived and we can see if values exploded (inf/huge => numerical bug);
+            # if a rank does NOT print this, it is stuck IN the grad all-reduce
+            # itself (pure comms hang, grads never arrived).
+            with torch.no_grad():
+                gn = 0.0
+                for p in raw_mod.parameters():
+                    if p.grad is not None:
+                        gn += float((p.grad.detach().float() ** 2).sum())
+                gn = gn ** 0.5
+            print(f"[hb] rank{rank} step{step} G:loss={float(loss):.3e} gradnorm={gn:.3e}",
+                  flush=True)
         torch.nn.utils.clip_grad_norm_(net.parameters(), 1.0)
         opt.step(); sched.step()
         if is_main():
@@ -276,16 +389,26 @@ def train(args):
             # actual convergence trend is readable in the log.
             ema = lv if ema is None else 0.98 * ema + 0.02 * lv
             if step % args.log_every == 0:
+                now = time.time()
+                # WINDOWED rate over the last log interval (NOT cumulative since
+                # start): cumulative is dragged down for a long time by the one-off
+                # startup (first 14 GB run load + torch.compile) and misleadingly
+                # reads ~0 even when steady-state throughput is fine.
+                inst = (step - last_step) / max(now - last_t, 1e-9)
+                eta_h = (total_steps - step) / max(inst, 1e-9) / 3600.0
+                avg = (step - start_step) / max(now - t0, 1e-9)
                 print(f"  step {step:,}/{total_steps:,} | loss={lv:.4f} ema={ema:.4f} | "
-                      f"{step/(time.time()-t0):.2f} steps/s | lr={sched.get_last_lr()[0]:.2e}",
-                      flush=True)
+                      f"{inst:.2f} steps/s (avg {avg:.2f}) | ETA {eta_h:.1f}h | "
+                      f"lr={sched.get_last_lr()[0]:.2e}", flush=True)
+                last_t, last_step = now, step
                 loss_hist.append(ema)
+            if step % args.ckpt_every == 0:
+                save_ckpt(step)
 
     if is_main():
         out = Path(args.out_dir); out.mkdir(parents=True, exist_ok=True)
-        raw = net.module if world > 1 else net
-        raw = getattr(raw, "_orig_mod", raw)      # unwrap torch.compile
-        torch.save(raw.state_dict(), out / "sphere_flow.pth")
+        save_ckpt(total_steps)                    # final checkpoint too
+        torch.save(raw_mod.state_dict(), out / "sphere_flow.pth")
         np.savez(out / "meta.npz", nside=args.nside, order=args.order, K=args.K,
                  hidden=args.hidden, n_layers=args.n_layers, cond_dim=cond_dim,
                  sig_scale=sig_scale, resid_scale=resid_scale,
@@ -322,6 +445,12 @@ if __name__ == "__main__":
     p.add_argument("--compile", action="store_true", default=True)
     p.add_argument("--no-compile", dest="compile", action="store_false")
     p.add_argument("--log-every", type=int, default=20)
+    p.add_argument("--ckpt-every", type=int, default=500,
+                   help="Save an atomic checkpoint every N steps; on restart the run "
+                        "auto-resumes from out-dir/checkpoint.pt (fabric/NCCL crashes "
+                        "then cost minutes, not the whole run).")
+    p.add_argument("--fresh", action="store_true",
+                   help="Ignore an existing checkpoint and start from scratch.")
     p.add_argument("--out-dir", default="./sphere_flow_model")
     args = p.parse_args()
     try:

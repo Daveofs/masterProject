@@ -19,7 +19,7 @@ import healpy as hp
 import torch
 import yaml
 
-import masterProject.ml.almflow.flow_matching_alm as fm
+import flow_matching_alm as fm
 
 
 def load_model(model_dir, device):
