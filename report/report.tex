@@ -49,40 +49,47 @@ where $\delta = (\rho - \bar\rho)/\bar\rho$ is the dimensionless matter overdens
 \subsubsection{Matter Power Spectrum and Transfer Function}
 \label{sec:power_spectrum}
 
-While the tidal-tensor classification above describes the cosmic web \emph{qualitatively}, its statistical properties are quantified through the matter power spectrum $P(k)$. Writing the density contrast in Fourier space as $\delta(\mathbf{k})$, and assuming statistical homogeneity and isotropy, the power spectrum is defined through
+While the tidal-tensor classification above describes the cosmic web \emph{qualitatively}, its statistical content is captured by the matter power spectrum $P(k)$. Writing the density contrast in Fourier space as $\delta(\mathbf{k})$ and assuming statistical homogeneity and isotropy, the power spectrum is defined through
 \begin{equation}
   \big\langle \delta(\mathbf{k})\, \delta^*(\mathbf{k}')\big\rangle = (2\pi)^3\, \delta_D(\mathbf{k}-\mathbf{k}')\, P(k),
   \label{eq:power_spectrum_def}
 \end{equation}
-where $\delta_D$ is the Dirac delta and the angle brackets denote an ensemble average over realisations of the initial conditions. \cite{dodelson_modern_2020, huterer_growth_2023} Simplified we can express it
+where $\delta_D$ is the Dirac delta and the angle brackets denote an ensemble average over realisations of the initial conditions \cite{dodelson_modern_2020, huterer_growth_2023}. In linear theory the shape of $P(k)$ factorises into three physically distinct pieces,
 \begin{equation}
-    P(k) \propto k^{n_s}T^2(k)
+  P(k, a) \;\propto\; \underbrace{k^{n_s}}_{\text{primordial}}\; \underbrace{T^2(k)}_{\text{transfer}}\; \underbrace{D^2(a)}_{\text{growth}},
+  \label{eq:pk_factorised}
 \end{equation}
-with $n_s$ the scalar spectral index. \cite{huterer_growth_2023, eisenstein_baryonic_1998} Further we can simplify the transfer function $T(k)$ to 
+where $n_s \simeq 0.96$ is the scalar spectral index of the near scale-invariant primordial spectrum, $D(a)$ is the linear growth factor, and $T(k)$ is the transfer function encoding how each mode evolves through the radiation- and matter-dominated eras \cite{huterer_growth_2023, eisenstein_baryonic_1998}.
+\vspace{\sectionvspace} \\
+The transfer function is normalised so that $T(k)\to 1$ on large scales ($k \ll k_{\mathrm{eq}}$), where modes enter the horizon only after matter--radiation equality and grow unimpeded. Modes that enter during radiation domination ($k \gg k_{\mathrm{eq}}$) are instead suppressed by the near-absence of growth in that era, so that for cold dark matter $T(k) \propto (k_{\mathrm{eq}}/k)^2 \ln(k/k_{\mathrm{eq}})$ \cite{bardeen_statistics_1986, eisenstein_baryonic_1998}. The two regimes meet at the equality scale, fixed by the comoving horizon at matter--radiation equality,
 \begin{equation}
-    T(k) = 1 - \frac{k}{k_{eq}} + ...  
+  k_{\mathrm{eq}} = a_{\mathrm{eq}}\, H(a_{\mathrm{eq}}) = H_0\,\sqrt{\frac{2\,\Omega_m^2}{\Omega_r}}, \qquad a_{\mathrm{eq}} = \frac{\Omega_r}{\Omega_m},
+  \label{eq:keq}
 \end{equation}
-with $k_{eq} = H_0\sqrt{\frac{2\Omega_m}{\Omega_r}}$. \cite{bardeen_statistics_1986, eisenstein_baryonic_1998} We see that the transfer function is an essential component of the power matter spectrum, as also the matter and radiation density. We also see that transfer function is dependent on the neutrino mass, as visualized in Figure \ref{fig:transfer_function}. 
+so that $P(k)$ turns over from $P \propto k^{n_s}$ on large scales to $P \propto k^{n_s-4}\ln^2 k$ on small scales. The location of this turnover, and hence the whole broadband shape of $P(k)$, is therefore set directly by the matter and radiation densities $\Omega_m$ and $\Omega_r$.
+\vspace{\sectionvspace} \\
+Massive neutrinos leave a characteristic imprint on this shape. While relativistic they free-stream out of overdense regions, erasing perturbations below their free-streaming scale and suppressing $T(k)$ -- and hence $P(k)$ -- on small scales by an amount that grows with the summed neutrino mass $\sum m_\nu$ \cite{lesgourgues_massive_2006, lesgourgues_neutrino_2012}. Figure~\ref{fig:transfer_function} shows this dependence for three values of the neutrino mass, $m_\nu = 0$, $0.009$ and $0.05$~eV.
 \begin{figure}[h!]
     \centering
     \includegraphics[width=0.8\linewidth]{plots/background/transfer_function.png}
-    \caption{\cite{lesgourgues_massive_2006}}
+    \caption{Linear matter transfer function for three neutrino-mass configurations ($m_\nu = 0,\,0.009,\,0.05$~eV, red curves): increasing the neutrino mass suppresses power on small scales relative to the massless case. Reproduced from \cite{lesgourgues_massive_2006}.}
     \label{fig:transfer_function}
 \end{figure}
-There are three red curves regarding the neutrino mass $m_{\nu_1}=0$, $m_{\nu_2} = 0.009$ and $m_{\nu_3} = 0.05$ eV. \cite{lesgourgues_neutrino_2012,lesgourgues_massive_2006} Also this will have a an effect on angular power spectrum $C_l$, which is defined as
+\vspace{\sectionvspace} \\
+Because the observables in this thesis are maps on the sky, the three-dimensional $P(k)$ must be projected onto the sphere. Integrating the density field along the line of sight against a radial window $W(\chi)$ and invoking the Limber approximation, the angular power spectrum $C_\ell$ reduces to a single integral over the matter power spectrum,
 \begin{equation}
-    C_l \approx \int  k^2P(k) dk
+  C_\ell \approx \int \frac{\mathrm{d}\chi}{\chi^2}\, W^2(\chi)\, P\!\left(k = \frac{\ell + 1/2}{\chi},\, \chi\right),
+  \label{eq:cl_limber}
 \end{equation}
-is the fourier transfrom of the power matter spectrum. \cite{seljak_line_1996}.
-\begin{figure}
+so that the neutrino suppression in $P(k)$ propagates into a suppression of $C_\ell$ towards high multipoles $\ell$ \cite{seljak_line_1996}. This projection, and its sensitivity to the input $P(k)$, underlies the lightcone statistics compared later in this thesis; the corresponding neutrino effect on the angular spectrum is illustrated in Figure~\ref{fig:neutrino_cl}.
+\begin{figure}[h!]
     \centering
     \includegraphics[width=0.8\linewidth]{plots/background/neutrinos_effect.png}
-    \caption{\cite{lesgourgues_massive_2006}}
-    \label{fig:placeholder}
+    \caption{Effect of the neutrino mass on the angular (and matter) power spectrum: the small-scale suppression of $P(k)$ carries over to high multipoles of $C_\ell$. Reproduced from \cite{lesgourgues_massive_2006}.}
+    \label{fig:neutrino_cl}
 \end{figure}
-This fundamental for this project since later we will see its influence, when generating the initial conditions for the simulations. 
 \vspace{\sectionvspace} \\
-Obtaining $P(k)$ precisely, including this transfer function, requires solving the coupled linear Einstein--Boltzmann equations for the perturbed Friedmann--Lema\^itre--Robertson--Walker metric and the phase-space distributions of all matter and radiation species -- the same system solved by the differentiable Einstein--Boltzmann module of the Disco-DJ framework used later in this thesis \cite{hahn_disco-dj_2024}.
+Obtaining $P(k)$ -- and in particular the transfer function $T(k)$ -- to the accuracy required here means solving the coupled linear Einstein--Boltzmann equations for the perturbed Friedmann--Lema\^itre--Robertson--Walker metric and the phase-space distributions of all matter and radiation species, massive neutrinos included. This is precisely the system solved by the differentiable Einstein--Boltzmann module of the Disco-DJ framework used later in this thesis \cite{hahn_disco-dj_2024}.
 
 \subsubsection{Lightcones and Snapshots}
 
@@ -95,17 +102,31 @@ Because the depth of the desired lightcone (out to some $z_{\max}$) is typically
 Cosmological $N$-body simulations have historically tracked, and in some respects driven, the development of high-performance computing: the number of particles that can be evolved in a fixed wall-clock time has grown by many orders of magnitude over the past decades, both because of raw hardware improvements and because of continual gains in the efficiency of the gravity solvers themselves \cite{potter_pkdgrav3_2016}. The scientific payoff of these simulations lies in their ability to model the large-scale structure (LSS) of the Universe to the non-linear precision that photometric surveys require. LSS observables are particularly sensitive to the present-day matter density $\Omega_m$ and the amplitude of matter clustering $\sigma_8$; because a lightcone simulation can be sliced into tomographic redshift bins, it further allows the growth of structure to be tracked over cosmic time, which is what makes such simulations sensitive to the dark-energy equation-of-state parameter $w_0$ (and its possible time evolution) and hence to the physical origin of cosmic acceleration \cite{kacprzak_cosmogridv1_2023}.
 
 \subsubsection{DISCO-DJ}
+\label{sec:discodj}
 
-All forward models implemented in Disco-Dj are concerned with computing an approximate solution to the cosmological Vlasov–Poisson system: 
-
-df dt = ∂tf + p  a2 · ∇xf + g  a · ∇pf = 0, where g := −∇xφ, (2.1)  see e.g. [56, 57] for recent reviews. Here, f = f (x, p, t) is the phase-space distribution function, where the coordinates x are comoving in a universe expanding with a scale factor a(t).
-
-We now turn towards the ingredients for PM (particle mesh) simulations. A key component is the time integration scheme used for the temporal discretisation of the Vlasov–Poisson system (2.1). To make a connection with the previous sections, we note that it is possible in fact to design integrators that exactly trace perturbative trajectories up to a certain order, while higher-order truncation errors decrease as the step size is reduced [78–80]. A single PM time step would then compute, e.g., 2LPT trajectories (up to higher-order terms, and with the caveat that discretisation errors arise due to the Eulerian PM-based force computation, compared to the Lagrangian evaluation of quantities in LPT).  Disco-Dj supports different drift-kick-drift leapfrog/Verlet steppers of the form: 
-
-X n+1/2  i = Xn  i + τ1V n  i ,  V n+1  i = αV n  i + βA(Xn+1/2  i ),  X n+1  i = X n+1/2  i + τ2V n+1  i .
-Here, Xn  i denotes the position of particle i at the nth time step, A(Xn+1/2  i ) is the acceleration evaluated in the middle of the full time step (i.e. after the first drift), τ = τ1 + τ2 is the time step size, and α and β are coefficients that may depend on both the current time and time step. For the velocity variable V n  i (and the associated time step variable τ ), different choices are supported, such as  • the canonical momentum variable V = a2X ̇ with τ = R an+1  an (H(a)a3)−1 da and  • the growth-time velocity V = dX/dD = X ̇ /(aH(a)D′(a)) with τ = Dn+1 − Dn,  where the overdot denotes a derivative w.r.t. cosmic time. symplectic Zeldovich consistent integrator.  Recently, Ref. [80] built onto the analysis of Ref. [79] and derived the BullFrog integrator, which corresponds to the unique choice of α and β that aligns the N -body trajectory with 2LPT after each time step in its regime of validity:  α = E′(Dn+1) − ξn+1/2  E′(Dn) − ξn+1/2  , β = (1 − α)Dn+1/2, (2.16)  – 10 where  ξ = D−1  n+1/2 En + E′(Dn) Dn+1 − Dn  2 − Dn+1/2, (2.17)  and E = −(3/7)D2 − (3/1001)ΛD5 + O(Λ2D8) with Λ := ΩΛ/Ωm is the second-order growth function (see Appendix B for the defining ordinary differential equation). 1 In view of its superior performance, BullFrog is the default integrator in DiscoDJ, yielding accurate predictions already with very few steps. \cite{list_disco-dj_2026}
+Disco-DJ (\emph{Differentiable Simulations for Cosmology -- Done with JAX}) is a particle-mesh (PM) code whose entire forward model is GPU-accelerated and differentiable, so that gradients of any output with respect to the input parameters -- or the initial conditions themselves -- are available through automatic differentiation \cite{list_disco-dj_2026}. Like any $N$-body method it approximates the collisionless dynamics of dark matter, i.e.\ a solution of the cosmological Vlasov--Poisson system for the phase-space distribution $f(\mathbf{x},\mathbf{p},t)$,
+\begin{equation}
+  \frac{\partial f}{\partial t} + \frac{\mathbf{p}}{a^2}\cdot\nabla_{\mathbf{x}} f - \nabla_{\mathbf{x}}\phi\cdot\nabla_{\mathbf{p}} f = 0,
+  \qquad \nabla_{\mathbf{x}}^2\phi = \frac{3\,\Omega_m H_0^2}{2a}\,\delta,
+  \label{eq:vlasov_poisson}
+\end{equation}
+where $\mathbf{x}$ are comoving coordinates, $\mathbf{p} = a^2\dot{\mathbf{x}}$ the conjugate momentum, $a(t)$ the scale factor, and $\phi$ the peculiar gravitational potential sourced by the density contrast $\delta$ through the Poisson equation \cite{list_disco-dj_2026}.
+\vspace{\sectionvspace} \\
+In the PM scheme the potential is not summed particle-by-particle, as in the tree/FMM solver of Sec.~\ref{sec:pkdgrav}, but obtained on a regular grid: the particles are deposited onto a mesh to give $\delta$, the Poisson equation is solved in Fourier space with a single FFT (where $\nabla^2 \to -k^2$), and the force $-\nabla_{\mathbf{x}}\phi$ is interpolated back to each particle. A force evaluation is thus global and cheap, at the price of a spatial resolution limited by the mesh spacing -- the origin of the small-scale inaccuracy discussed in Sec.~\ref{sec:pipeline}.
+\vspace{\sectionvspace} \\
+Time integration uses a drift--kick--drift leapfrog step. Writing $\mathbf{X}_i^n$ for the position of particle $i$ at step $n$ and $\mathbf{V}_i^n$ for its velocity variable, one step of size $\tau = \tau_1 + \tau_2$ reads
+\begin{align}
+  \mathbf{X}_i^{\,n+1/2} &= \mathbf{X}_i^{\,n} + \tau_1\,\mathbf{V}_i^{\,n}, \nonumber\\
+  \mathbf{V}_i^{\,n+1} &= \alpha\,\mathbf{V}_i^{\,n} + \beta\,\mathbf{A}\!\left(\mathbf{X}_i^{\,n+1/2}\right), \\
+  \mathbf{X}_i^{\,n+1} &= \mathbf{X}_i^{\,n+1/2} + \tau_2\,\mathbf{V}_i^{\,n+1}, \nonumber
+  \label{eq:dkd}
+\end{align}
+where $\mathbf{A}$ is the PM acceleration evaluated at the half-step position and $\alpha,\beta$ are coefficients that may depend on time and step size. Different choices of the velocity variable and time coordinate are supported -- for example the canonical momentum $\mathbf{V} = a^2\dot{\mathbf{X}}$, or the growth-time velocity $\mathbf{V} = \mathrm{d}\mathbf{X}/\mathrm{d}D$ that uses the linear growth factor $D(a)$ itself as the time variable \cite{list_disco-dj_2026}.
+\vspace{\sectionvspace} \\
+The key idea exploited by Disco-DJ is that $\alpha$ and $\beta$ can be chosen so that a single PM step reproduces perturbation theory exactly in its regime of validity. Its default \emph{BullFrog} integrator fixes $\alpha,\beta$ such that each step follows the second-order Lagrangian perturbation theory (2LPT) trajectory on large scales, with the higher-order truncation error shrinking as the step is refined \cite{list_disco-dj_2026}. Because the large-scale evolution is then correct by construction, per-cent-level accuracy in the present-day power spectrum is reached with only a handful of steps -- e.g.\ about $6$ steps at $k \approx 0.2\,h/\mathrm{Mpc}$ for $512^3$ particles -- which is what makes Disco-DJ fast enough to act as the cheap forward model in this work \cite{list_disco-dj_2026}.
 
 \subsubsection{Pkdgrav}
+\label{sec:pkdgrav}
 
 The gravity solver \textsc{PkdGrav3} computes the gravitational force with a binary-tree Fast Multipole Method (FMM): rather than only approximating a distant tree cell's effect on individual particles (as in a Barnes--Hut tree code), it also expands the potential \emph{within} a receiving cell sourced by a distant cell, an interaction that lets the cost of a full force evaluation scale as $\mathcal{O}(N)$ instead of $\mathcal{O}(N\log N)$ \cite[Sec.~3.1]{potter_pkdgrav3_2016}. \vspace{\sectionvspace} \\ 
 Because particles in different regions of a cosmological box span many orders of magnitude in local density, and hence in dynamical time, a single global time step would be highly wasteful. \textsc{PkdGrav3} instead assigns each particle to one of several time-step ``rungs'', advancing only the particles active on a given rung at each sub-step, and additionally builds a second, smaller tree restricted to the small subset of particles on the shortest (``very active'') rungs so that this frequently-rebuilt tree stays cheap; the combination is summarised by the kick-drift-kick ``umbrella'' diagram over one base time step, see Figure \ref{fig:pkd_rungs}. This dual-tree multi-stepping scheme is what keeps the tree-construction cost from dominating the runtime even though the shortest rungs may be walked hundreds of times per base step \cite[Sec.~3.2]{potter_pkdgrav3_2016}. \vspace{\sectionvspace} \\ 
@@ -124,19 +145,21 @@ CosmoGridV1 is a large, publicly released suite of lightcone $N$-body simulation
 
 \section{Methods and implementation}
 \subsection{Pipeline Architecture}
-\underline{Limitations and Solutions}
+\label{sec:pipeline}
 
-The problem of comosgrid an pkdgrav is that we have much longer simulation time.
-The alternative framework to it is by using the fast disco simulation. The tradeoff we have with disco here is that we have less precision on small scales. So to overall goal is:
+The reference suite CosmoGridV1 evolves every realisation with \textsc{PkdGrav3} (Sec.~\ref{sec:pkdgrav}), whose FMM force solver and adaptive time-stepping resolve structure accurately down to small scales. That accuracy is expensive: each lightcone costs many node-hours, so the millions of realisations required for map-level, simulation-based inference dominate the total cost of the analysis \cite{kacprzak_cosmogridv1_2023, potter_pkdgrav3_2016}.
+\vspace{\sectionvspace} \\
+Disco-DJ offers the opposite trade-off. Its particle-mesh solver and theory-informed BullFrog stepper (Sec.~\ref{sec:discodj}) reproduce the same large-scale clustering in seconds rather than hours, but the force resolution is capped by the PM grid, so power is progressively lost on small scales -- exactly the scales that carry much of the non-Gaussian information exploited by the deep-learning analysis \cite{list_disco-dj_2026}.
+\vspace{\sectionvspace} \\
+The aim of this work is therefore to keep Disco-DJ's speed while recovering the small-scale content that \textsc{PkdGrav3} would have produced. Formally, we seek a correction $f$ acting on the cheap lightcone maps such that
+\begin{equation}
+  f\!\left(\mathrm{Map}_{\textsc{disco}}\right) \;\approx\; \mathrm{Map}_{\textsc{CosmoGrid}},
+  \label{eq:correction_goal}
+\end{equation}
+where both maps are generated from the \emph{same} initial conditions and cosmology, so that $f$ has only to model the resolution-dependent difference between the two solvers, not any change of realisation.
 
-Let $f(Map)$ be some small scale corrections function
-
-\[
-f(Map_{disco}) \approx Map_{Cosmogrid}
-\]
-
-
-First we planned to do an AI-correction, but a better approach was with correcting the angular power matter spectrum for high dipole l.  
+\paragraph{Limitations and solutions.}
+Two routes to $f$ were considered. The first is a direct, image-level neural-network correction that maps $\mathrm{Map}_{\textsc{disco}}$ onto $\mathrm{Map}_{\textsc{CosmoGrid}}$ pixel by pixel. This is expressive, but heavy: full-sky HEALPix maps at $N_{\mathrm{side}} = 2048$ ($\sim 5\times 10^{7}$ pixels) are large, live on the sphere rather than on a flat grid, and do not fit on a single GPU without tiling into patches (Sec.~\ref{sec:network}). The second route, adopted here, works in harmonic space and corrects the angular power spectrum $C_\ell$ of the Disco-DJ maps at high multipole $\ell$, where the PM resolution deficit is concentrated. Operating on $C_\ell$ is far cheaper, is naturally defined on the sphere, and targets the deficit exactly where Eq.~\eqref{eq:cl_limber} shows it appears; the trade-off is that it corrects a summary statistic rather than the full field.
 
 
 \subsection{IC generation}
@@ -148,8 +171,13 @@ Before using \textsc{disco}'s shell builder (Sec.~\ref{sec:shell_builder_core}) 
 
 \subsubsection{Backscaled initial conditions and hand-off to \textsc{disco}}
 
-As described in section \ref{sec:power_spectrum} we have to ensure that we are dealing with deliver a correct transfer function with the correct neutrino mass. Since this has an influence on directly, if it matches the cosmogridv1. 
-
+The initial conditions handed to \textsc{disco} must reproduce, at $z=0$, the same linear clustering as CosmoGridV1. This is enforced by \emph{back-scaling}: rather than seeding the box with the linear power spectrum evaluated at the starting redshift $z_i$, we take the target present-day linear spectrum $P(k, z{=}0)$ and scale it back to $z_i$ with the scale-independent linear growth factor,
+\begin{equation}
+  P(k, z_i) = \left(\frac{D(z_i)}{D(0)}\right)^{2} P(k, z{=}0).
+  \label{eq:backscaling}
+\end{equation}
+A Newtonian $N$-body (or PM) code neglects the radiation and the scale-dependent neutrino free-streaming that shape the true transfer function at early times; back-scaling absorbs those effects into the initial amplitude, so that forward Newtonian evolution recovers the correct linear $P(k)$ -- and hence the correct transfer function $T(k)$ of Sec.~\ref{sec:power_spectrum} -- at $z=0$ \cite{dodelson_modern_2020}. The present-day $P(k)$ itself, including the transfer function evaluated at the CosmoGridV1 neutrino mass $\sum m_\nu = 0.06$~eV, is obtained from the differentiable Einstein--Boltzmann solver of Disco-DJ \cite{hahn_disco-dj_2024, kacprzak_cosmogridv1_2023}. Matching this transfer function -- and in particular its neutrino-induced small-scale suppression (Sec.~\ref{sec:power_spectrum}, Fig.~\ref{fig:transfer_function}) -- is what guarantees that the \textsc{disco} run begins from a state statistically consistent with the reference CosmoGridV1 cosmology.
+\vspace{\sectionvspace} \\
 The resulting particle positions and velocities at $a_i = 1/(1+z_i)$ are exported and used, unmodified, as the initial condition for the corresponding \textsc{disco} run: \textsc{disco} evolves this state forward to $a=1$ and accumulates the lightcone with the shell builder of Sec.~\ref{sec:shell_builder_core} over the same redshift range, $z_{\max}=3.5$ down to $z=0$, at the same HEALPix resolution $N_{\mathrm{side}}=2048$.
 \subsection{Shell Builder}
 
@@ -289,6 +317,7 @@ This procedure reproduces the corner-observer, box-replication scheme of \textsc
 
 
 \subsection{Neural Network}
+\label{sec:network}
 \subsubsection{Dimensional Reduction}
 VRAM issues -> patches or in spherical harmonics
 \subsubsection{Data preparation}
@@ -301,39 +330,55 @@ VRAM issues -> patches or in spherical harmonics
 \section{Computational Infrastructure}
 \subsection{Computing Environments}
 
-The code development went through several stages. Starting locally with only testing and seeing how things works towards more complex architecture inside of an cluster. 
+Development proceeded in stages of increasing scale, from a local workstation used for prototyping to two GPU clusters used for production runs.
 
 \subsubsection{Local Development}
 
-We first implemented disco and pkdgrav on a local device, to see what it needs to run. This also makes sense, since one have direct ouptut, which can be checked and fixed directly. This much more time efficient, than when dealing with clusters. For some simple tests we used a low resolution $res=16$, which lead to a total particle number of $16^3=4096$. A local setup can easily deal with it and also terminate under minute. The problem starts when we want to have higher resolutions, this lead directly to RAM error, since 
+Both \textsc{disco} and \textsc{PkdGrav3} were first set up on a local machine, to establish a minimal working configuration and to inspect their output interactively. Running locally shortens the debugging loop considerably: results can be plotted and checked immediately, without the queueing latency of a batch system. Small tests used a resolution of $16^3 = 4096$ particles, which completes in under a minute on a single core. The binding constraint is memory: storing only the phase-space state (three positions and three velocities per particle, in single precision) already for a CosmoGridV1-sized run,
 \[
-res=832 \rightarrow 832^3 = 5\cdot10^8 \text{ particles} \rightarrow ... \text{GB},
+  832^3 \approx 5.8\times10^{8}\ \text{particles} \times 24\ \text{bytes} \approx 14\ \text{GB},
 \]
-which is mostly not available on simple computers. 
+exceeds the RAM of a typical workstation before any tree, mesh, or lightcone buffers are added. Production resolutions therefore require a cluster.
 
-\subsubsection{Euler (ETH)}
+\subsubsection{Euler (ETH Z\"urich)}
 
-On the cluster we have created virtual environments for each module (pkdgrav, disco), since some libraries conflict with others and therefore we have to treat it seperately.  But regarding the resources we are now able to use higher resolutions as $res=832$. We can also use GPU supported version, which can lead to a massive speed up. Nevertheless the allocations for this simulations can lead to a rather long runtime depending on what configuration is used. We can therefore adapt to handle multi-node configurations.
+On ETH's Euler cluster we built a separate virtual environment for each code, because \textsc{disco} and \textsc{PkdGrav3} have conflicting library dependencies that cannot coexist in a single environment. Euler provides the memory and the GPU partitions needed to run at the full $832^3$ resolution, with substantial speed-ups from the GPU-accelerated builds. Depending on the configuration a single simulation can still be long-running, so jobs are distributed across multiple nodes where the code supports it.
 
-\subsubsection{CSCS (Alps/Piz Daint)}
+\subsubsection{CSCS (Alps / Piz Daint)}
 
-Here we can use the very efficient NVIDIA GH200 with 120 GB of VRAM. This is perfect for scaling up and to reduce the runtimes for each simulation, either for generating the training pairs or for a training of the model itself.  
+The largest runs use the CSCS Alps system, whose NVIDIA GH200 nodes provide 120~GB of on-package memory. This large VRAM is well suited to scaling Disco-DJ up and to shortening the wall-clock time of each run, whether generating the training pairs or, later, training the network itself.
 
 \subsection{Software Engineering}
 \subsubsection{Code Structure}
 
-We saved all the important executable and virtual environments side of the HOME directory of the cluster, since it's not dropped at any times. Since the storage in home is limited to a specific amount, we saved the output into SCRATCH. For example we submitted a transfer job from globus to entrypoint of CSCS to transfer all data from Cosmogridv1 of size 110 $TB$. But also for sure much smaller size of data as for example all logs for each job submission. This was very helpful for debugging and also for later look ups, to compare. Also important plots of snpashots and shells are stored inside of that. 
+Executables and virtual environments are kept in the cluster \texttt{HOME} directory, which is persistent and backed up. Because \texttt{HOME} has a strict quota, all bulk output is written instead to \texttt{SCRATCH}: simulation snapshots and shell maps, per-job logs, and diagnostic plots of snapshots and shells. Keeping the full log of every submission proved valuable both for debugging and for later cross-run comparison. The CosmoGridV1 reference data ($\sim 110$~TB) was transferred to the CSCS entry point with a dedicated Globus transfer job.
 
+\subsubsection{Job Scheduling and Submission}
 
+Every Python script is paired with a Slurm batch script. The Python entry point is written to run unchanged both locally and on the cluster, while the accompanying batch script requests the resources and captures the output. The same job can then be launched interactively (\texttt{bash}, for fast monitoring in the terminal) or submitted to the queue (\texttt{sbatch}, to run detached and log to file). A representative submission script is shown below.
 
-\subsubsection{ Job Scheduling and Submissions}
+\begin{verbatim}
+#!/bin/bash
+#SBATCH --nodes=2
+#SBATCH --exclusive
+#SBATCH --job-name=discodj-custom
+#SBATCH --partition=normal
+#SBATCH --account=sk037
+#SBATCH --ntasks-per-node=1
+#SBATCH --time=01:00:00
+#SBATCH --gres=gpu:4                    # GPUs per node
+#SBATCH --output=/capstor/scratch/cscs/damrein/outputs/logs/disco_custom/slurm-%j.out
+#SBATCH --error=/capstor/scratch/cscs/damrein/outputs/logs/disco_custom/slurm-%j.err
+#SBATCH --chdir=/capstor/scratch/cscs/damrein/outputs/disco_custom
 
-For each python script we have also created an bash file. This was very useful since the python script could be used locally, but also on the cluster and the bash file of it was inside of the cluster for job submission either with $sbatch$ or $bash$. That way we were able to control, if we want to monitor output very fast inside of the terminal or if we want to run it in the background and store it. 
-
+# 1. activate the code-specific virtual environment
+# 2. define paths and simulation parameters
+# 3. run the Python driver
+\end{verbatim}
 
 \subsubsection{Version Control (GitHub)}
 
-A very important decision was to create a new repository for the project (all scripts) and also the modified DISCO with shell builder. This is useful to have certain safety, if the computer crashes or when losing overview. So there is always the possibility to restore an older working version. 
+The whole project -- the analysis scripts together with the modified \textsc{disco} that includes the shell builder -- is kept in a dedicated Git repository. Beyond the usual protection against machine failure, this gives a reliable way to return to a known-good state when an experimental change breaks the pipeline, and keeps the many configuration variants organised.
 
 
 \section{Results}

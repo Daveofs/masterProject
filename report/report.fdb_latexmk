@@ -1,16 +1,17 @@
 # Fdb version 4
-["biber report"] 0 "report.bcf" "report.bbl" "report" 1783431692.43334 0
-  "references.bib" 0 -1 0 ""
-  "report.bcf" 0 -1 0 "pdflatex"
+["biber report"] 1783432589.88603 "report.bcf" "report.bbl" "report" 1783433283.48689 0
+  "references.bib" 1783432264.08357 42477 83da97f6113c05924b6ba581771f3fee ""
+  "report.bcf" 1783433283.42402 112376 15558997ba6df5cc5414a184e929b247 "pdflatex"
   (generated)
   "report.bbl"
   "report.blg"
   (rewritten before read)
-["pdflatex"] 1783431691.57769 "/Users/david/projects/masterProject/report/report.tex" "report.pdf" "report" 1783431692.43359 2
-  "/Users/david/projects/masterProject/report/report.tex" 1783431690.14641 33624 26ea1a26fd2d7177ffbbf409d2009930 ""
+["pdflatex"] 1783433282.19145 "/Users/david/projects/masterProject/report/report.tex" "report.pdf" "report" 1783433283.48713 0
+  "/Users/david/projects/masterProject/report/report.tex" 1783433002.4129 41071 f8cb804145556c846e520c5cf3e320b9 ""
   "/usr/local/texlive/2025/texmf-dist/fonts/enc/dvips/cm-super/cm-super-ts1.enc" 1136849721 2900 1537cc8184ad1792082cd229ecc269f4 ""
   "/usr/local/texlive/2025/texmf-dist/fonts/map/fontname/texfonts.map" 1577235249 3524 cb3e574dea2d1052e39280babc910dc8 ""
   "/usr/local/texlive/2025/texmf-dist/fonts/tfm/jknappen/ec/tcrm1000.tfm" 1136768653 1536 e07581a4bb3136ece9eeb4c3ffab8233 ""
+  "/usr/local/texlive/2025/texmf-dist/fonts/tfm/jknappen/ec/tcti1000.tfm" 1136768653 2048 3777f70f4372b17e2d3fda2b5684af05 ""
   "/usr/local/texlive/2025/texmf-dist/fonts/tfm/public/amsfonts/cmextra/cmex7.tfm" 1246382020 1004 54797486969f23fa377b128694d548df ""
   "/usr/local/texlive/2025/texmf-dist/fonts/tfm/public/amsfonts/cmextra/cmex8.tfm" 1246382020 988 bdf658c3bfc2d96d3c8b02cfc1c94c20 ""
   "/usr/local/texlive/2025/texmf-dist/fonts/tfm/public/amsfonts/symbols/msam10.tfm" 1246382020 916 f87d7c45f9c908e672703b83b72241a3 ""
@@ -41,6 +42,7 @@
   "/usr/local/texlive/2025/texmf-dist/fonts/tfm/public/cm/cmtt10.tfm" 1136768653 768 1321e9409b4137d6fb428ac9dc956269 ""
   "/usr/local/texlive/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmbx10.pfb" 1248133631 34811 78b52f49e893bcba91bd7581cdc144c0 ""
   "/usr/local/texlive/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmbx12.pfb" 1248133631 32080 340ef9bf63678554ee606688e7b5339d ""
+  "/usr/local/texlive/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmbx7.pfb" 1248133631 32007 e8fa0078355f39467039935974716569 ""
   "/usr/local/texlive/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmbx9.pfb" 1248133631 32298 c6d25bb16d1eac01ebdc6d7084126a1e ""
   "/usr/local/texlive/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmcsc10.pfb" 1248133631 32001 6aeea3afe875097b1eb0da29acd61e28 ""
   "/usr/local/texlive/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmex10.pfb" 1248133631 30251 6afa5cb1d0204815a708a080681d4674 ""
@@ -59,6 +61,7 @@
   "/usr/local/texlive/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmtt10.pfb" 1248133631 31099 c85edf1dd5b9e826d67c9c7293b6786c ""
   "/usr/local/texlive/2025/texmf-dist/fonts/type1/public/amsfonts/symbols/msbm10.pfb" 1248133631 34694 ad62b13721ee8eda1dcc8993c8bd7041 ""
   "/usr/local/texlive/2025/texmf-dist/fonts/type1/public/cm-super/sfrm1000.pfb" 1215737283 138258 6525c253f16cededa14c7fd0da7f67b2 ""
+  "/usr/local/texlive/2025/texmf-dist/fonts/type1/public/cm-super/sfti1000.pfb" 1215737283 186554 e8f0fa8ca05e038f257a06405232745f ""
   "/usr/local/texlive/2025/texmf-dist/tex/context/base/mkii/supp-pdf.mkii" 1461363279 71627 94eb9990bed73c364d7f53f960cc8c5b ""
   "/usr/local/texlive/2025/texmf-dist/tex/generic/iftex/iftex.sty" 1734129479 7984 7dbb9280f03c0a315425f1b4f35d43ee ""
   "/usr/local/texlive/2025/texmf-dist/tex/generic/infwarerr/infwarerr.sty" 1575499628 8356 7bbb2c2373aa810be568c29e333da8ed ""
@@ -112,14 +115,15 @@
   "/usr/local/texlive/2025/texmf-var/fonts/map/pdftex/updmap/pdftex.map" 1769698027 5467155 19efa205003f9ecad95fbbaa6ff24da1 ""
   "/usr/local/texlive/2025/texmf-var/web2c/pdftex/pdflatex.fmt" 1769697921 3345739 7b1738d193bbf8447227a8c722250453 ""
   "/usr/local/texlive/2025/texmf.cnf" 1741450484 577 418a7058ec8e006d8704f60ecd22c938 ""
-  "plots/background/crossing_condition.png" 0 -1 0 ""
-  "plots/background/neutrinos_effect.png" 0 -1 0 ""
-  "plots/background/pkdgrav_rungs.png" 0 -1 0 ""
-  "plots/background/transfer_function.png" 0 -1 0 ""
-  "report.aux" 1783431692.27156 10286 7e7d21edeb832afc1241bd0900cf59aa "pdflatex"
-  "report.bbl" 0 -1 0 "biber report"
-  "report.tex" 1783431690.14641 33624 26ea1a26fd2d7177ffbbf409d2009930 ""
-  "report.toc" 1783431692.27431 2934 a4f9323f30a9a9c6a3b13803f8dbb6f3 "pdflatex"
+  "plots/background/crossing_condition.png" 1783433271.31696 100143 7f00565fd69245d899de3b3899fd7ddd ""
+  "plots/background/neutrinos_effect.png" 1783433271.30082 271799 c41f482729a7780b0dfa4351f13b3e15 ""
+  "plots/background/pkdgrav_rungs.png" 1783433271.29428 131171 a1e5a6501f2b601c96b76256d079056b ""
+  "plots/background/transfer_function.png" 1783433271.28275 236388 181aa56a104eb2b3d410f290dc0760c2 ""
+  "report.aux" 1783433283.42134 13729 ae0d38783198d966e7b12cc965d04bc0 "pdflatex"
+  "report.bbl" 1783432600.41022 59118 c4b1e05c98b91ea4cbf7c76f429793a1 "biber report"
+  "report.run.xml" 1783433283.42455 2319 1dbeae9c91c70510d621aca3b4772e83 "pdflatex"
+  "report.tex" 1783433002.4129 41071 f8cb804145556c846e520c5cf3e320b9 ""
+  "report.toc" 1783433283.42459 3009 00abc2cb7f2789c6bb7ca2db2f10c22d "pdflatex"
   (generated)
   "report.aux"
   "report.bcf"
