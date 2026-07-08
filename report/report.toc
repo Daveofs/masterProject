@@ -3,40 +3,40 @@
 \contentsline {subsection}{\numberline {2.1}Cosmological Framework}{3}{}%
 \contentsline {subsubsection}{\numberline {2.1.1}The Cosmic Web}{3}{}%
 \contentsline {subsubsection}{\numberline {2.1.2}Matter Power Spectrum and Transfer Function}{4}{}%
-\contentsline {subsubsection}{\numberline {2.1.3}Lightcones and Snapshots}{6}{}%
+\contentsline {subsubsection}{\numberline {2.1.3}Lightcones and Snapshots}{5}{}%
 \contentsline {subsection}{\numberline {2.2}Cosmological Simulations}{6}{}%
 \contentsline {subsubsection}{\numberline {2.2.1}DISCO-DJ}{6}{}%
 \contentsline {subsubsection}{\numberline {2.2.2}Pkdgrav}{7}{}%
 \contentsline {subsubsection}{\numberline {2.2.3}CosmoGridV1}{8}{}%
-\contentsline {section}{\numberline {3}Methods and implementation}{9}{}%
-\contentsline {subsection}{\numberline {3.1}Pipeline Architecture}{9}{}%
+\contentsline {section}{\numberline {3}Methods and implementation}{8}{}%
+\contentsline {subsection}{\numberline {3.1}Pipeline Architecture}{8}{}%
 \contentsline {paragraph}{Limitations and solutions.}{9}{}%
-\contentsline {subsection}{\numberline {3.2}IC generation}{10}{}%
-\contentsline {subsubsection}{\numberline {3.2.1}Validation against CosmoGridV1}{10}{}%
-\contentsline {subsubsection}{\numberline {3.2.2}Backscaled initial conditions and hand-off to \textsc {disco}}{10}{}%
+\contentsline {subsection}{\numberline {3.2}IC generation}{9}{}%
+\contentsline {subsubsection}{\numberline {3.2.1}Validation against CosmoGridV1}{9}{}%
+\contentsline {subsubsection}{\numberline {3.2.2}Backscaled initial conditions and hand-off to \textsc {disco}}{9}{}%
 \contentsline {subsection}{\numberline {3.3}Shell Builder}{10}{}%
 \contentsline {subsubsection}{\numberline {3.3.1}Core}{10}{}%
-\contentsline {paragraph}{Time discretization.}{11}{}%
-\contentsline {paragraph}{Accumulation procedure.}{11}{}%
-\contentsline {paragraph}{Output.}{12}{}%
-\contentsline {subsubsection}{\numberline {3.3.2}Crossing Condition}{12}{}%
+\contentsline {paragraph}{Time discretization.}{10}{}%
+\contentsline {paragraph}{Accumulation procedure.}{10}{}%
+\contentsline {paragraph}{Output.}{11}{}%
+\contentsline {subsubsection}{\numberline {3.3.2}Crossing Condition}{11}{}%
 \contentsline {paragraph}{Periodic replicas.}{12}{}%
-\contentsline {paragraph}{Linear crossing formula.}{13}{}%
+\contentsline {paragraph}{Linear crossing formula.}{12}{}%
 \contentsline {paragraph}{Shell assignment and pixelization.}{13}{}%
-\contentsline {subsection}{\numberline {3.4}Neural Network}{14}{}%
-\contentsline {subsubsection}{\numberline {3.4.1}Dimensional Reduction}{14}{}%
+\contentsline {subsection}{\numberline {3.4}Neural Network}{13}{}%
+\contentsline {subsubsection}{\numberline {3.4.1}Dimensional Reduction}{13}{}%
 \contentsline {subsubsection}{\numberline {3.4.2}Data preparation}{14}{}%
 \contentsline {subsubsection}{\numberline {3.4.3}Network Architecture}{14}{}%
 \contentsline {subsubsection}{\numberline {3.4.4}Training Procedure}{14}{}%
 \contentsline {subsubsection}{\numberline {3.4.5}Validation Strategy}{14}{}%
-\contentsline {section}{\numberline {4}Computational Infrastructure}{15}{}%
-\contentsline {subsection}{\numberline {4.1}Computing Environments}{15}{}%
-\contentsline {subsubsection}{\numberline {4.1.1}Local Development}{15}{}%
+\contentsline {section}{\numberline {4}Computational Infrastructure}{14}{}%
+\contentsline {subsection}{\numberline {4.1}Computing Environments}{14}{}%
+\contentsline {subsubsection}{\numberline {4.1.1}Local Development}{14}{}%
 \contentsline {subsubsection}{\numberline {4.1.2}Euler (ETH Z\"urich)}{15}{}%
-\contentsline {subsubsection}{\numberline {4.1.3}CSCS (Alps / Piz Daint)}{16}{}%
-\contentsline {subsection}{\numberline {4.2}Software Engineering}{16}{}%
-\contentsline {subsubsection}{\numberline {4.2.1}Code Structure}{16}{}%
-\contentsline {subsubsection}{\numberline {4.2.2}Job Scheduling and Submission}{16}{}%
-\contentsline {subsubsection}{\numberline {4.2.3}Version Control (GitHub)}{17}{}%
-\contentsline {section}{\numberline {5}Results}{17}{}%
+\contentsline {subsubsection}{\numberline {4.1.3}CSCS (Alps / Piz Daint)}{15}{}%
+\contentsline {subsection}{\numberline {4.2}Software Engineering}{15}{}%
+\contentsline {subsubsection}{\numberline {4.2.1}Code Structure}{15}{}%
+\contentsline {subsubsection}{\numberline {4.2.2}Job Scheduling and Submission}{15}{}%
+\contentsline {subsubsection}{\numberline {4.2.3}Version Control (GitHub)}{16}{}%
+\contentsline {section}{\numberline {5}Results}{16}{}%
 \contentsline {section}{\numberline {6}Conclusion}{17}{}%

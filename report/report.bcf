@@ -2389,9 +2389,9 @@
     <bcf:citekey order="12" intorder="1">bardeen_statistics_1986</bcf:citekey>
     <bcf:citekey order="12" intorder="2">eisenstein_baryonic_1998</bcf:citekey>
     <bcf:citekey order="13" intorder="1">lesgourgues_massive_2006</bcf:citekey>
-    <bcf:citekey order="13" intorder="2">lesgourgues_neutrino_2012</bcf:citekey>
     <bcf:citekey order="14" intorder="1">lesgourgues_massive_2006</bcf:citekey>
-    <bcf:citekey order="15" intorder="1">lesgourgues_massive_2006</bcf:citekey>
+    <bcf:citekey order="15" intorder="1">lesgourgues_neutrino_2012</bcf:citekey>
+    <bcf:citekey order="15" intorder="2">lesgourgues_massive_2006</bcf:citekey>
     <bcf:citekey order="16" intorder="1">seljak_line_1996</bcf:citekey>
     <bcf:citekey order="17" intorder="1">lesgourgues_massive_2006</bcf:citekey>
     <bcf:citekey order="18" intorder="1">lesgourgues_massive_2006</bcf:citekey>
@@ -2415,13 +2415,10 @@
     <bcf:citekey order="36" intorder="1">kacprzak_cosmogridv1_2023</bcf:citekey>
     <bcf:citekey order="36" intorder="2">potter_pkdgrav3_2016</bcf:citekey>
     <bcf:citekey order="37" intorder="1">list_disco-dj_2026</bcf:citekey>
-    <bcf:citekey order="38" intorder="1">dodelson_modern_2020</bcf:citekey>
-    <bcf:citekey order="39" intorder="1">hahn_disco-dj_2024</bcf:citekey>
-    <bcf:citekey order="39" intorder="2">kacprzak_cosmogridv1_2023</bcf:citekey>
+    <bcf:citekey order="38" intorder="1">noauthor_examplepkdgrav3_lightcone_2022</bcf:citekey>
+    <bcf:citekey order="39" intorder="1">noauthor_examplepkdgrav3_lightcone_2022</bcf:citekey>
     <bcf:citekey order="40" intorder="1">noauthor_examplepkdgrav3_lightcone_2022</bcf:citekey>
-    <bcf:citekey order="41" intorder="1">noauthor_examplepkdgrav3_lightcone_2022</bcf:citekey>
-    <bcf:citekey order="42" intorder="1">noauthor_examplepkdgrav3_lightcone_2022</bcf:citekey>
-    <bcf:citekey order="43" intorder="1">defferrard_deepsphere_2020</bcf:citekey>
+    <bcf:citekey order="41" intorder="1">defferrard_deepsphere_2020</bcf:citekey>
   </bcf:section>
   <!-- SORTING TEMPLATES -->
   <bcf:sortingtemplate name="nty">

@@ -49,47 +49,41 @@ where $\delta = (\rho - \bar\rho)/\bar\rho$ is the dimensionless matter overdens
 \subsubsection{Matter Power Spectrum and Transfer Function}
 \label{sec:power_spectrum}
 
-While the tidal-tensor classification above describes the cosmic web \emph{qualitatively}, its statistical content is captured by the matter power spectrum $P(k)$. Writing the density contrast in Fourier space as $\delta(\mathbf{k})$ and assuming statistical homogeneity and isotropy, the power spectrum is defined through
+While the tidal-tensor classification above describes the cosmic web \emph{qualitatively}, its statistical properties are quantified through the matter power spectrum $P(k)$. Writing the density contrast in Fourier space as $\delta(\mathbf{k})$ and assuming statistical homogeneity and isotropy, the power spectrum is defined through
 \begin{equation}
   \big\langle \delta(\mathbf{k})\, \delta^*(\mathbf{k}')\big\rangle = (2\pi)^3\, \delta_D(\mathbf{k}-\mathbf{k}')\, P(k),
   \label{eq:power_spectrum_def}
 \end{equation}
-where $\delta_D$ is the Dirac delta and the angle brackets denote an ensemble average over realisations of the initial conditions \cite{dodelson_modern_2020, huterer_growth_2023}. In linear theory the shape of $P(k)$ factorises into three physically distinct pieces,
+where $\delta_D$ is the Dirac delta and the angle brackets denote an ensemble average over realisations of the initial conditions \cite{dodelson_modern_2020, huterer_growth_2023}. In a simplified form it can be written as
 \begin{equation}
-  P(k, a) \;\propto\; \underbrace{k^{n_s}}_{\text{primordial}}\; \underbrace{T^2(k)}_{\text{transfer}}\; \underbrace{D^2(a)}_{\text{growth}},
-  \label{eq:pk_factorised}
+    P(k) \propto k^{n_s}\,T^2(k),
 \end{equation}
-where $n_s \simeq 0.96$ is the scalar spectral index of the near scale-invariant primordial spectrum, $D(a)$ is the linear growth factor, and $T(k)$ is the transfer function encoding how each mode evolves through the radiation- and matter-dominated eras \cite{huterer_growth_2023, eisenstein_baryonic_1998}.
-\vspace{\sectionvspace} \\
-The transfer function is normalised so that $T(k)\to 1$ on large scales ($k \ll k_{\mathrm{eq}}$), where modes enter the horizon only after matter--radiation equality and grow unimpeded. Modes that enter during radiation domination ($k \gg k_{\mathrm{eq}}$) are instead suppressed by the near-absence of growth in that era, so that for cold dark matter $T(k) \propto (k_{\mathrm{eq}}/k)^2 \ln(k/k_{\mathrm{eq}})$ \cite{bardeen_statistics_1986, eisenstein_baryonic_1998}. The two regimes meet at the equality scale, fixed by the comoving horizon at matter--radiation equality,
+with $n_s$ the scalar spectral index \cite{huterer_growth_2023, eisenstein_baryonic_1998}. The transfer function $T(k)$ can in turn be approximated by
 \begin{equation}
-  k_{\mathrm{eq}} = a_{\mathrm{eq}}\, H(a_{\mathrm{eq}}) = H_0\,\sqrt{\frac{2\,\Omega_m^2}{\Omega_r}}, \qquad a_{\mathrm{eq}} = \frac{\Omega_r}{\Omega_m},
-  \label{eq:keq}
+    T(k) = 1 - \frac{k}{k_{\mathrm{eq}}} + \dots, \qquad k_{\mathrm{eq}} = H_0\sqrt{\frac{2\Omega_m}{\Omega_r}},
 \end{equation}
-so that $P(k)$ turns over from $P \propto k^{n_s}$ on large scales to $P \propto k^{n_s-4}\ln^2 k$ on small scales. The location of this turnover, and hence the whole broadband shape of $P(k)$, is therefore set directly by the matter and radiation densities $\Omega_m$ and $\Omega_r$.
-\vspace{\sectionvspace} \\
-Massive neutrinos leave a characteristic imprint on this shape. While relativistic they free-stream out of overdense regions, erasing perturbations below their free-streaming scale and suppressing $T(k)$ -- and hence $P(k)$ -- on small scales by an amount that grows with the summed neutrino mass $\sum m_\nu$ \cite{lesgourgues_massive_2006, lesgourgues_neutrino_2012}. Figure~\ref{fig:transfer_function} shows this dependence for three values of the neutrino mass, $m_\nu = 0$, $0.009$ and $0.05$~eV.
+\cite{bardeen_statistics_1986, eisenstein_baryonic_1998}. The transfer function is therefore an essential ingredient of the matter power spectrum, alongside the matter and radiation densities. It also depends on the neutrino mass, as illustrated in Figure~\ref{fig:transfer_function}.
 \begin{figure}[h!]
     \centering
     \includegraphics[width=0.8\linewidth]{plots/background/transfer_function.png}
-    \caption{Linear matter transfer function for three neutrino-mass configurations ($m_\nu = 0,\,0.009,\,0.05$~eV, red curves): increasing the neutrino mass suppresses power on small scales relative to the massless case. Reproduced from \cite{lesgourgues_massive_2006}.}
+    \caption{Linear matter transfer function for three neutrino masses (red curves). Reproduced from \cite{lesgourgues_massive_2006}.}
     \label{fig:transfer_function}
 \end{figure}
-\vspace{\sectionvspace} \\
-Because the observables in this thesis are maps on the sky, the three-dimensional $P(k)$ must be projected onto the sphere. Integrating the density field along the line of sight against a radial window $W(\chi)$ and invoking the Limber approximation, the angular power spectrum $C_\ell$ reduces to a single integral over the matter power spectrum,
+The three red curves correspond to the neutrino masses $m_{\nu_1}=0$, $m_{\nu_2}=0.009$ and $m_{\nu_3}=0.05$~eV \cite{lesgourgues_neutrino_2012, lesgourgues_massive_2006}. This in turn affects the angular power spectrum $C_\ell$, which is defined as
 \begin{equation}
-  C_\ell \approx \int \frac{\mathrm{d}\chi}{\chi^2}\, W^2(\chi)\, P\!\left(k = \frac{\ell + 1/2}{\chi},\, \chi\right),
-  \label{eq:cl_limber}
+    C_\ell \approx \int k^2\, P(k)\, \mathrm{d}k,
+    \label{eq:cl}
 \end{equation}
-so that the neutrino suppression in $P(k)$ propagates into a suppression of $C_\ell$ towards high multipoles $\ell$ \cite{seljak_line_1996}. This projection, and its sensitivity to the input $P(k)$, underlies the lightcone statistics compared later in this thesis; the corresponding neutrino effect on the angular spectrum is illustrated in Figure~\ref{fig:neutrino_cl}.
+and is essentially the Fourier transform of the matter power spectrum \cite{seljak_line_1996}.
 \begin{figure}[h!]
     \centering
     \includegraphics[width=0.8\linewidth]{plots/background/neutrinos_effect.png}
-    \caption{Effect of the neutrino mass on the angular (and matter) power spectrum: the small-scale suppression of $P(k)$ carries over to high multipoles of $C_\ell$. Reproduced from \cite{lesgourgues_massive_2006}.}
-    \label{fig:neutrino_cl}
+    \caption{Effect of the neutrino mass on the angular power spectrum. Reproduced from \cite{lesgourgues_massive_2006}.}
+    \label{fig:neutrinos_effect}
 \end{figure}
+This is fundamental for the present project, since its influence reappears later when generating the initial conditions for the simulations.
 \vspace{\sectionvspace} \\
-Obtaining $P(k)$ -- and in particular the transfer function $T(k)$ -- to the accuracy required here means solving the coupled linear Einstein--Boltzmann equations for the perturbed Friedmann--Lema\^itre--Robertson--Walker metric and the phase-space distributions of all matter and radiation species, massive neutrinos included. This is precisely the system solved by the differentiable Einstein--Boltzmann module of the Disco-DJ framework used later in this thesis \cite{hahn_disco-dj_2024}.
+Obtaining $P(k)$ precisely, including this transfer function, requires solving the coupled linear Einstein--Boltzmann equations for the perturbed Friedmann--Lema\^itre--Robertson--Walker metric and the phase-space distributions of all matter and radiation species -- the same system solved by the differentiable Einstein--Boltzmann module of the Disco-DJ framework used later in this thesis \cite{hahn_disco-dj_2024}.
 
 \subsubsection{Lightcones and Snapshots}
 
@@ -159,7 +153,7 @@ The aim of this work is therefore to keep Disco-DJ's speed while recovering the 
 where both maps are generated from the \emph{same} initial conditions and cosmology, so that $f$ has only to model the resolution-dependent difference between the two solvers, not any change of realisation.
 
 \paragraph{Limitations and solutions.}
-Two routes to $f$ were considered. The first is a direct, image-level neural-network correction that maps $\mathrm{Map}_{\textsc{disco}}$ onto $\mathrm{Map}_{\textsc{CosmoGrid}}$ pixel by pixel. This is expressive, but heavy: full-sky HEALPix maps at $N_{\mathrm{side}} = 2048$ ($\sim 5\times 10^{7}$ pixels) are large, live on the sphere rather than on a flat grid, and do not fit on a single GPU without tiling into patches (Sec.~\ref{sec:network}). The second route, adopted here, works in harmonic space and corrects the angular power spectrum $C_\ell$ of the Disco-DJ maps at high multipole $\ell$, where the PM resolution deficit is concentrated. Operating on $C_\ell$ is far cheaper, is naturally defined on the sphere, and targets the deficit exactly where Eq.~\eqref{eq:cl_limber} shows it appears; the trade-off is that it corrects a summary statistic rather than the full field.
+Two routes to $f$ were considered. The first is a direct, image-level neural-network correction that maps $\mathrm{Map}_{\textsc{disco}}$ onto $\mathrm{Map}_{\textsc{CosmoGrid}}$ pixel by pixel. This is expressive, but heavy: full-sky HEALPix maps at $N_{\mathrm{side}} = 2048$ ($\sim 5\times 10^{7}$ pixels) are large, live on the sphere rather than on a flat grid, and do not fit on a single GPU without tiling into patches (Sec.~\ref{sec:network}). The second route, adopted here, works in harmonic space and corrects the angular power spectrum $C_\ell$ of the Disco-DJ maps at high multipole $\ell$, where the PM resolution deficit is concentrated. Operating on $C_\ell$ is far cheaper, is naturally defined on the sphere, and targets the deficit exactly where Eq.~\eqref{eq:cl} relates it to $P(k)$; the trade-off is that it corrects a summary statistic rather than the full field.
 
 
 \subsection{IC generation}
@@ -171,12 +165,7 @@ Before using \textsc{disco}'s shell builder (Sec.~\ref{sec:shell_builder_core}) 
 
 \subsubsection{Backscaled initial conditions and hand-off to \textsc{disco}}
 
-The initial conditions handed to \textsc{disco} must reproduce, at $z=0$, the same linear clustering as CosmoGridV1. This is enforced by \emph{back-scaling}: rather than seeding the box with the linear power spectrum evaluated at the starting redshift $z_i$, we take the target present-day linear spectrum $P(k, z{=}0)$ and scale it back to $z_i$ with the scale-independent linear growth factor,
-\begin{equation}
-  P(k, z_i) = \left(\frac{D(z_i)}{D(0)}\right)^{2} P(k, z{=}0).
-  \label{eq:backscaling}
-\end{equation}
-A Newtonian $N$-body (or PM) code neglects the radiation and the scale-dependent neutrino free-streaming that shape the true transfer function at early times; back-scaling absorbs those effects into the initial amplitude, so that forward Newtonian evolution recovers the correct linear $P(k)$ -- and hence the correct transfer function $T(k)$ of Sec.~\ref{sec:power_spectrum} -- at $z=0$ \cite{dodelson_modern_2020}. The present-day $P(k)$ itself, including the transfer function evaluated at the CosmoGridV1 neutrino mass $\sum m_\nu = 0.06$~eV, is obtained from the differentiable Einstein--Boltzmann solver of Disco-DJ \cite{hahn_disco-dj_2024, kacprzak_cosmogridv1_2023}. Matching this transfer function -- and in particular its neutrino-induced small-scale suppression (Sec.~\ref{sec:power_spectrum}, Fig.~\ref{fig:transfer_function}) -- is what guarantees that the \textsc{disco} run begins from a state statistically consistent with the reference CosmoGridV1 cosmology.
+As described in Section~\ref{sec:power_spectrum}, the initial conditions must be built from a correct transfer function evaluated at the correct neutrino mass, since this directly determines whether the resulting field is consistent with CosmoGridV1.
 \vspace{\sectionvspace} \\
 The resulting particle positions and velocities at $a_i = 1/(1+z_i)$ are exported and used, unmodified, as the initial condition for the corresponding \textsc{disco} run: \textsc{disco} evolves this state forward to $a=1$ and accumulates the lightcone with the shell builder of Sec.~\ref{sec:shell_builder_core} over the same redshift range, $z_{\max}=3.5$ down to $z=0$, at the same HEALPix resolution $N_{\mathrm{side}}=2048$.
 \subsection{Shell Builder}
@@ -355,26 +344,40 @@ Executables and virtual environments are kept in the cluster \texttt{HOME} direc
 
 \subsubsection{Job Scheduling and Submission}
 
-Every Python script is paired with a Slurm batch script. The Python entry point is written to run unchanged both locally and on the cluster, while the accompanying batch script requests the resources and captures the output. The same job can then be launched interactively (\texttt{bash}, for fast monitoring in the terminal) or submitted to the queue (\texttt{sbatch}, to run detached and log to file). A representative submission script is shown below.
+Every Python script is paired with a Slurm batch script. The Python entry point is written to run unchanged both locally and on the cluster, while the accompanying batch script requests the resources and captures the output. The same job can then be launched interactively (\texttt{bash}, for fast monitoring directly in the terminal) or submitted to the queue (\texttt{sbatch}, to run detached and log to file).
+
+Each batch script follows the same two-part layout. The first part is a header of \texttt{\#SBATCH} directives that declares the resource request to the scheduler, and the second is a short execution body that prepares the environment and launches the driver. The header groups naturally into three concerns:
+\begin{itemize}
+  \item \textbf{Resources} -- how much hardware to reserve: the number of \texttt{nodes}, the GPUs per node (\texttt{gres=gpu}), the task layout (\texttt{ntasks-per-node}), \texttt{exclusive} node access, and a wall-clock \texttt{time} limit after which the job is killed.
+  \item \textbf{Accounting} -- where the allocation is charged and queued: the \texttt{account} and the \texttt{partition}.
+  \item \textbf{Bookkeeping} -- where results and diagnostics go: a human-readable \texttt{job-name}, the working directory (\texttt{chdir}), and the \texttt{output}/\texttt{error} log paths, where \texttt{\%j} expands to the unique job ID so that concurrent runs never overwrite one another.
+\end{itemize}
+A representative submission script is shown below.
 
 \begin{verbatim}
 #!/bin/bash
+# --- Resources ---
 #SBATCH --nodes=2
 #SBATCH --exclusive
-#SBATCH --job-name=discodj-custom
-#SBATCH --partition=normal
-#SBATCH --account=sk037
 #SBATCH --ntasks-per-node=1
-#SBATCH --time=01:00:00
 #SBATCH --gres=gpu:4                    # GPUs per node
+#SBATCH --time=01:00:00                 # wall-clock limit (hh:mm:ss)
+# --- Accounting ---
+#SBATCH --account=sk037
+#SBATCH --partition=normal
+# --- Bookkeeping ---
+#SBATCH --job-name=discodj-custom
+#SBATCH --chdir=/capstor/scratch/cscs/damrein/outputs/disco_custom
 #SBATCH --output=/capstor/scratch/cscs/damrein/outputs/logs/disco_custom/slurm-%j.out
 #SBATCH --error=/capstor/scratch/cscs/damrein/outputs/logs/disco_custom/slurm-%j.err
-#SBATCH --chdir=/capstor/scratch/cscs/damrein/outputs/disco_custom
 
+# --- Execution body ---
 # 1. activate the code-specific virtual environment
 # 2. define paths and simulation parameters
 # 3. run the Python driver
 \end{verbatim}
+
+Because only the header changes between runs, adapting a job to a new configuration -- more nodes, a longer time limit, or a different output directory -- amounts to editing a few directives, while the Python driver is reused unchanged.
 
 \subsubsection{Version Control (GitHub)}
 

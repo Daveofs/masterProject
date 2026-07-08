@@ -1,4 +1,4 @@
-This is pdfTeX, Version 3.141592653-2.6-1.40.27 (TeX Live 2025) (preloaded format=pdflatex 2026.1.29)  7 JUL 2026 16:08
+This is pdfTeX, Version 3.141592653-2.6-1.40.27 (TeX Live 2025) (preloaded format=pdflatex 2026.1.29)  7 JUL 2026 16:39
 entering extended mode
  restricted \write18 enabled.
  file:line:error style messages enabled.
@@ -478,82 +478,75 @@ File: umsb.fd 2013/01/14 v3.01 AMS symbols B
 <plots/background/transfer_function.png, id=24, 1103.12125pt x 532.99126pt>
 File: plots/background/transfer_function.png Graphic file (type png)
 <use plots/background/transfer_function.png>
-Package pdftex.def Info: plots/background/transfer_function.png  used on input line 74.
+Package pdftex.def Info: plots/background/transfer_function.png  used on input line 68.
 (pdftex.def)             Requested size: 276.00105pt x 133.35321pt.
+<plots/background/neutrinos_effect.png, id=26, 1319.93124pt x 490.83376pt>
+File: plots/background/neutrinos_effect.png Graphic file (type png)
+<use plots/background/neutrinos_effect.png>
+Package pdftex.def Info: plots/background/neutrinos_effect.png  used on input line 80.
+(pdftex.def)             Requested size: 276.00105pt x 102.63625pt.
 
 
 LaTeX Warning: `!h' float specifier changed to `!ht'.
 
 
 
-[4]
-<plots/background/neutrinos_effect.png, id=32, 1319.93124pt x 490.83376pt>
-File: plots/background/neutrinos_effect.png Graphic file (type png)
-<use plots/background/neutrinos_effect.png>
-Package pdftex.def Info: plots/background/neutrinos_effect.png  used on input line 87.
-(pdftex.def)             Requested size: 276.00105pt x 102.63625pt.
+[4 <./plots/background/transfer_function.png>]
 
-
-[5 <./plots/background/transfer_function.png> <./plots/background/neutrinos_effect.png>]
+[5 <./plots/background/neutrinos_effect.png>]
 
 [6]
-Underfull \hbox (badness 10000) in paragraph at lines 131--133
+Underfull \hbox (badness 10000) in paragraph at lines 125--127
 
  []
+
+<plots/background/pkdgrav_rungs.png, id=43, 586.19pt x 355.3275pt>
+File: plots/background/pkdgrav_rungs.png Graphic file (type png)
+<use plots/background/pkdgrav_rungs.png>
+Package pdftex.def Info: plots/background/pkdgrav_rungs.png  used on input line 130.
+(pdftex.def)             Requested size: 172.5pt x 104.56044pt.
+
+LaTeX Warning: `!h' float specifier changed to `!ht'.
 
 
 
 [7]
-<plots/background/pkdgrav_rungs.png, id=46, 586.19pt x 355.3275pt>
-File: plots/background/pkdgrav_rungs.png Graphic file (type png)
-<use plots/background/pkdgrav_rungs.png>
-Package pdftex.def Info: plots/background/pkdgrav_rungs.png  used on input line 136.
-(pdftex.def)             Requested size: 172.5pt x 104.56044pt.
-
 
 [8 <./plots/background/pkdgrav_rungs.png>]
-Overfull \hbox (16.41043pt too wide) in paragraph at lines 162--163
+Overfull \hbox (16.41043pt too wide) in paragraph at lines 156--157
 \OT1/cmr/m/n/10 di-rect, image-level neural-network cor-rec-tion that maps $[][]$ onto $[][]$
  []
 
 
-LaTeX Warning: Reference `tab:pkdgrav_params' on page 9 undefined on input line 170.
+LaTeX Warning: Reference `tab:pkdgrav_params' on page 9 undefined on input line 164.
+
+
+LaTeX Font Warning: Font shape `OT1/cmr/bx/sc' undefined
+(Font)              using `OT1/cmr/bx/n' instead on input line 166.
 
 
 
 [9]
 
-LaTeX Font Warning: Font shape `OT1/cmr/bx/sc' undefined
-(Font)              using `OT1/cmr/bx/n' instead on input line 172.
-
-
-Overfull \hbox (7.48448pt too wide) in paragraph at lines 178--182
-\OT1/cmr/m/n/10 A New-to-nian $\OML/cmm/m/it/10 N$\OT1/cmr/m/n/10 -body (or PM) code ne-glects the ra-di-a-tion and the scale-dependent
- []
-
-
-
 [10]
-
-[11]
-Overfull \hbox (12.97336pt too wide) in paragraph at lines 245--246
+Overfull \hbox (12.97336pt too wide) in paragraph at lines 234--235
  \OT1/cmr/bx/n/10 Pe-ri-odic repli-cas.[] \OT1/cmr/m/n/10 The ob-server is placed at the box cen-tre, $\OT1/cmr/bx/n/10 o \OT1/cmr/m/n/10 = (\OML/cmm/m/it/10 L=\OT1/cmr/m/n/10 2\OML/cmm/m/it/10 ; L=\OT1/cmr/m/n/10 2\OML/cmm/m/it/10 ; L=\OT1/cmr/m/n/10 2)$,
  []
 
 
-Overfull \hbox (73.8178pt too wide) detected at line 250
+
+[11]
+Overfull \hbox (73.8178pt too wide) detected at line 239
 []\OMS/cmsy/m/n/10 D \OT1/cmr/m/n/10 = [] \OT1/cmr/bx/n/10 d \OT1/cmr/m/n/10 = (\OML/cmm/m/it/10 n[]; n[]; n[]\OT1/cmr/m/n/10 ) \OML/cmm/m/it/10 L  \OT1/cmr/m/n/10 :  \OT1/cmr/bx/n/10 n \OMS/cmsy/m/n/10 2 \U/msb/m/n/10 Z[]\OML/cmm/m/it/10 ;   []^^_[][]\OT1/cmr/bx/n/10 o []
  []
 
 
 
 [12]
-
-[13]
-<plots/background/crossing_condition.png, id=71, 515.0442pt x 515.526pt>
+<plots/background/crossing_condition.png, id=67, 515.0442pt x 515.526pt>
 File: plots/background/crossing_condition.png Graphic file (type png)
 <use plots/background/crossing_condition.png>
-Package pdftex.def Info: plots/background/crossing_condition.png  used on input line 313.
+Package pdftex.def Info: plots/background/crossing_condition.png  used on input line 302.
 (pdftex.def)             Requested size: 172.5pt x 172.66492pt.
 
 
@@ -561,42 +554,57 @@ LaTeX Warning: `!h' float specifier changed to `!ht'.
 
 
 
-[14]
+[13]
 
-[15 <./plots/background/crossing_condition.png>]
-Overfull \hbox (101.24611pt too wide) in paragraph at lines 377--377
+[14 <./plots/background/crossing_condition.png>]
+Overfull \hbox (7.40163pt too wide) in paragraph at lines 351--352
+\OT1/cmr/m/n/10 GPUs per node (\OT1/cmtt/m/n/10 gres=gpu\OT1/cmr/m/n/10 ), the task lay-out (\OT1/cmtt/m/n/10 ntasks-per-node\OT1/cmr/m/n/10 ), \OT1/cmtt/m/n/10 exclusive
+ []
+
+
+
+[15{/usr/local/texlive/2025/texmf-dist/fonts/enc/dvips/cm-super/cm-super-ts1.enc}]
+Overfull \hbox (1.86041pt too wide) in paragraph at lines 353--354
+\OT1/cmtt/m/n/10 job-name\OT1/cmr/m/n/10 , the work-ing di-rec-tory (\OT1/cmtt/m/n/10 chdir\OT1/cmr/m/n/10 ), and the \OT1/cmtt/m/n/10 output\OT1/cmr/m/n/10 /\OT1/cmtt/m/n/10 error \OT1/cmr/m/n/10 log paths,
+ []
+
+
+Overfull \hbox (17.24684pt too wide) in paragraph at lines 378--378
+[]\OT1/cmtt/m/n/10 #SBATCH --time=01:00:00                 # wall-clock limit (hh:mm:ss)[] 
+ []
+
+
+Overfull \hbox (1.49698pt too wide) in paragraph at lines 378--378
+[]\OT1/cmtt/m/n/10 #SBATCH --chdir=/capstor/scratch/cscs/damrein/outputs/disco_custom[] 
+ []
+
+
+Overfull \hbox (101.24611pt too wide) in paragraph at lines 378--378
 []\OT1/cmtt/m/n/10 #SBATCH --output=/capstor/scratch/cscs/damrein/outputs/logs/disco_custom/slurm-%j.out[] 
  []
 
 
-Overfull \hbox (95.99615pt too wide) in paragraph at lines 377--377
+Overfull \hbox (95.99615pt too wide) in paragraph at lines 378--378
 []\OT1/cmtt/m/n/10 #SBATCH --error=/capstor/scratch/cscs/damrein/outputs/logs/disco_custom/slurm-%j.err[] 
- []
-
-
-Overfull \hbox (1.49698pt too wide) in paragraph at lines 377--377
-[]\OT1/cmtt/m/n/10 #SBATCH --chdir=/capstor/scratch/cscs/damrein/outputs/disco_custom[] 
  []
 
 
 
 [16]
-Overfull \hbox (4.38956pt too wide) in paragraph at lines 390--390
+Overfull \hbox (4.38956pt too wide) in paragraph at lines 393--393
 []\OT1/cmr/m/n/10 Micha^^?el Def-fer-rard et al. \OT1/cmr/m/it/10 Deep-Sphere: a graph-based spher-i-cal CNN\OT1/cmr/m/n/10 . Dec. 30,
  []
 
 
 
-[17{/usr/local/texlive/2025/texmf-dist/fonts/enc/dvips/cm-super/cm-super-ts1.enc}]
-Overfull \hbox (0.7008pt too wide) in paragraph at lines 390--390
+[17]
+Overfull \hbox (0.7008pt too wide) in paragraph at lines 393--393
 \OT1/cmr/m/it/10 yond Tril-lion Par-ti-cle Cos-mo-log-i-cal Sim-u-la-tions for the Next Era of Galaxy
  []
 
 
 
-[18]
-
-[19] (./report.aux)
+[18] (./report.aux)
  ***********
 LaTeX2e <2024-11-01> patch level 2
 L3 programming layer <2025-01-18>
@@ -614,17 +622,17 @@ Package logreq Info: Writing requests to 'report.run.xml'.
  ) 
 Here is how much of TeX's memory you used:
  11715 strings out of 473190
- 216756 string characters out of 5715800
- 1038533 words of memory out of 5000000
+ 216784 string characters out of 5715800
+ 1036457 words of memory out of 5000000
  34849 multiletter control sequences out of 15000+600000
  570055 words of font info for 78 fonts, out of 8000000 for 9000
  1141 hyphenation exceptions out of 8191
  66i,10n,81p,2044b,1346s stack positions out of 10000i,1000n,20000p,200000b,200000s
 </usr/local/texlive/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmbx10.pfb></usr/local/texlive/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmbx12.pfb></usr/local/texlive/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmbx7.pfb></usr/local/texlive/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmbx9.pfb></usr/local/texlive/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmcsc10.pfb></usr/local/texlive/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmex10.pfb></usr/local/texlive/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi10.pfb></usr/local/texlive/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi5.pfb></usr/local/texlive/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi7.pfb></usr/local/texlive/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmr10.pfb></usr/local/texlive/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmr12.pfb></usr/local/texlive/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmr17.pfb></usr/local/texlive/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmr5.pfb></usr/local/texlive/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmr7.pfb></usr/local/texlive/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmr8.pfb></usr/local/texlive/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmsy10.pfb></usr/local/texlive/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmsy7.pfb></usr/local/texlive/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmti10.pfb></usr/local/texlive/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmtt10.pfb></usr/local/texlive/2025/texmf-dist/fonts/type1/public/amsfonts/symbols/msbm10.pfb></usr/local/texlive/2025/texmf-dist/fonts/type1/public/cm-super/sfrm1000.pfb></usr/local/texlive/2025/texmf-dist/fonts/type1/public/cm-super/sfti1000.pfb>
-Output written on report.pdf (19 pages, 747603 bytes).
+Output written on report.pdf (18 pages, 747283 bytes).
 PDF statistics:
- 187 PDF objects out of 1000 (max. 8388607)
- 112 compressed objects within 2 object streams
+ 183 PDF objects out of 1000 (max. 8388607)
+ 109 compressed objects within 2 object streams
  0 named destinations out of 1000 (max. 500000)
  21 words of extra memory for PDF output out of 10000 (max. 10000000)
 
