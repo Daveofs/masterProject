@@ -2,44 +2,38 @@
 \usepackage{graphicx} % Required for inserting images
 \usepackage{appendix}
 \usepackage{algorithm}
+\usepackage{minted}
 \usepackage{amssymb}
 \usepackage{algpseudocode}
+\usepackage[left=25mm,top=25mm,right=25mm,bottom=45mm]{geometry}
 \usepackage{amsmath}
 \usepackage{biblatex}
 \addbibresource{references.bib}
-
-% Set vertical spacing within sections
-\newlength{\sectionvspace}
-\setlength{\sectionvspace}{1em}
-
-
-
 \title{AI-Enhanced Fast Cosmological Simulations for Accurate Large-Scale Structure Inference}
-\author{David Amrein }
+\author{David Amrein, Jozef Bucko, Alexandre Refregier }
 \date{\today}
-
 \begin{document}
-
 \maketitle
-
+\begin{figure}[h!]
+    \centering
+    \includegraphics[width=0.8\linewidth]{plots/background/place_holder.png}
+    \caption{cover picture}
+    \label{fig:placeholder}
+\end{figure}
 \tableofcontents
-
 \newpage
 \begin{abstract}
     
 \end{abstract}
-
 \section{Introduction}
 \section{Theoretical Background}
-
 \subsection{Cosmological Framework}
-
 \subsubsection{The Cosmic Web}
 \label{sec:cosmic_web}
 
 On scales of a few to a few hundred megaparsecs, matter in the Universe is not smoothly distributed but arranged into an interconnected network of dense compact knots, elongated filaments, two-dimensional sheets, and large under-dense voids -- collectively known as the \emph{cosmic web} \cite{bond_how_1996, libeskind_tracing_2018}. The term originates with \citeauthor{bond_how_1996}, who showed that this filament-dominated pattern is already present in embryonic form in the tidal field of the initial density perturbations, with the nonlinear gravitational evolution sharpening rather than creating it \cite{bond_how_1996}. The same gravitational instability that seeds this pattern is responsible for its growth: initially small density fluctuations are amplified by their own self-gravity, so that overdense regions contract while voids expand and come to dominate the volume of the Universe \cite{bond_how_1996}. Large galaxy redshift surveys -- 2dFGRS, SDSS, and the 2MASS redshift survey (2MRS) among them -- as well as cosmological $N$-body simulations both recover this same web-like arrangement of galaxies and dark matter \cite{libeskind_tracing_2018}.
-\vspace{\sectionvspace} \\ 
-Gravitational instability drives the emergence of anisotropic structure: because collapse along the direction of a region's strongest tidal compression proceeds fastest, an initially only mildly non-spherical overdensity first flattens into a sheet, then contracts further into a filament, and only finally collapses fully into a compact halo -- the sequence of anisotropic collapse first described by Zel'dovich \cite{libeskind_tracing_2018}. This picture can be made quantitative by looking at the local tidal (or velocity-shear) field. Following the tidal-tensor classification reviewed by \cite{libeskind_tracing_2018}, one computes the Hessian of the (rescaled) gravitational potential $\phi$,
+
+Gravitational instability drives the emergence of anisotropic structure: because collapse along the direction of a region's strongest tidal compression proceeds fastest, an initially only mildly non-spherical overdensity first flattens into a sheet, then contracts further into a filament, and only finally collapses fully into a compact halo -- the sequence of anisotropic collapse first described by Zel'dovich \cite{libeskind_tracing_2018}. This picture can be made quantitative by looking at the local tidal (or velocity-shear) field: following the tidal-tensor classification reviewed by \cite{libeskind_tracing_2018}, one computes the Hessian of the (rescaled) gravitational potential $\phi$,
 \begin{equation}
   T_{\alpha\beta} = \frac{\partial^2 \phi}{\partial x_\alpha \partial x_\beta}, \qquad \nabla^2 \phi = \delta,
   \label{eq:tidal_tensor}
@@ -58,42 +52,44 @@ where $\delta_D$ is the Dirac delta and the angle brackets denote an ensemble av
 \begin{equation}
     P(k) \propto k^{n_s}\,T^2(k),
 \end{equation}
-with $n_s$ the scalar spectral index \cite{huterer_growth_2023, eisenstein_baryonic_1998}. The transfer function $T(k)$ can in turn be approximated by
+with $n_s$ the scalar spectral index \cite{eisenstein_baryonic_1998, huterer_growth_2023}. The transfer function $T(k)$ can in turn be approximated by
 \begin{equation}
     T(k) = 1 - \frac{k}{k_{\mathrm{eq}}} + \dots, \qquad k_{\mathrm{eq}} = H_0\sqrt{\frac{2\Omega_m}{\Omega_r}},
 \end{equation}
-\cite{bardeen_statistics_1986, eisenstein_baryonic_1998}. The transfer function is therefore an essential ingredient of the matter power spectrum, alongside the matter and radiation densities. It also depends on the neutrino mass, as illustrated in Figure~\ref{fig:transfer_function}.
+\cite{bardeen_statistics_1986, eisenstein_baryonic_1998}. The transfer function is therefore an essential ingredient of the matter power spectrum, alongside the matter and radiation densities, and it also depends on the neutrino mass, as illustrated in Figure~\ref{fig:transfer_function}.
+
 \begin{figure}[h!]
     \centering
     \includegraphics[width=0.8\linewidth]{plots/background/transfer_function.png}
     \caption{Linear matter transfer function for three neutrino masses (red curves). Reproduced from \cite{lesgourgues_massive_2006}.}
     \label{fig:transfer_function}
 \end{figure}
-The three red curves correspond to the neutrino masses $m_{\nu_1}=0$, $m_{\nu_2}=0.009$ and $m_{\nu_3}=0.05$~eV \cite{lesgourgues_neutrino_2012, lesgourgues_massive_2006}. This in turn affects the angular power spectrum $C_\ell$, which is defined as
+
+The three red curves correspond to the neutrino masses $m_{\nu_1}=0$, $m_{\nu_2}=0.009$ and $m_{\nu_3}=0.05$~eV \cite{lesgourgues_neutrino_2012, lesgourgues_massive_2006}. This in turn affects $P(k)$, as also the angular power spectrum $C_\ell$, which is defined as
 \begin{equation}
     C_\ell \approx \int k^2\, P(k)\, \mathrm{d}k,
     \label{eq:cl}
 \end{equation}
-and is essentially the Fourier transform of the matter power spectrum \cite{seljak_line_1996}.
+and is essentially the Fourier transform of the $P(k)$ \cite{seljak_line_1996}, illustrated for varying neutrino mass in Figure~\ref{fig:neutrinos_effect}.
+
 \begin{figure}[h!]
     \centering
     \includegraphics[width=0.8\linewidth]{plots/background/neutrinos_effect.png}
     \caption{Effect of the neutrino mass on the angular power spectrum. Reproduced from \cite{lesgourgues_massive_2006}.}
     \label{fig:neutrinos_effect}
 \end{figure}
-This is fundamental for the present project, since its influence reappears later when generating the initial conditions for the simulations.
-\vspace{\sectionvspace} \\
-Obtaining $P(k)$ precisely, including this transfer function, requires solving the coupled linear Einstein--Boltzmann equations for the perturbed Friedmann--Lema\^itre--Robertson--Walker metric and the phase-space distributions of all matter and radiation species -- the same system solved by the differentiable Einstein--Boltzmann module of the Disco-DJ framework used later in this thesis \cite{hahn_disco-dj_2024}.
+
+The dependence on the neutrino mass is not a side note here: it reappears directly when generating the initial conditions for the simulations in Sec.~\ref{sec:ic_generation}, since matching the transfer function -- neutrinos included -- is a precondition for those initial conditions to be consistent with CosmoGridV1. More generally, obtaining $P(k)$ precisely, including this transfer function, requires solving the coupled linear Einstein--Boltzmann equations for the perturbed Friedmann--Lema\^itre--Robertson--Walker metric and the phase-space distributions of all matter and radiation species -- the same system solved by the differentiable Einstein--Boltzmann module of the Disco-DJ framework used later in this thesis \cite{hahn_disco-dj_2024}.
 
 \subsubsection{Lightcones and Snapshots}
 
 An $N$-body simulation naturally outputs \emph{snapshots}: the full particle phase-space (positions and velocities) within a periodic box of fixed comoving side length, at a fixed time. Reproducing how we actually observe the Universe, however, requires a \emph{lightcone}: rather than a single time slice, an observer at a fixed spacetime point receives light emitted from progressively more distant (and hence earlier) shells as one looks to higher redshift, so a simulated lightcone must record particles at the (redshift-dependent) comoving distance from which they are being observed, not at a single global time.
-\vspace{\sectionvspace} \\
-Because the depth of the desired lightcone (out to some $z_{\max}$) is typically larger than a single simulation box, the box is periodically replicated around a centrally placed observer: box replication takes advantage of the fact that a simulation with periodic boundary conditions can, in principle, represent an arbitrarily large volume, at the cost of the same structures reappearing at multiple replica images along a given line of sight \cite{kacprzak_cosmogridv1_2023}. This replication strategy, and the trade-off between box size, structure repetition, and the resulting bias or excess variance in the projected lightcone statistics, is discussed in detail by \cite{kacprzak_cosmogridv1_2023}, who additionally introduce a shell-permutation scheme that mitigates the repeated-structure problem by drawing different radial shells of a single lightcone from independent simulations of the same cosmology.
+
+Because the depth of the desired lightcone (out to some $z_{\max}$) is typically larger than a single simulation box, the box is periodically replicated around a centrally placed observer: box replication takes advantage of the fact that a simulation with periodic boundary conditions can, in principle, represent an arbitrarily large volume, at the cost of the same structures reappearing at multiple replica images along a given line of sight \cite{kacprzak_cosmogridv1_2023}. This replication strategy, and the trade-off between box size, structure repetition, and the resulting bias or excess variance in the projected lightcone statistics, is discussed in detail by \cite{kacprzak_cosmogridv1_2023}, who additionally introduce a shell-permutation scheme that mitigates the repeated-structure problem by drawing different radial shells of a single lightcone from independent simulations of the same cosmology. The shell builder introduced in Sec.~\ref{sec:shell_builder_core} implements the same replication idea directly inside the time integration, rather than as a post-processing step.
 
 \subsection{Cosmological Simulations}
 
-Cosmological $N$-body simulations have historically tracked, and in some respects driven, the development of high-performance computing: the number of particles that can be evolved in a fixed wall-clock time has grown by many orders of magnitude over the past decades, both because of raw hardware improvements and because of continual gains in the efficiency of the gravity solvers themselves \cite{potter_pkdgrav3_2016}. The scientific payoff of these simulations lies in their ability to model the large-scale structure (LSS) of the Universe to the non-linear precision that photometric surveys require. LSS observables are particularly sensitive to the present-day matter density $\Omega_m$ and the amplitude of matter clustering $\sigma_8$; because a lightcone simulation can be sliced into tomographic redshift bins, it further allows the growth of structure to be tracked over cosmic time, which is what makes such simulations sensitive to the dark-energy equation-of-state parameter $w_0$ (and its possible time evolution) and hence to the physical origin of cosmic acceleration \cite{kacprzak_cosmogridv1_2023}.
+Cosmological $N$-body simulations have historically tracked, and in some respects driven, the development of high-performance computing: the number of particles that can be evolved in a fixed wall-clock time has grown by many orders of magnitude over the past decades, both because of raw hardware improvements and because of continual gains in the efficiency of the gravity solvers themselves \cite{potter_pkdgrav3_2016}. The scientific payoff of these simulations lies in their ability to model the large-scale structure (LSS) of the Universe to the non-linear precision that photometric surveys require. LSS observables are particularly sensitive to the present-day matter density $\Omega_m$ and the amplitude of matter clustering $\sigma_8$; because a lightcone simulation can be sliced into tomographic redshift bins, it further allows the growth of structure to be tracked over cosmic time, which is what makes such simulations sensitive to the dark-energy equation-of-state parameter $w_0$ (and its possible time evolution) and hence to the physical origin of cosmic acceleration \cite{kacprzak_cosmogridv1_2023}. Two solvers embody opposite ends of the resulting accuracy-versus-cost trade-off, and both are used in this thesis: the tree-based \textsc{PkdGrav3} (Sec.~\ref{sec:pkdgrav}), which anchors the accurate CosmoGridV1 reference simulations, and the particle-mesh Disco-DJ (Sec.~\ref{sec:discodj}), which is fast enough to generate the large volume of training data our approach requires.
 
 \subsubsection{DISCO-DJ}
 \label{sec:discodj}
@@ -105,25 +101,15 @@ Disco-DJ (\emph{Differentiable Simulations for Cosmology -- Done with JAX}) is a
   \label{eq:vlasov_poisson}
 \end{equation}
 where $\mathbf{x}$ are comoving coordinates, $\mathbf{p} = a^2\dot{\mathbf{x}}$ the conjugate momentum, $a(t)$ the scale factor, and $\phi$ the peculiar gravitational potential sourced by the density contrast $\delta$ through the Poisson equation \cite{list_disco-dj_2026}.
-\vspace{\sectionvspace} \\
-In the PM scheme the potential is not summed particle-by-particle, as in the tree/FMM solver of Sec.~\ref{sec:pkdgrav}, but obtained on a regular grid: the particles are deposited onto a mesh to give $\delta$, the Poisson equation is solved in Fourier space with a single FFT (where $\nabla^2 \to -k^2$), and the force $-\nabla_{\mathbf{x}}\phi$ is interpolated back to each particle. A force evaluation is thus global and cheap, at the price of a spatial resolution limited by the mesh spacing -- the origin of the small-scale inaccuracy discussed in Sec.~\ref{sec:pipeline}.
-\vspace{\sectionvspace} \\
-Time integration uses a drift--kick--drift leapfrog step. Writing $\mathbf{X}_i^n$ for the position of particle $i$ at step $n$ and $\mathbf{V}_i^n$ for its velocity variable, one step of size $\tau = \tau_1 + \tau_2$ reads
-\begin{align}
-  \mathbf{X}_i^{\,n+1/2} &= \mathbf{X}_i^{\,n} + \tau_1\,\mathbf{V}_i^{\,n}, \nonumber\\
-  \mathbf{V}_i^{\,n+1} &= \alpha\,\mathbf{V}_i^{\,n} + \beta\,\mathbf{A}\!\left(\mathbf{X}_i^{\,n+1/2}\right), \\
-  \mathbf{X}_i^{\,n+1} &= \mathbf{X}_i^{\,n+1/2} + \tau_2\,\mathbf{V}_i^{\,n+1}, \nonumber
-  \label{eq:dkd}
-\end{align}
-where $\mathbf{A}$ is the PM acceleration evaluated at the half-step position and $\alpha,\beta$ are coefficients that may depend on time and step size. Different choices of the velocity variable and time coordinate are supported -- for example the canonical momentum $\mathbf{V} = a^2\dot{\mathbf{X}}$, or the growth-time velocity $\mathbf{V} = \mathrm{d}\mathbf{X}/\mathrm{d}D$ that uses the linear growth factor $D(a)$ itself as the time variable \cite{list_disco-dj_2026}.
-\vspace{\sectionvspace} \\
-The key idea exploited by Disco-DJ is that $\alpha$ and $\beta$ can be chosen so that a single PM step reproduces perturbation theory exactly in its regime of validity. Its default \emph{BullFrog} integrator fixes $\alpha,\beta$ such that each step follows the second-order Lagrangian perturbation theory (2LPT) trajectory on large scales, with the higher-order truncation error shrinking as the step is refined \cite{list_disco-dj_2026}. Because the large-scale evolution is then correct by construction, per-cent-level accuracy in the present-day power spectrum is reached with only a handful of steps -- e.g.\ about $6$ steps at $k \approx 0.2\,h/\mathrm{Mpc}$ for $512^3$ particles -- which is what makes Disco-DJ fast enough to act as the cheap forward model in this work \cite{list_disco-dj_2026}.
+
+What sets the PM scheme apart from the tree/FMM solver of Sec.~\ref{sec:pkdgrav} is how the potential is obtained: rather than summing particle-by-particle, the particles are deposited onto a regular mesh to give $\delta$, the Poisson equation is solved in Fourier space with a single FFT (where $\nabla^2 \to -k^2$), and the force $-\nabla_{\mathbf{x}}\phi$ is interpolated back to each particle \cite{list_disco-dj_2026}. A force evaluation is thus global and cheap, at the price of a spatial resolution limited by the mesh spacing -- the origin of the small-scale inaccuracy discussed in Sec.~\ref{sec:pipeline}, and, as shown in Sec.~\ref{sec:local_dev}, also the origin of Disco-DJ's memory footprint on a cluster.
 
 \subsubsection{Pkdgrav}
 \label{sec:pkdgrav}
 
-The gravity solver \textsc{PkdGrav3} computes the gravitational force with a binary-tree Fast Multipole Method (FMM): rather than only approximating a distant tree cell's effect on individual particles (as in a Barnes--Hut tree code), it also expands the potential \emph{within} a receiving cell sourced by a distant cell, an interaction that lets the cost of a full force evaluation scale as $\mathcal{O}(N)$ instead of $\mathcal{O}(N\log N)$ \cite[Sec.~3.1]{potter_pkdgrav3_2016}. \vspace{\sectionvspace} \\ 
-Because particles in different regions of a cosmological box span many orders of magnitude in local density, and hence in dynamical time, a single global time step would be highly wasteful. \textsc{PkdGrav3} instead assigns each particle to one of several time-step ``rungs'', advancing only the particles active on a given rung at each sub-step, and additionally builds a second, smaller tree restricted to the small subset of particles on the shortest (``very active'') rungs so that this frequently-rebuilt tree stays cheap; the combination is summarised by the kick-drift-kick ``umbrella'' diagram over one base time step, see Figure \ref{fig:pkd_rungs}. This dual-tree multi-stepping scheme is what keeps the tree-construction cost from dominating the runtime even though the shortest rungs may be walked hundreds of times per base step \cite[Sec.~3.2]{potter_pkdgrav3_2016}. \vspace{\sectionvspace} \\ 
+The gravity solver \textsc{PkdGrav3} takes the opposite approach: rather than a mesh, it computes the gravitational force with a binary-tree Fast Multipole Method (FMM). Rather than only approximating a distant tree cell's effect on individual particles (as in a Barnes--Hut tree code), it also expands the potential \emph{within} a receiving cell sourced by a distant cell, an interaction that lets the cost of a full force evaluation scale as $\mathcal{O}(N)$ instead of $\mathcal{O}(N\log N)$ \cite{potter_pkdgrav3_2016}.
+
+This accuracy is not free: because particles in different regions of a cosmological box span many orders of magnitude in local density, and hence in dynamical time, a single global time step would be highly wasteful. \textsc{PkdGrav3} instead assigns each particle to one of several time-step ``rungs'', advancing only the particles active on a given rung at each sub-step, and additionally builds a second, smaller tree restricted to the small subset of particles on the shortest (``very active'') rungs so that this frequently-rebuilt tree stays cheap; the combination is summarised by the kick-drift-kick ``umbrella'' diagram over one base time step, shown in Figure~\ref{fig:pkd_rungs}. This dual-tree multi-stepping scheme is what keeps the tree-construction cost from dominating the runtime even though the shortest rungs may be walked hundreds of times per base step \cite{potter_pkdgrav3_2016}.
 
 \begin{figure}[h!]
     \centering
@@ -132,19 +118,20 @@ Because particles in different regions of a cosmological box span many orders of
     \label{fig:pkd_rungs}
 \end{figure}
 
+It is precisely this combination of a per-particle tree, per-particle rung state, and domain-decomposition buffers that gives \textsc{PkdGrav3} the larger, and rather different, memory footprint discussed quantitatively in Sec.~\ref{sec:local_dev}.
+
 \subsubsection{CosmoGridV1}
 
-CosmoGridV1 is a large, publicly released suite of lightcone $N$-body simulations built specifically for map-level (rather than two-point-function-only) cosmological inference from large-scale-structure probes such as weak lensing and galaxy clustering \cite{kacprzak_cosmogridv1_2023}. It samples a six-dimensional flat $w$CDM parameter space ($\Omega_m$, $\sigma_8$, $w_0$, $H_0$, $n_s$, $\Omega_b$, with a fixed total neutrino mass) at 2500 points arranged on a Sobol sequence, running 7 independent realisations at every point, in addition to 200 realisations (with parameter-derivative pairs) at a fixed fiducial cosmology and a smaller set of benchmark runs at higher resolution used to validate the main configuration's choices of box size, particle count, and shell thickness \cite{kacprzak_cosmogridv1_2023}. Every simulation is run with \textsc{PkdGrav3} in a periodic box of $900\,\mathrm{Mpc}/h$ with $832^3$ particles, and stores its lightcone as HEALPix particle-count maps at $N_{\rm side}=2048$ out to $z=3.5$, together with friends-of-friends halo catalogues at each output step \cite{kacprzak_cosmogridv1_2023}. These raw particle-count shells are the basis from which observable maps of weak-lensing convergence, galaxy clustering, and intrinsic alignment are subsequently constructed, and the same dataset has previously been used, together with a shell-based baryon correction model, for a deep-learning cosmological parameter analysis of the KiDS-1000 weak-lensing survey \cite{fluri_full_2022}.
-
+CosmoGridV1 is a large, publicly released suite of lightcone $N$-body simulations built specifically for map-level (rather than two-point-function-only) cosmological inference from large-scale-structure probes such as weak lensing and galaxy clustering \cite{kacprzak_cosmogridv1_2023}. It samples a six-dimensional flat $w$CDM parameter space ($\Omega_m$, $\sigma_8$, $w_0$, $H_0$, $n_s$, $\Omega_b$, with a fixed total neutrino mass) at 2500 points arranged on a Sobol sequence, running 7 independent realisations at every point, in addition to 200 realisations (with parameter-derivative pairs) at a fixed fiducial cosmology and a smaller set of benchmark runs at higher resolution used to validate the main configuration's choices of box size, particle count, and shell thickness \cite{kacprzak_cosmogridv1_2023}. Every simulation is run with \textsc{PkdGrav3} in a periodic box of $900\,\mathrm{Mpc}/h$ with $832^3$ particles, and stores its lightcone as HEALPix particle-count maps at $N_{\rm side}=2048$ out to $z=3.5$, together with friends-of-friends halo catalogues at each output step \cite{kacprzak_cosmogridv1_2023}. These raw particle-count shells are the basis from which observable maps of weak-lensing convergence, galaxy clustering, and intrinsic alignment are subsequently constructed, and the same dataset has previously been used, together with a shell-based baryon correction model, for a deep-learning cosmological parameter analysis of the KiDS-1000 weak-lensing survey \cite{fluri_full_2022}. It is this suite -- box size, particle count, cosmology, and all -- that Sec.~\ref{sec:pipeline} takes as the accuracy target for the pipeline developed in this thesis.
 
 \section{Methods and implementation}
 \subsection{Pipeline Architecture}
 \label{sec:pipeline}
 
 The reference suite CosmoGridV1 evolves every realisation with \textsc{PkdGrav3} (Sec.~\ref{sec:pkdgrav}), whose FMM force solver and adaptive time-stepping resolve structure accurately down to small scales. That accuracy is expensive: each lightcone costs many node-hours, so the millions of realisations required for map-level, simulation-based inference dominate the total cost of the analysis \cite{kacprzak_cosmogridv1_2023, potter_pkdgrav3_2016}.
-\vspace{\sectionvspace} \\
-Disco-DJ offers the opposite trade-off. Its particle-mesh solver and theory-informed BullFrog stepper (Sec.~\ref{sec:discodj}) reproduce the same large-scale clustering in seconds rather than hours, but the force resolution is capped by the PM grid, so power is progressively lost on small scales -- exactly the scales that carry much of the non-Gaussian information exploited by the deep-learning analysis \cite{list_disco-dj_2026}.
-\vspace{\sectionvspace} \\
+
+Disco-DJ offers the opposite trade-off. Its particle-mesh solver (Sec.~\ref{sec:discodj}) reproduces the same large-scale clustering in minutes rather than hours, but the force resolution is capped by the PM grid, so power is progressively lost on small scales -- exactly the scales that carry much of the non-Gaussian information exploited by the deep-learning analysis \cite{list_disco-dj_2026}.
+
 The aim of this work is therefore to keep Disco-DJ's speed while recovering the small-scale content that \textsc{PkdGrav3} would have produced. Formally, we seek a correction $f$ acting on the cheap lightcone maps such that
 \begin{equation}
   f\!\left(\mathrm{Map}_{\textsc{disco}}\right) \;\approx\; \mathrm{Map}_{\textsc{CosmoGrid}},
@@ -152,39 +139,32 @@ The aim of this work is therefore to keep Disco-DJ's speed while recovering the 
 \end{equation}
 where both maps are generated from the \emph{same} initial conditions and cosmology, so that $f$ has only to model the resolution-dependent difference between the two solvers, not any change of realisation.
 
-\paragraph{Limitations and solutions.}
-Two routes to $f$ were considered. The first is a direct, image-level neural-network correction that maps $\mathrm{Map}_{\textsc{disco}}$ onto $\mathrm{Map}_{\textsc{CosmoGrid}}$ pixel by pixel. This is expressive, but heavy: full-sky HEALPix maps at $N_{\mathrm{side}} = 2048$ ($\sim 5\times 10^{7}$ pixels) are large, live on the sphere rather than on a flat grid, and do not fit on a single GPU without tiling into patches (Sec.~\ref{sec:network}). The second route, adopted here, works in harmonic space and corrects the angular power spectrum $C_\ell$ of the Disco-DJ maps at high multipole $\ell$, where the PM resolution deficit is concentrated. Operating on $C_\ell$ is far cheaper, is naturally defined on the sphere, and targets the deficit exactly where Eq.~\eqref{eq:cl} relates it to $P(k)$; the trade-off is that it corrects a summary statistic rather than the full field.
-
+\paragraph{Approaches.} Two routes to $f$ were considered. The first is a direct, image-level neural-network correction that maps $\mathrm{Map}_{\textsc{disco}}$ onto $\mathrm{Map}_{\textsc{CosmoGrid}}$ pixel by pixel. This is expressive, but heavy: full-sky HEALPix maps at $N_{\mathrm{side}} = 2048$ ($\sim 5\times 10^{7}$ pixels) are large, live on the sphere rather than on a flat grid, and do not fit on a single GPU without tiling into patches (Sec.~\ref{sec:network}). The second route, adopted here, works in harmonic space and corrects the angular power spectrum $C_\ell$ of the Disco-DJ maps at high multipole $\ell$, where the PM resolution deficit is concentrated. Operating on $C_\ell$ is far cheaper, is naturally defined on the sphere, and targets the deficit exactly where Eq.~\eqref{eq:cl} relates it to $P(k)$; the trade-off is that it corrects a summary statistic rather than the full field.
 
 \subsection{IC generation}
 \label{sec:ic_generation}
-
 \subsubsection{Validation against CosmoGridV1}
 
-Before using \textsc{disco}'s shell builder (Sec.~\ref{sec:shell_builder_core}) for any downstream analysis, we first validate that a lightcone produced with our \textsc{PkdGrav3} configuration reproduces the reference CosmoGridV1 statistics. To this end we run \textsc{PkdGrav3} with its native lightcone module on the exact box, resolution, and cosmology used by CosmoGridV1, and compare the resulting matter angular power spectrum $C_\ell$ against the corresponding CosmoGridV1 lightcone. Table~\ref{tab:pkdgrav_params} lists the parameters that must be matched exactly for this comparison to be meaningful, together with the corresponding keys in the \textsc{PkdGrav3} configuration file (\texttt{cosmology.par}).
+Before using \textsc{disco}'s shell builder (Sec.~\ref{sec:shell_builder_core}) for any downstream analysis, we first validate that a lightcone produced with our \textsc{PkdGrav3} configuration reproduces the reference CosmoGridV1 statistics. To this end we run \textsc{PkdGrav3} with its native lightcone module on the exact box, resolution, and cosmology used by CosmoGridV1, and compare the resulting matter angular power spectrum $C_\ell$ against the corresponding CosmoGridV1 lightcone.
 
 \subsubsection{Backscaled initial conditions and hand-off to \textsc{disco}}
 
-As described in Section~\ref{sec:power_spectrum}, the initial conditions must be built from a correct transfer function evaluated at the correct neutrino mass, since this directly determines whether the resulting field is consistent with CosmoGridV1.
-\vspace{\sectionvspace} \\
-The resulting particle positions and velocities at $a_i = 1/(1+z_i)$ are exported and used, unmodified, as the initial condition for the corresponding \textsc{disco} run: \textsc{disco} evolves this state forward to $a=1$ and accumulates the lightcone with the shell builder of Sec.~\ref{sec:shell_builder_core} over the same redshift range, $z_{\max}=3.5$ down to $z=0$, at the same HEALPix resolution $N_{\mathrm{side}}=2048$.
-\subsection{Shell Builder}
+As described in Sec.~\ref{sec:power_spectrum}, the initial conditions must be built from a correct transfer function evaluated at the correct neutrino mass, since this directly determines whether the resulting field is consistent with CosmoGridV1. The resulting particle positions and velocities at $a_i = 1/(1+z_i)$ are exported and used, unmodified, as the initial condition for the corresponding \textsc{disco} run: \textsc{disco} evolves this state forward to $a=1$ and accumulates the lightcone with the shell builder of Sec.~\ref{sec:shell_builder_core} over the same redshift range, $z_{\max}=3.5$ down to $z=0$, at the same HEALPix resolution $N_{\mathrm{side}}=2048$.
 
+\subsection{Shell Builder}
 \subsubsection{Core}
 \label{sec:shell_builder_core}
 
 A lightcone output requires the particle distribution to be resampled at every integration step, since the observable past lightcone shell changes continuously as the universe evolves. The most direct implementation stores the full particle snapshot at each of the $n_{\mathrm{steps}}$ integration steps and performs the shell decomposition after the simulation has finished. This approach is memory-prohibitive: retaining $n_{\mathrm{steps}}$ full-resolution snapshots simultaneously exceeds the available device memory for the particle counts considered here. We therefore interleave the shell decomposition with the time integration, so that at any given time only the particle states immediately before and after the current integration step, together with a set of low-dimensional pixelized count maps, need to be held in memory.
 
-\paragraph{Time discretization.}
-The radial shells are not defined by the integrator itself but are supplied externally, e.g.\ through a CosmoGridV1-format metainfo table. Each shell $s \in \{1,\dots,S\}$ is specified by a redshift interval $[z_s^{\mathrm{lo}}, z_s^{\mathrm{hi}}]$ and the corresponding comoving-distance interval $[r_s^{\mathrm{lo}}, r_s^{\mathrm{hi}}]$. To ensure that no shell boundary is crossed \emph{within} an integration step, we define the set of integration times as the union of all shell edges,
+\paragraph{Time discretization.} The radial shells are not defined by the integrator itself but are supplied externally, e.g.\ through a CosmoGridV1-format metainfo table. Each shell $s \in \{1,\dots,S\}$ is specified by a redshift interval $[z_s^{\mathrm{lo}}, z_s^{\mathrm{hi}}]$ and the corresponding comoving-distance interval $[r_s^{\mathrm{lo}}, r_s^{\mathrm{hi}}]$. To ensure that no shell boundary is crossed \emph{within} an integration step, we define the set of integration times as the union of all shell edges,
 \begin{equation}
   \{z_j\}_{j=0}^{S} = \mathrm{unique}\Big(\{z_s^{\mathrm{lo}}\}_{s=1}^{S} \,\cup\, \{z_s^{\mathrm{hi}}\}_{s=1}^{S}\Big), \qquad a_j = \frac{1}{1+z_j},
   \label{eq:step_grid}
 \end{equation}
 sorted in ascending order of $a_j$ (equivalently, descending order of $z_j$). By construction, every shell boundary coincides exactly with an integration-step boundary. The interval $[a_{\mathrm{ini}}, a_0]$, preceding the first shell, is integrated separately with $n_{\mathrm{pre}}$ sub-steps and without shell accumulation, in order to bring the particle state into registry with the shell grid defined in Eq.~\eqref{eq:step_grid}. The remaining $J = S$ intervals $[a_j, a_{j+1}]$, $j = 0,\dots,J-1$, are each advanced with exactly one integration sub-step.
 
-\paragraph{Accumulation procedure.}
-Algorithm~\ref{alg:shell_accum} summarizes the per-step accumulation. At step $j$, the comoving positions and validity mask of all particles are recorded both before the sub-step, $\{\mathbf{x}_p^{(j)}, m_p^{(j)}\}$, and after it, $\{\mathbf{x}_p^{(j+1)}, m_p^{(j+1)}\}$. The scale-factor edges of the step are converted to comoving distance through the cosmology-dependent map $\chi(a)$,
+\paragraph{Accumulation procedure.} Algorithm~\ref{alg:shell_accum} summarizes the per-step accumulation. At step $j$, the comoving positions and validity mask of all particles are recorded both before the sub-step, $\{\mathbf{x}_p^{(j)}, m_p^{(j)}\}$, and after it, $\{\mathbf{x}_p^{(j+1)}, m_p^{(j+1)}\}$. The scale-factor edges of the step are converted to comoving distance through the cosmology-dependent map $\chi(a)$,
 \begin{equation}
   R_j = \chi(a_j), \qquad R_{j+1} = \chi(a_{j+1}), \qquad R_j > R_{j+1},
   \label{eq:step_radii}
@@ -223,21 +203,18 @@ Because the integration grid is constructed from the shell edges themselves (Eq.
 \end{algorithmic}
 \end{algorithm}
 
-\paragraph{Output.}
-Once all $J$ steps have been processed, the set of per-shell count maps $\{\mathbf{S}_s\}_{s=1}^{S}$, together with the shell table, is serialized to a single output file. At no point during the procedure are more than $\mathcal{O}(1)$ full particle snapshots and $S$ integer-valued maps of size $N_{\mathrm{pix}}$ held simultaneously; this is what removes the memory bottleneck associated with the naive end-of-run decomposition.
+\paragraph{Output.} Once all $J$ steps have been processed, the set of per-shell count maps $\{\mathbf{S}_s\}_{s=1}^{S}$, together with the shell table, is serialized to a single output file. At no point during the procedure are more than $\mathcal{O}(1)$ full particle snapshots and $S$ integer-valued maps of size $N_{\mathrm{pix}}$ held simultaneously; this is what removes the memory bottleneck associated with the naive end-of-run decomposition.
+
 \subsubsection{Crossing Condition}
 \label{sec:crossing}
 
- The condition follows the moving-lightcone formulation of \textsc{PkDgrav3} \cite{noauthor_examplepkdgrav3_lightcone_2022} exactly, rather than the vector-trajectory intersection used in the earlier sketch.
+The condition follows the moving-lightcone formulation of \textsc{PkDgrav3} \cite{noauthor_examplepkdgrav3_lightcone_2022} exactly, rather than the vector-trajectory intersection used in the earlier sketch.
 
-\paragraph{Periodic replicas.}
-The observer is placed at the box centre, $\mathbf{o} = (L/2, L/2, L/2)$, with $L$ the box side length. Since the requested lightcone depth $\chi_{\max} = \chi\big(1/(1+z_{\max})\big)$ generally exceeds $L$, the simulation volume is periodically replicated: let
-
+\paragraph{Periodic replicas.} The observer is placed at the box centre, $\mathbf{o} = (L/2, L/2, L/2)$, with $L$ the box side length. Since the requested lightcone depth $\chi_{\max} = \chi\big(1/(1+z_{\max})\big)$ generally exceeds $L$, the simulation volume is periodically replicated: let
 \begin{equation}
   \mathcal{D} = \Big\{\, \mathbf{d} = (n_1, n_2, n_3)\,L \;:\; \mathbf{n}\in\mathbb{Z}^3, \ \; \text{replicated cube intersects the ball of radius } \chi_{\max} \text{ about } \mathbf{o} \,\Big\}
   \label{eq:replica_set}
 \end{equation}
-
 denote the finite set of replica offsets, precomputed once from $(\chi_{\max}, L)$. For each $\mathbf{d}\in\mathcal{D}$ we also precompute the nearest and farthest possible distance of the replicated cube from the observer,
 \begin{equation}
   r_{\min}(\mathbf{d}) = \big\lVert \max(0, |\mathbf{d}| - L/2) \big\rVert, \qquad
@@ -246,14 +223,13 @@ denote the finite set of replica offsets, precomputed once from $(\chi_{\max}, L
 \end{equation}
 (componentwise $\max$ and absolute value, followed by the Euclidean norm), which allow a replica to be rejected for a given step without evaluating any particle if its radial range cannot overlap the step's lightcone annulus.
 
-\paragraph{Linear crossing formula.}
-For step $j$ with N-body boundaries $a_j < a_{j+1}$, define, as before, $r_j^{\mathrm{hi}} = \chi(a_j)$ and $r_j^{\mathrm{lo}} = \chi(a_{j+1})$. For a particle with pre-/post-step positions $\mathbf{x}_p(a_j), \mathbf{x}_p(a_{j+1})$ relative to the box centre, and a replica offset $\mathbf{d}\in\mathcal{D}$, define the shifted positions and their radii
+\paragraph{Linear crossing formula.} For step $j$ with N-body boundaries $a_j < a_{j+1}$, define, as before, $r_j^{\mathrm{hi}} = \chi(a_j)$ and $r_j^{\mathrm{lo}} = \chi(a_{j+1})$. For a particle with pre-/post-step positions $\mathbf{x}_p(a_j), \mathbf{x}_p(a_{j+1})$ relative to the box centre, and a replica offset $\mathbf{d}\in\mathcal{D}$, define the shifted positions and their radii
 \begin{equation}
   \mathbf{R}_0 = \mathbf{x}_p(a_j) + \mathbf{d}, \qquad \mathbf{R}_1 = \mathbf{x}_p(a_{j+1}) + \mathbf{d}, \qquad
   r_0 = \lVert \mathbf{R}_0 \rVert, \qquad r_1 = \lVert \mathbf{R}_1 \rVert.
   \label{eq:replica_radii}
 \end{equation}
-Rather than solving for the intersection of the interpolated \emph{vector} trajectory with the receding lightcone sphere (which requires a quadratic root), the implementation follows \textsc{PkDgrav3} and linearly interpolates the \emph{scalar} radii of the particle and of the lightcone front over the step,
+ The implementation follows \textsc{PkDgrav3} and interpolates the particle radius $r_p(v)$ and the lightcone front radius $R(v)$ linearly over the step,
 \begin{equation}
   r_p(v) = r_0 + v\,(r_1 - r_0), \qquad R(v) = r_j^{\mathrm{hi}} - v\,(r_j^{\mathrm{hi}} - r_j^{\mathrm{lo}}), \qquad v\in[0,1],
   \label{eq:scalar_interp}
@@ -265,8 +241,7 @@ and solves $r_p(v^\ast) = R(v^\ast)$ for the crossing parameter,
 \end{equation}
 A particle--replica pair is accepted only if $v^\ast \in [0,1)$; since Eq.~\eqref{eq:vx_formula} partitions the step interval, this guarantees that every particle is caught in \emph{at most one} step, for a fixed replica -- evaluating the crossing test against the (generally narrower) metainfo shell bounds instead of the full step bounds $[r_j^{\mathrm{lo}}, r_j^{\mathrm{hi}})$ would break this partition and could double-count particles moving across two adjacent shells within the same step. Pairs with $|r_1 - r_0|$ below a numerical tolerance ($10^{-20}$) are treated as non-moving and rejected, and the denominator of Eq.~\eqref{eq:vx_formula} is floored in magnitude at $10^{-10}$ to avoid division by a near-zero value.
 
-\paragraph{Shell assignment and pixelization.}
-The crossing position is obtained by applying $v^\ast$ to the \emph{vector} positions,
+\paragraph{Shell assignment and pixelization.} The crossing position is obtained by applying $v^\ast$ to the \emph{vector} positions,
 \begin{equation}
   \mathbf{x}_{\mathrm{cross}} = (1-v^\ast)\,\mathbf{R}_0 + v^\ast\,\mathbf{R}_1, \qquad r_{\mathrm{cross}} = \lVert \mathbf{x}_{\mathrm{cross}} \rVert,
   \label{eq:cross_pos}
@@ -286,7 +261,7 @@ Surviving crossings are pixelized with the equal-area HEALPix ring scheme at res
 \State $\mathbf{R}_0 \gets \mathbf{x}_p(a_j) + \mathbf{d}$, \quad $\mathbf{R}_1 \gets \mathbf{x}_p(a_{j+1}) + \mathbf{d}$
 \State $r_0 \gets \lVert \mathbf{R}_0 \rVert$, \quad $r_1 \gets \lVert \mathbf{R}_1 \rVert$
 \If{$|r_1 - r_0| \le \epsilon_{\mathrm{move}}$} \State \Return \emph{reject (stationary)} \EndIf
-\State $v^\ast \gets \big(r_j^{\mathrm{hi}} - r_0\big) \,/\, \big[(r_j^{\mathrm{hi}} - r_j^{\mathrm{lo}}) + (r_1 - r_0)\big]$ \Comment{Eq.~\ref{eq:vx_formula}, denominator floored at $\epsilon_{\mathrm{den}}$}
+\State $v^\ast \gets \big(r_j^{\mathrm{hi}} - r_0\big) \,/\, \big[(r_j^{\mathrm{hi}} - r_j^{\mathrm{lo}}) + (r_1 - r_0)\big]$ \text{(Eq.~\ref{eq:vx_formula}, denominator floored at $\epsilon_{\mathrm{den}}$)}
 \If{$v^\ast \notin [0,1)$} \State \Return \emph{reject (not caught this step)} \EndIf
 \State $\mathbf{x}_{\mathrm{cross}} \gets (1-v^\ast)\mathbf{R}_0 + v^\ast \mathbf{R}_1$, \quad $r_{\mathrm{cross}} \gets \lVert \mathbf{x}_{\mathrm{cross}} \rVert$
 \If{$r_{\mathrm{cross}} \notin [r_s^{\mathrm{lo}}, r_s^{\mathrm{hi}})$} \State \Return \emph{reject (wrong shell)} \EndIf
@@ -301,96 +276,168 @@ This procedure reproduces the corner-observer, box-replication scheme of \textsc
     \centering
     \includegraphics[width=0.5\linewidth]{plots/background/crossing_condition.png}
     \caption{\cite{noauthor_examplepkdgrav3_lightcone_2022}}
-    \label{fig:placeholder}
+    \label{fig:placeholder2}
 \end{figure}
-
 
 \subsection{Neural Network}
 \label{sec:network}
-\subsubsection{Dimensional Reduction}
-VRAM issues -> patches or in spherical harmonics
-\subsubsection{Data preparation}
-\subsubsection{Network Architecture}
-\subsubsection{Training Procedure}
-\subsubsection{Validation Strategy}
-(Angular) Power Spectru, Kappa -> UFALCON 
 
+The correction $f$ of Eq.~\eqref{eq:correction_goal} is implemented as a neural network operating on the angular power spectra of the Disco-DJ lightcone maps produced by the pipeline above. The remainder of this section works through that network end to end: how the spherical input is made tractable on a single GPU (Sec.~\ref{sec:dim_reduction}), how training pairs are assembled from matched Disco-DJ/CosmoGridV1 realisations (Sec.~\ref{sec:data_prep}), the architecture itself (Sec.~\ref{sec:net_arch}), how it is trained (Sec.~\ref{sec:training}), and how the corrected maps are validated (Sec.~\ref{sec:validation}).
+
+\subsubsection{Dimensional Reduction}
+\label{sec:dim_reduction}
+
+As noted in Sec.~\ref{sec:pipeline}, a full-resolution HEALPix map at $N_{\mathrm{side}}=2048$ does not fit on a single GPU alongside a network of any depth. Two dimensional-reduction strategies address this VRAM constraint: tiling the sphere into flat patches small enough to fit standard convolutional layers, or working directly with a spherical-harmonic (or graph-based spherical-CNN) representation that respects the sphere's topology without an explicit flat projection.
+
+\subsubsection{Data preparation}
+\label{sec:data_prep}
+
+\subsubsection{Network Architecture}
+\label{sec:net_arch}
+
+Spherical convolutional architectures such as DeepSphere \cite{defferrard_deepsphere_2020}, which operate directly on the HEALPix pixelization via a graph representation, are a natural starting point for a network that must respect the spherical geometry motivated in Sec.~\ref{sec:dim_reduction}.
+
+\subsubsection{Training Procedure}
+\label{sec:training}
+
+\subsubsection{Validation Strategy}
+\label{sec:validation}
+
+The corrected maps are validated against the CosmoGridV1 reference in the same summary statistics the correction targets: the (angular) power spectrum $C_\ell$ of Eq.~\eqref{eq:cl}, and convergence ($\kappa$) maps projected with UFALCON, so that the comparison is made on the same observable quantities used to build the training objective in Sec.~\ref{sec:training}.
 
 \section{Computational Infrastructure}
+\label{sec:infrastructure}
+ 
 \subsection{Computing Environments}
-
-Development proceeded in stages of increasing scale, from a local workstation used for prototyping to two GPU clusters used for production runs.
-
+ 
+Development proceeded through three tiers of increasing scale: a local workstation for prototyping, ETH Zurich's Euler cluster for medium-scale production, and the CSCS Alps system for full-resolution runs. Each tier trades a shorter debugging loop for less computational headroom, and it is the memory footprint of the two codes from Sec.~\ref{sec:discodj} and Sec.~\ref{sec:pkdgrav} -- not their runtime -- that ultimately decides which tier a given job belongs to.
+ 
 \subsubsection{Local Development}
-
-Both \textsc{disco} and \textsc{PkdGrav3} were first set up on a local machine, to establish a minimal working configuration and to inspect their output interactively. Running locally shortens the debugging loop considerably: results can be plotted and checked immediately, without the queueing latency of a batch system. Small tests used a resolution of $16^3 = 4096$ particles, which completes in under a minute on a single core. The binding constraint is memory: storing only the phase-space state (three positions and three velocities per particle, in single precision) already for a CosmoGridV1-sized run,
-\[
-  832^3 \approx 5.8\times10^{8}\ \text{particles} \times 24\ \text{bytes} \approx 14\ \text{GB},
-\]
-exceeds the RAM of a typical workstation before any tree, mesh, or lightcone buffers are added. Production resolutions therefore require a cluster.
-
-\subsubsection{Euler (ETH Z\"urich)}
-
-On ETH's Euler cluster we built a separate virtual environment for each code, because \textsc{disco} and \textsc{PkdGrav3} have conflicting library dependencies that cannot coexist in a single environment. Euler provides the memory and the GPU partitions needed to run at the full $832^3$ resolution, with substantial speed-ups from the GPU-accelerated builds. Depending on the configuration a single simulation can still be long-running, so jobs are distributed across multiple nodes where the code supports it.
-
+\label{sec:local_dev}
+ 
+\textsc{disco} and \textsc{PkdGrav3} were first set up on a local machine to establish a minimal working configuration and to inspect their output interactively: results can be plotted and checked immediately, without the queueing latency of a batch system, which shortens the debugging loop considerably. In practice this means that a bug in, say, the shell-builder logic of Sec.~\ref{sec:shell_builder_core} or in the initial-condition hand-off of Sec.~\ref{sec:ic_generation} is caught and fixed in seconds on a laptop, rather than only surfacing after a queued job on a cluster has already run to completion. Small tests at a resolution of $16^3 = 4096$ particles complete in under a minute on a single core; a run this size is not meant to be physically meaningful, only to exercise the full pipeline -- initial conditions, time integration, and lightcone accumulation -- end to end before committing to a production-scale configuration.
+ 
+The binding constraint once the resolution is scaled up to production size is memory, and the two codes hit that limit for structurally different reasons. Storing only the raw phase-space state of a particle -- three position and three velocity components, each a single-precision (4-byte) float, i.e.\ $6\times4=24$ bytes per particle -- for a CosmoGridV1-sized run gives
+\begin{equation}
+    N_p = 832^3 \approx 5.8\times10^{8}\ \text{particles}, \qquad
+    N_p \times 24\ \text{bytes} \approx 14\ \text{GB},
+    \label{eq:phasespace_mem}
+\end{equation}
+which already exceeds a typical workstation's RAM once any headroom for the rest of the run is included. This number is only a floor, and the two codes exceed it in different ways. For \textsc{PkdGrav3}, Eq.~\eqref{eq:phasespace_mem} covers only the particle positions and velocities themselves; as already noted in Sec.~\ref{sec:pkdgrav}, the code additionally carries a per-particle tree, per-particle rung state, and domain-decomposition buffers alongside this raw data, so its actual memory footprint at a given particle count is correspondingly larger than Eq.~\eqref{eq:phasespace_mem}, by an amount that grows with the depth of the tree and the number of particles active on the shortest rungs at a given step. \textsc{disco}, by contrast, is bounded less by the particle count than by the resolution of its force mesh: because its Poisson solve is a single global FFT over the whole PM grid (Sec.~\ref{sec:discodj}), rather than a spatially local tree walk, the entire mesh -- the density field, its Fourier transform, and the resulting force components -- must reside in memory simultaneously for a single force evaluation, so that (unlike \textsc{PkdGrav3}) its memory demand scales with the chosen mesh resolution rather than directly with the particle count. Production-resolution runs of either code therefore require a cluster.
+ 
+\subsubsection{Euler (ETH Zurich)}
+ 
+On Euler we built a separate virtual environment for each code, because \textsc{disco} and \textsc{PkdGrav3} have conflicting library dependencies that cannot coexist in a single environment: \textsc{disco} is built on JAX (Sec.~\ref{sec:discodj}) and therefore needs a matched GPU-software stack for its own automatic-differentiation and GPU-acceleration machinery, while \textsc{PkdGrav3} is a compiled tree code with its own domain-decomposition layer (Sec.~\ref{sec:pkdgrav}) built against a separate toolchain; installing both into one environment risks exactly the kind of version conflict that a per-code environment avoids. Euler provides the memory and the GPU partitions needed to run at the full $832^3$ resolution, with substantial speed-ups from the GPU-accelerated builds -- speed-ups that matter specifically for \textsc{disco}, whose entire force solve is GPU-accelerated by construction (Sec.~\ref{sec:discodj}), rather than for \textsc{PkdGrav3}, whose FMM force calculation is CPU-bound (in the used version). Depending on the configuration a single simulation can still be long-running, so jobs are distributed across multiple nodes where the code supports it.
+ 
 \subsubsection{CSCS (Alps / Piz Daint)}
-
-The largest runs use the CSCS Alps system, whose NVIDIA GH200 nodes provide 120~GB of on-package memory. This large VRAM is well suited to scaling Disco-DJ up and to shortening the wall-clock time of each run, whether generating the training pairs or, later, training the network itself.
-
+ 
+The largest runs use the CSCS Alps system, whose NVIDIA GH200 nodes provide 120~GB of on-package memory. This large memory pool is well suited to scaling \textsc{disco} up in particular: as argued in Sec.~\ref{sec:local_dev}, \textsc{disco}'s memory demand tracks the resolution of its PM grid rather than the particle count, and the entire grid must be resident in memory for a single force evaluation, so a larger available memory directly translates into a finer mesh -- and hence a smaller-scale force resolution -- that can be run without running out of memory mid-simulation. The same large memory pool also shortens the wall-clock time of each run, whether generating the \textsc{disco}/CosmoGridV1 training pairs of Sec.~\ref{sec:pipeline} or, later, training the correction network of Sec.~\ref{sec:network} itself, since both tasks can be run with larger batches -- of simulations in the first case, of map patches in the second -- without being forced to break the workload into smaller pieces purely to fit within a tighter memory budget.
+ 
 \subsection{Software Engineering}
 \subsubsection{Code Structure}
-
-Executables and virtual environments are kept in the cluster \texttt{HOME} directory, which is persistent and backed up. Because \texttt{HOME} has a strict quota, all bulk output is written instead to \texttt{SCRATCH}: simulation snapshots and shell maps, per-job logs, and diagnostic plots of snapshots and shells. Keeping the full log of every submission proved valuable both for debugging and for later cross-run comparison. The CosmoGridV1 reference data ($\sim 110$~TB) was transferred to the CSCS entry point with a dedicated Globus transfer job.
-
+ 
+Executables and virtual environments are kept in the cluster's \texttt{HOME} directory, which is persistent and backed up but subject to a strict storage quota. This split is deliberate: the code and its environment are exactly the things that must survive between sessions and be rebuildable on demand, so they belong in the small, safe, backed-up \texttt{HOME}, whereas simulation snapshots, shell maps, per-job logs, and diagnostic plots are bulk, regenerable output that is instead written to \texttt{SCRATCH}, which trades that persistence for effectively unbounded (though periodically purged) capacity -- exactly the trade-off that disposable intermediate output should make. Keeping the full log of every submission proved valuable both for debugging and for later cross-run comparison, since a run's log is often the only remaining record of exactly which configuration produced a given output. The CosmoGridV1 reference dataset ($\sim110$~TB) was transferred to the CSCS entry point with a dedicated Globus transfer job: at this scale, an interactive, single-stream copy would be both too slow and too fragile, since a single dropped connection partway through could force the transfer to restart from scratch, whereas a managed transfer job can run unattended and recover from such interruptions on its own.
+ 
 \subsubsection{Job Scheduling and Submission}
-
-Every Python script is paired with a Slurm batch script. The Python entry point is written to run unchanged both locally and on the cluster, while the accompanying batch script requests the resources and captures the output. The same job can then be launched interactively (\texttt{bash}, for fast monitoring directly in the terminal) or submitted to the queue (\texttt{sbatch}, to run detached and log to file).
-
+ 
+\subsubsection{Job Scheduling and Submission}
+ 
+Every Python script is paired with a Slurm batch script. The Python entry point is written to run unchanged both locally and on the cluster, while the accompanying batch script requests the resources and captures the output; keeping the two separate means the same driver used for the small local tests of Sec.~\ref{sec:local_dev} is also what eventually runs, unmodified, on a full production allocation, with only the surrounding batch script changing. The same job can then be launched interactively (\texttt{bash}, for fast monitoring directly in the terminal) or submitted to the queue (\texttt{sbatch}, to run detached and log to file) -- interactive launches being the natural continuation of local debugging once a job needs cluster-scale resources, and queued submission being reserved for runs that are expected to actually take long enough to justify running unattended.
+ 
 Each batch script follows the same two-part layout. The first part is a header of \texttt{\#SBATCH} directives that declares the resource request to the scheduler, and the second is a short execution body that prepares the environment and launches the driver. The header groups naturally into three concerns:
 \begin{itemize}
   \item \textbf{Resources} -- how much hardware to reserve: the number of \texttt{nodes}, the GPUs per node (\texttt{gres=gpu}), the task layout (\texttt{ntasks-per-node}), \texttt{exclusive} node access, and a wall-clock \texttt{time} limit after which the job is killed.
   \item \textbf{Accounting} -- where the allocation is charged and queued: the \texttt{account} and the \texttt{partition}.
   \item \textbf{Bookkeeping} -- where results and diagnostics go: a human-readable \texttt{job-name}, the working directory (\texttt{chdir}), and the \texttt{output}/\texttt{error} log paths, where \texttt{\%j} expands to the unique job ID so that concurrent runs never overwrite one another.
 \end{itemize}
-A representative submission script is shown below.
+The \textbf{Resources} block also fixes what the job costs against the allocation: requesting $n_{\mathrm{nodes}}$ nodes for a wall-clock time $t$ is billed as
+\begin{equation}
+    C = n_{\mathrm{nodes}} \times t \quad [\text{node-hours}],
+    \label{eq:node_hours}
+\end{equation}
+regardless of how much of that time is actually spent computing rather than sitting idle, which is exactly why the interactive/queued distinction above matters in practice: short, single-node interactive sessions are used for debugging, where the actual compute is brief and the goal is a fast turnaround rather than efficient use of Eq.~\eqref{eq:node_hours}, while \texttt{exclusive}, multi-node allocations with a generous \texttt{time} limit are reserved for production runs, where the requested resources are what the run is actually expected to use. A representative submission script is shown below.
 
-\begin{verbatim}
+The execution body is short, but it is doing three distinct jobs before the driver ever starts. Giving here an concrete example of the \textsc{Disco} run. First, it activates the \textsc{disco}-specific environment (\texttt{miniforge}/\texttt{conda activate vir\_env}) -- the per-code environment split motivated in Sec.~\ref{sec:local_dev}, made concrete here as the very first thing the job does. Second, it fixes the paths the driver needs: \texttt{IC\_FILE} points to \texttt{CosmoML.tipsy}, the backscaled \textsc{PkdGrav3} initial condition of Sec.~\ref{sec:ic_generation}, handed to \textsc{disco} in the \texttt{tipsy} format, and \texttt{PARAM\_FILE} points to the run's configuration. Third, it sets the physical run parameters as ordinary shell variables rather than burying them in the driver itself, so that the same script is reused for different configurations. \texttt{RES=832} and \texttt{BOXSIZE=900.0} are exactly the CosmoGridV1 particle count and box size already fixed in Sec.~\ref{sec:local_dev}, while \texttt{RES\_PM=1664} sets \textsc{disco}'s particle-mesh grid to exactly twice that resolution per dimension ($1664 = 2\times832$) -- the finer force mesh whose memory cost is exactly what the estimate in Sec.~\ref{sec:local_dev} is built around.
+ 
+The task count passed to \texttt{srun} is computed, rather than hard-coded, for the same reason. The header itself only reserves \texttt{--ntasks-per-node=1}, so Slurm's own bookkeeping treats the job as one task per node; the actual degree of parallelism -- one process per GPU -- is left to the execution body, which reads the number of nodes Slurm actually granted (\texttt{SLURM\_NNODES}) and multiplies it by the four GPUs requested per node (\texttt{--gres=gpu:4}) to get \texttt{NTASKS=\$((SLURM\_NNODES * 4))}. Passing this computed value explicitly to \texttt{srun --ntasks} is what lets \texttt{--nodes} in the header be the only thing that needs to change to scale the same script from the two-node example shown here to a larger allocation: the task count, and hence the process-per-GPU launch, follows automatically.
+ 
+Because only the header and these few shell variables change between runs, adapting a job to a new configuration -- more nodes, a different resolution, a longer time limit, or a different output directory -- amounts to editing a handful of lines, while the underlying Python driver invoked by \texttt{simulation\_run} is reused unchanged.
+\subsubsection{Version Control (GitHub)}
+ 
+The whole project -- the analysis scripts together with the modified \textsc{disco} that includes the shell builder -- is kept in a dedicated Git repository. Beyond the usual protection against machine failure, this gives a reliable way to return to a known-good state when an experimental change breaks the pipeline, and keeps the many configuration variants organised.
+\section{Results}
+
+\section{Conclusion}
+\printbibliography
+
+% =========== Appendix ===========
+\appendix
+\section{Implementation Details}\label{app:implementation}
+
+\subsection{Job Configuration}\label{app:slurm}
+\begin{listing}[H]
+\centering
+\begin{minipage}{0.75\textwidth}
+\begin{minted}[
+  frame=single,
+  framesep=8pt,
+  fontsize=\small,
+  linenos=false,
+]{bash}
 #!/bin/bash
+ 
+# =========== Job settings ===========
+ 
 # --- Resources ---
 #SBATCH --nodes=2
 #SBATCH --exclusive
 #SBATCH --ntasks-per-node=1
-#SBATCH --gres=gpu:4                    # GPUs per node
-#SBATCH --time=01:00:00                 # wall-clock limit (hh:mm:ss)
+#SBATCH --gres=gpu:4
+#SBATCH --time=01:00:00
+ 
 # --- Accounting ---
 #SBATCH --account=sk037
 #SBATCH --partition=normal
+ 
 # --- Bookkeeping ---
-#SBATCH --job-name=discodj-custom
-#SBATCH --chdir=/capstor/scratch/cscs/damrein/outputs/disco_custom
-#SBATCH --output=/capstor/scratch/cscs/damrein/outputs/logs/disco_custom/slurm-%j.out
-#SBATCH --error=/capstor/scratch/cscs/damrein/outputs/logs/disco_custom/slurm-%j.err
+#SBATCH --job-name=run_disco
+#SBATCH --output=../run_disco-%j.out
+#SBATCH --error=../run_disco-%j.err
+ 
+# =========== Execution body ===========
+ 
+# 1. Activate the code-specific virtual environment
+source miniforge/bin/activate
+conda activate vir_env
+ 
+# 2. Paths to input files
+IC_FILE=../CosmoML.tipsy
+PARAM_FILE=../params.yml
+# ... additional paths as needed
+ 
+# 3. Simulation parameters
+RES=832
+RES_PM=1664
+BOXSIZE=900.0
+# ... additional parameters as needed
+ 
+# 4. Run the simulation
+NTASKS=$((SLURM_NNODES * 4))
+ 
+srun --ntasks="${NTASKS}" \
+    simulation_run \
+    --ics-file "${IC_FILE}" \
+    --param-file "${PARAM_FILE}" \
+    --res "${RES}" \
+    --res-pm "${RES_PM}" \
+    --boxsize "${BOXSIZE}" \
+    # ... additional flags
+ 
+\end{minted}
+\end{minipage}
+\caption{SLURM job script for a \textsc{disco} run.}
+\end{listing}
 
-# --- Execution body ---
-# 1. activate the code-specific virtual environment
-# 2. define paths and simulation parameters
-# 3. run the Python driver
-\end{verbatim}
 
-Because only the header changes between runs, adapting a job to a new configuration -- more nodes, a longer time limit, or a different output directory -- amounts to editing a few directives, while the Python driver is reused unchanged.
-
-\subsubsection{Version Control (GitHub)}
-
-The whole project -- the analysis scripts together with the modified \textsc{disco} that includes the shell builder -- is kept in a dedicated Git repository. Beyond the usual protection against machine failure, this gives a reliable way to return to a known-good state when an experimental change breaks the pipeline, and keeps the many configuration variants organised.
-
-
-\section{Results}
-from \cite{defferrard_deepsphere_2020}
-\section{Conclusion}
-
-
-\printbibliography
 
 \end{document}
-
-
