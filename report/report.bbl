@@ -1,0 +1,1065 @@
+% $ biblatex auxiliary file $
+% $ biblatex bbl format version 3.3 $
+% Do not modify the above lines!
+%
+% This is an auxiliary file used by the 'biblatex' package.
+% This file may safely be deleted. It will be recreated by
+% biber as required.
+%
+\begingroup
+\makeatletter
+\@ifundefined{ver@biblatex.sty}
+  {\@latex@error
+     {Missing 'biblatex' package}
+     {The bibliography requires the 'biblatex' package.}
+      \aftergroup\endinput}
+  {}
+\endgroup
+
+
+\refsection{0}
+  \datalist[entry]{nty/global//global/global/global}
+    \entry{bardeen_statistics_1986}{article}{}{}
+      \name{author}{4}{}{%
+        {{hash=754e78bb81671df0a833b0caf5d8e301}{%
+           family={Bardeen},
+           familyi={B\bibinitperiod},
+           given={J.\bibnamedelimi M.},
+           giveni={J\bibinitperiod\bibinitdelim M\bibinitperiod}}}%
+        {{hash=169e1f4ad782c91e8d14ada28e21ca40}{%
+           family={Bond},
+           familyi={B\bibinitperiod},
+           given={J.\bibnamedelimi R.},
+           giveni={J\bibinitperiod\bibinitdelim R\bibinitperiod}}}%
+        {{hash=8b603d319b790bd344bfc8f6f79c47ff}{%
+           family={Kaiser},
+           familyi={K\bibinitperiod},
+           given={N.},
+           giveni={N\bibinitperiod}}}%
+        {{hash=1ba7f5ab870009f4edab5dbb623bd91b}{%
+           family={Szalay},
+           familyi={S\bibinitperiod},
+           given={A.\bibnamedelimi S.},
+           giveni={A\bibinitperiod\bibinitdelim S\bibinitperiod}}}%
+      }
+      \strng{namehash}{9a8c80174a1357cd71ffaee721ec22bb}
+      \strng{fullhash}{501359399d94a8fddf64ec98fd9a6b0d}
+      \strng{fullhashraw}{501359399d94a8fddf64ec98fd9a6b0d}
+      \strng{bibnamehash}{9a8c80174a1357cd71ffaee721ec22bb}
+      \strng{authorbibnamehash}{9a8c80174a1357cd71ffaee721ec22bb}
+      \strng{authornamehash}{9a8c80174a1357cd71ffaee721ec22bb}
+      \strng{authorfullhash}{501359399d94a8fddf64ec98fd9a6b0d}
+      \strng{authorfullhashraw}{501359399d94a8fddf64ec98fd9a6b0d}
+      \field{sortinit}{B}
+      \field{sortinithash}{d7095fff47cda75ca2589920aae98399}
+      \field{labelnamesource}{author}
+      \field{labeltitlesource}{title}
+      \field{abstract}{A set of new mathematical results on the theory of Gaussian random fields is presented, and the application of such calculations in cosmology to treat questions of structure formation from small-amplitude initial density fluctuations is addressed. The point process equation is discussed, giving the general formula for the average number density of peaks. The problem of the proper conditional probability constraints appropriate to maxima are examined using a one-dimensional illustration. The average density of maxima of a general three-dimensional Gaussian field is calculated as a function of heights of the maxima, and the average density of 'upcrossing' points on density contour surfaces is computed. The number density of peaks subject to the constraint that the large-scale density field be fixed is determined and used to discuss the segregation of high peaks from the underlying mass distribution. The machinery to calculate n-point peak-peak correlation functions is determined, as are the shapes of the profiles about maxima.}
+      \field{issn}{0004-637X}
+      \field{journaltitle}{The Astrophysical Journal}
+      \field{langid}{english}
+      \field{month}{5}
+      \field{title}{The Statistics of Peaks of Gaussian Random Fields}
+      \field{urlday}{7}
+      \field{urlmonth}{7}
+      \field{urlyear}{2026}
+      \field{volume}{304}
+      \field{year}{1986}
+      \field{dateera}{ce}
+      \field{urldateera}{ce}
+      \field{pages}{15}
+      \range{pages}{1}
+      \verb{doi}
+      \verb 10.1086/164143
+      \endverb
+      \verb{urlraw}
+      \verb https://ui.adsabs.harvard.edu/abs/1986ApJ...304...15B/abstract
+      \endverb
+      \verb{url}
+      \verb https://ui.adsabs.harvard.edu/abs/1986ApJ...304...15B/abstract
+      \endverb
+    \endentry
+    \entry{bond_how_1996}{article}{}{}
+      \name{author}{3}{}{%
+        {{hash=d632c1bf1dcccb1191d0873e41f4f1dc}{%
+           family={Bond},
+           familyi={B\bibinitperiod},
+           given={J.},
+           giveni={J\bibinitperiod}}}%
+        {{hash=0f1067b936cc72b669c19b2991b4c64b}{%
+           family={Kofman},
+           familyi={K\bibinitperiod},
+           given={Lev},
+           giveni={L\bibinitperiod}}}%
+        {{hash=2b734fc116df96058574e1a86cbb3978}{%
+           family={Pogosyan},
+           familyi={P\bibinitperiod},
+           given={D.},
+           giveni={D\bibinitperiod}}}%
+      }
+      \strng{namehash}{fd8a32a64181ad88af0abcd974335f3b}
+      \strng{fullhash}{fd8a32a64181ad88af0abcd974335f3b}
+      \strng{fullhashraw}{fd8a32a64181ad88af0abcd974335f3b}
+      \strng{bibnamehash}{fd8a32a64181ad88af0abcd974335f3b}
+      \strng{authorbibnamehash}{fd8a32a64181ad88af0abcd974335f3b}
+      \strng{authornamehash}{fd8a32a64181ad88af0abcd974335f3b}
+      \strng{authorfullhash}{fd8a32a64181ad88af0abcd974335f3b}
+      \strng{authorfullhashraw}{fd8a32a64181ad88af0abcd974335f3b}
+      \field{sortinit}{B}
+      \field{sortinithash}{d7095fff47cda75ca2589920aae98399}
+      \field{labelnamesource}{author}
+      \field{labeltitlesource}{title}
+      \field{abstract}{{LARGE}-{SCALE} structure in the distribution of galaxies is thought to have evolved through gravitational instabilities from small density fluctuations in the (largely homogeneous) early Universe. This structure of galaxies consists of rich and poor clusters, connected by filaments and sheets, with regions largely devoid of galaxies (voids) in between1. Numerical simulations of the growth of initial density fluctuations through a nonlinear regime, motivated by the likely physics of the early Universe, also show a network of filaments and voids2,3,18, but the origin of this picture of filaments as the dominant structure was not well understood. Here we show that the 'web' of filaments that defines the final state in these simulations is present in the initial density fluctuations; the pattern of the web is defined largely by the rare density peaks in the initial fluctuations, with the subsequent nonlinear evolution of the structure bringing the filamentary network into sharper relief. Applying these results to the observed galaxy distribution, we suggest that 'superclusters' are filamentary cluster-cluster bridges, and we predict that the most pronounced filaments will be found between clusters of galaxies that are aligned with each other and close together.}
+      \field{day}{18}
+      \field{journaltitle}{Nature}
+      \field{month}{4}
+      \field{shortjournal}{Nature}
+      \field{title}{How filaments of galaxies are woven into the cosmic web}
+      \field{volume}{380}
+      \field{year}{1996}
+      \field{dateera}{ce}
+      \field{pages}{603\bibrangedash 606}
+      \range{pages}{4}
+      \verb{doi}
+      \verb 10.1038/380603a0
+      \endverb
+    \endentry
+    \entry{defferrard_deepsphere_2020}{misc}{}{}
+      \name{author}{4}{}{%
+        {{hash=1c45ec3985cdb526e1b18bf4041b4c22}{%
+           family={Defferrard},
+           familyi={D\bibinitperiod},
+           given={Michaël},
+           giveni={M\bibinitperiod}}}%
+        {{hash=e7da8e9e881d032b5aa3a4ccc8a8ae95}{%
+           family={Milani},
+           familyi={M\bibinitperiod},
+           given={Martino},
+           giveni={M\bibinitperiod}}}%
+        {{hash=a856ec0579df5fd53258a9cdef4c4982}{%
+           family={Gusset},
+           familyi={G\bibinitperiod},
+           given={Frédérick},
+           giveni={F\bibinitperiod}}}%
+        {{hash=c9234fd9939a5272d2f2af705c9f908f}{%
+           family={Perraudin},
+           familyi={P\bibinitperiod},
+           given={Nathanaël},
+           giveni={N\bibinitperiod}}}%
+      }
+      \list{publisher}{1}{%
+        {arXiv}%
+      }
+      \strng{namehash}{08ab1a63b0c357f6c1df04bd4deec745}
+      \strng{fullhash}{7be09902bbaa62422119c3191e33c874}
+      \strng{fullhashraw}{7be09902bbaa62422119c3191e33c874}
+      \strng{bibnamehash}{08ab1a63b0c357f6c1df04bd4deec745}
+      \strng{authorbibnamehash}{08ab1a63b0c357f6c1df04bd4deec745}
+      \strng{authornamehash}{08ab1a63b0c357f6c1df04bd4deec745}
+      \strng{authorfullhash}{7be09902bbaa62422119c3191e33c874}
+      \strng{authorfullhashraw}{7be09902bbaa62422119c3191e33c874}
+      \field{sortinit}{D}
+      \field{sortinithash}{6f385f66841fb5e82009dc833c761848}
+      \field{labelnamesource}{author}
+      \field{labeltitlesource}{shorttitle}
+      \field{abstract}{Designing a convolution for a spherical neural network requires a delicate tradeoff between efficiency and rotation equivariance. {DeepSphere}, a method based on a graph representation of the sampled sphere, strikes a controllable balance between these two desiderata. This contribution is twofold. First, we study both theoretically and empirically how equivariance is affected by the underlying graph with respect to the number of vertices and neighbors. Second, we evaluate {DeepSphere} on relevant problems. Experiments show state-of-the-art performance and demonstrates the efficiency and flexibility of this formulation. Perhaps surprisingly, comparison with previous work suggests that anisotropic filters might be an unnecessary price to pay. Our code is available at https://github.com/deepsphere}
+      \field{day}{30}
+      \field{eprinttype}{arxiv}
+      \field{month}{12}
+      \field{number}{{arXiv}:2012.15000}
+      \field{shorttitle}{{DeepSphere}}
+      \field{title}{{DeepSphere}: a graph-based spherical {CNN}}
+      \field{urlday}{2}
+      \field{urlmonth}{7}
+      \field{urlyear}{2026}
+      \field{year}{2020}
+      \field{dateera}{ce}
+      \field{urldateera}{ce}
+      \verb{doi}
+      \verb 10.48550/arXiv.2012.15000
+      \endverb
+      \verb{eprint}
+      \verb 2012.15000 [cs.LG]
+      \endverb
+      \verb{urlraw}
+      \verb http://arxiv.org/abs/2012.15000
+      \endverb
+      \verb{url}
+      \verb http://arxiv.org/abs/2012.15000
+      \endverb
+      \keyw{Computer Science - Computer Vision and Pattern Recognition,Computer Science - Machine Learning,Statistics - Machine Learning}
+    \endentry
+    \entry{dodelson_modern_2020}{article}{}{}
+      \name{author}{2}{}{%
+        {{hash=d3698fbc1727820bb2fd421387b59c1b}{%
+           family={Dodelson},
+           familyi={D\bibinitperiod},
+           given={Scott},
+           giveni={S\bibinitperiod}}}%
+        {{hash=90cf806c60a0f6ee733bc817133c3960}{%
+           family={Schmidt},
+           familyi={S\bibinitperiod},
+           given={Fabian},
+           giveni={F\bibinitperiod}}}%
+      }
+      \strng{namehash}{743e43eeda7cc7a3837e25a7d93b6f57}
+      \strng{fullhash}{743e43eeda7cc7a3837e25a7d93b6f57}
+      \strng{fullhashraw}{743e43eeda7cc7a3837e25a7d93b6f57}
+      \strng{bibnamehash}{743e43eeda7cc7a3837e25a7d93b6f57}
+      \strng{authorbibnamehash}{743e43eeda7cc7a3837e25a7d93b6f57}
+      \strng{authornamehash}{743e43eeda7cc7a3837e25a7d93b6f57}
+      \strng{authorfullhash}{743e43eeda7cc7a3837e25a7d93b6f57}
+      \strng{authorfullhashraw}{743e43eeda7cc7a3837e25a7d93b6f57}
+      \field{sortinit}{D}
+      \field{sortinithash}{6f385f66841fb5e82009dc833c761848}
+      \field{labelnamesource}{author}
+      \field{labeltitlesource}{title}
+      \field{abstract}{Modern Cosmology, Second Edition, provides a detailed introduction to the field of cosmology. Beginning with the smooth, homogeneous universe described by a Friedmann-Lemaître-Robertson-Walker metric, this trusted resource includes careful treatments of dark energy, big bang nucleosynthesis, recombination, and dark matter. The reader is then introduced to perturbations about an {FLRW} universe: their evolution with the Einstein-Boltzmann equations, their primordial generation by inflation, and their observational consequences: the acoustic peaks in the {CMB}; the E/B decomposition in polarization; gravitational lensing of the {CMB} and large-scale structure; and the {BAO} standard ruler and redshift-space distortions in galaxy clustering. The Second Edition now also covers nonlinear structure formation including perturbation theory and simulations. The book concludes with a substantially updated chapter on data analysis. Modern Cosmology, Second Edition, shows how modern observations are rapidly revolutionizing our picture of the universe, and supplies readers with all the tools needed to work in cosmology.}
+      \field{journaltitle}{Modern Cosmology}
+      \field{langid}{english}
+      \field{note}{{ISBN}: 9780128159491}
+      \field{title}{Modern Cosmology}
+      \field{urlday}{4}
+      \field{urlmonth}{7}
+      \field{urlyear}{2026}
+      \field{year}{2020}
+      \field{dateera}{ce}
+      \field{urldateera}{ce}
+      \verb{doi}
+      \verb 10.1016/C2017-0-01943-2
+      \endverb
+      \verb{urlraw}
+      \verb https://ui.adsabs.harvard.edu/abs/2020moco.book.....D/abstract
+      \endverb
+      \verb{url}
+      \verb https://ui.adsabs.harvard.edu/abs/2020moco.book.....D/abstract
+      \endverb
+    \endentry
+    \entry{eisenstein_baryonic_1998}{article}{}{}
+      \name{author}{2}{}{%
+        {{hash=ed6fa3d34cdeab4583d555af8a365b02}{%
+           family={Eisenstein},
+           familyi={E\bibinitperiod},
+           given={Daniel\bibnamedelima J.},
+           giveni={D\bibinitperiod\bibinitdelim J\bibinitperiod}}}%
+        {{hash=b134113b331667441c40e2993aa7ad45}{%
+           family={Hu},
+           familyi={H\bibinitperiod},
+           given={Wayne},
+           giveni={W\bibinitperiod}}}%
+      }
+      \strng{namehash}{a0378e041bdd2414890fde2065499a6b}
+      \strng{fullhash}{a0378e041bdd2414890fde2065499a6b}
+      \strng{fullhashraw}{a0378e041bdd2414890fde2065499a6b}
+      \strng{bibnamehash}{a0378e041bdd2414890fde2065499a6b}
+      \strng{authorbibnamehash}{a0378e041bdd2414890fde2065499a6b}
+      \strng{authornamehash}{a0378e041bdd2414890fde2065499a6b}
+      \strng{authorfullhash}{a0378e041bdd2414890fde2065499a6b}
+      \strng{authorfullhashraw}{a0378e041bdd2414890fde2065499a6b}
+      \field{sortinit}{E}
+      \field{sortinithash}{8da8a182d344d5b9047633dfc0cc9131}
+      \field{labelnamesource}{author}
+      \field{labeltitlesource}{title}
+      \field{abstract}{We provide scaling relations and fitting formulae for adiabatic cold dark matter cosmologies that account for all baryon effects in the matter transfer function to better than 10\% in the large-scale structure regime. They are based upon a physically well-motivated separation of the effects of acoustic oscillations, Compton drag, velocity overshoot, baryon infall, adiabatic damping, Silk damping, and cold-dark-matter growth suppression. We also find a simpler, more accurate, and better motivated form for the zero baryon transfer function than previous works. These descriptions are employed to quantify the amplitude and location of baryonic features in linear theory. While baryonic oscillations are prominent if the baryon fraction exceeds \$Ω\_0 h{\textasciicircum}2 + 0.2\$, the main effect in more conventional cosmologies is a sharp suppression in the transfer function below the sound horizon. We provide a simple but accurate description of this effect and stress that it is not well approximated by a change in the shape parameter \$Γ\$.}
+      \field{eprinttype}{arxiv}
+      \field{issn}{0004-637X, 1538-4357}
+      \field{journaltitle}{The Astrophysical Journal}
+      \field{month}{4}
+      \field{number}{2}
+      \field{shortjournal}{{ApJ}}
+      \field{title}{Baryonic Features in the Matter Transfer Function}
+      \field{urlday}{7}
+      \field{urlmonth}{7}
+      \field{urlyear}{2026}
+      \field{volume}{496}
+      \field{year}{1998}
+      \field{dateera}{ce}
+      \field{urldateera}{ce}
+      \field{pages}{605\bibrangedash 614}
+      \range{pages}{10}
+      \verb{doi}
+      \verb 10.1086/305424
+      \endverb
+      \verb{eprint}
+      \verb astro-ph/9709112
+      \endverb
+      \verb{urlraw}
+      \verb http://arxiv.org/abs/astro-ph/9709112
+      \endverb
+      \verb{url}
+      \verb http://arxiv.org/abs/astro-ph/9709112
+      \endverb
+      \keyw{Astrophysics}
+    \endentry
+    \entry{noauthor_examplepkdgrav3_lightcone_2022}{online}{}{}
+      \field{sortinit}{e}
+      \field{sortinithash}{8da8a182d344d5b9047633dfc0cc9131}
+      \field{labeltitlesource}{title}
+      \field{abstract}{{PkDgrav}3 for dummies (with a Master's degree in Physics)}
+      \field{day}{2}
+      \field{langid}{english}
+      \field{month}{2}
+      \field{title}{example/pkdgrav3\_lightcone · main · Janis Fluri / {PkDgrav}3\_intro · {GitLab}}
+      \field{titleaddon}{{GitLab}}
+      \field{urlday}{4}
+      \field{urlmonth}{7}
+      \field{urlyear}{2026}
+      \field{year}{2022}
+      \field{dateera}{ce}
+      \field{urldateera}{ce}
+      \verb{urlraw}
+      \verb https://cosmo-gitlab.phys.ethz.ch/jafluri/pkdgrav3_intro/-/tree/main/example/pkdgrav3_lightcone
+      \endverb
+      \verb{url}
+      \verb https://cosmo-gitlab.phys.ethz.ch/jafluri/pkdgrav3_intro/-/tree/main/example/pkdgrav3_lightcone
+      \endverb
+    \endentry
+    \entry{fluri_full_2022}{article}{}{}
+      \name{author}{6}{}{%
+        {{hash=098970dbdd25b17069c302d0976fcc6f}{%
+           family={Fluri},
+           familyi={F\bibinitperiod},
+           given={Janis},
+           giveni={J\bibinitperiod}}}%
+        {{hash=df483ac6156aa0fcd034e33d2bc9c40d}{%
+           family={Kacprzak},
+           familyi={K\bibinitperiod},
+           given={Tomasz},
+           giveni={T\bibinitperiod}}}%
+        {{hash=6cfede2c7c222aae3aea34dc2eda42b2}{%
+           family={Lucchi},
+           familyi={L\bibinitperiod},
+           given={Aurelien},
+           giveni={A\bibinitperiod}}}%
+        {{hash=b0bbc045c27bc983e70475c843a27564}{%
+           family={Schneider},
+           familyi={S\bibinitperiod},
+           given={Aurel},
+           giveni={A\bibinitperiod}}}%
+        {{hash=be477f762f9072721aa39bdc57e3dceb}{%
+           family={Refregier},
+           familyi={R\bibinitperiod},
+           given={Alexandre},
+           giveni={A\bibinitperiod}}}%
+        {{hash=ee42cfed2ff3020233d2de97c356eaee}{%
+           family={Hofmann},
+           familyi={H\bibinitperiod},
+           given={Thomas},
+           giveni={T\bibinitperiod}}}%
+      }
+      \strng{namehash}{9a17c793b93cb5202f68c6c8c01288a8}
+      \strng{fullhash}{4d5a014661bedd2f0621523737650b6b}
+      \strng{fullhashraw}{4d5a014661bedd2f0621523737650b6b}
+      \strng{bibnamehash}{9a17c793b93cb5202f68c6c8c01288a8}
+      \strng{authorbibnamehash}{9a17c793b93cb5202f68c6c8c01288a8}
+      \strng{authornamehash}{9a17c793b93cb5202f68c6c8c01288a8}
+      \strng{authorfullhash}{4d5a014661bedd2f0621523737650b6b}
+      \strng{authorfullhashraw}{4d5a014661bedd2f0621523737650b6b}
+      \field{sortinit}{F}
+      \field{sortinithash}{2638baaa20439f1b5a8f80c6c08a13b4}
+      \field{labelnamesource}{author}
+      \field{labeltitlesource}{title}
+      \field{abstract}{We present a full forward-modeled \$w\${CDM} analysis of the {KiDS}-1000 weak lensing maps using graph-convolutional neural networks ({GCNN}). Utilizing the \${\textbackslash}texttt\{{CosmoGrid}\}\$, a novel massive simulation suite spanning six different cosmological parameters, we generate almost one million tomographic mock surveys on the sphere. Due to the large data set size and survey area, we perform a spherical analysis while limiting our map resolution to \${\textbackslash}texttt\{{HEALPix}\}\$ \$n\_{\textbackslash}mathrm\{side\}=512\$. We marginalize over systematics such as photometric redshift errors, multiplicative calibration and additive shear bias. Furthermore, we use a map-level implementation of the non-linear intrinsic alignment model along with a novel treatment of baryonic feedback to incorporate additional astrophysical nuisance parameters. We also perform a spherical power spectrum analysis for comparison. The constraints of the cosmological parameters are generated using a likelihood free inference method called Gaussian Process Approximate Bayesian Computation ({GPABC}). Finally, we check that our pipeline is robust against choices of the simulation parameters. We find constraints on the degeneracy parameter of \$S\_8 {\textbackslash}equiv σ\_8{\textbackslash}sqrt\{Ω\_M/0.3\} = 0.78{\textasciicircum}\{+0.06\}\_\{-0.06\}\$ for our power spectrum analysis and \$S\_8 = 0.79{\textasciicircum}\{+0.05\}\_\{-0.05\}\$ for our {GCNN} analysis, improving the former by 16\%. This is consistent with earlier analyses of the 2-point function, albeit slightly higher. Baryonic corrections generally broaden the constraints on the degeneracy parameter by about 10\%. These results offer great prospects for full machine learning based analyses of on-going and future weak lensing surveys.}
+      \field{day}{20}
+      \field{eprinttype}{arxiv}
+      \field{issn}{2470-0010, 2470-0029}
+      \field{journaltitle}{Physical Review D}
+      \field{month}{4}
+      \field{number}{8}
+      \field{shortjournal}{Phys. Rev. D}
+      \field{title}{A Full \$w\${CDM} Analysis of {KiDS}-1000 Weak Lensing Maps using Deep Learning}
+      \field{urlday}{2}
+      \field{urlmonth}{7}
+      \field{urlyear}{2026}
+      \field{volume}{105}
+      \field{year}{2022}
+      \field{dateera}{ce}
+      \field{urldateera}{ce}
+      \field{pages}{083518}
+      \range{pages}{1}
+      \verb{doi}
+      \verb 10.1103/PhysRevD.105.083518
+      \endverb
+      \verb{eprint}
+      \verb 2201.07771 [astro-ph.CO]
+      \endverb
+      \verb{urlraw}
+      \verb http://arxiv.org/abs/2201.07771
+      \endverb
+      \verb{url}
+      \verb http://arxiv.org/abs/2201.07771
+      \endverb
+      \keyw{Astrophysics - Cosmology and Nongalactic Astrophysics}
+    \endentry
+    \entry{hahn_disco-dj_2024}{article}{}{}
+      \name{author}{3}{}{%
+        {{hash=93d31a82af8d979d70eb089df6657151}{%
+           family={Hahn},
+           familyi={H\bibinitperiod},
+           given={Oliver},
+           giveni={O\bibinitperiod}}}%
+        {{hash=933ac8d07f2e51ff8aa3420f82ab823a}{%
+           family={List},
+           familyi={L\bibinitperiod},
+           given={Florian},
+           giveni={F\bibinitperiod}}}%
+        {{hash=3111a9d1d079d40bd17b6f52f309c071}{%
+           family={Porqueres},
+           familyi={P\bibinitperiod},
+           given={Natalia},
+           giveni={N\bibinitperiod}}}%
+      }
+      \strng{namehash}{eb3272abae029cdba70c41d5e9295f96}
+      \strng{fullhash}{eb3272abae029cdba70c41d5e9295f96}
+      \strng{fullhashraw}{eb3272abae029cdba70c41d5e9295f96}
+      \strng{bibnamehash}{eb3272abae029cdba70c41d5e9295f96}
+      \strng{authorbibnamehash}{eb3272abae029cdba70c41d5e9295f96}
+      \strng{authornamehash}{eb3272abae029cdba70c41d5e9295f96}
+      \strng{authorfullhash}{eb3272abae029cdba70c41d5e9295f96}
+      \strng{authorfullhashraw}{eb3272abae029cdba70c41d5e9295f96}
+      \field{sortinit}{H}
+      \field{sortinithash}{23a3aa7c24e56cfa16945d55545109b5}
+      \field{labelnamesource}{author}
+      \field{labeltitlesource}{shorttitle}
+      \field{abstract}{We present the Einstein-Boltzmann module of the {DISCO}-{DJ} ({DIfferentiable} Simulations for {COsmology} - Done with {JAX}) software package. This module implements a fully differentiable solver for the linearised cosmological Einstein-Boltzmann equations in the {JAX} framework, and allows computing Jacobian matrices of all solver output with respect to all input parameters using automatic differentiation. This implies that along with the solution for a given set of parameters, the tangent hyperplane in parameter space is known as well, which is a key ingredient for cosmological inference and forecasting problems as well as for many other applications. We discuss our implementation and demonstrate that our solver agrees at the per-mille level with the existing non-differentiable solvers {CAMB} and {CLASS}, including massive neutrinos and a dark energy fluid with parameterised equation of state. We illustrate the dependence of various summary statistics in large-scale structure cosmology on model parameters using the differentiable solver, and finally demonstrate how it can be easily used for Fisher forecasting, with a forecast for Euclid as an example. Since the implementation is significantly shorter and more modular than existing solvers, we believe it will be more straightforward to extend our solver to include additional physics, such as additional dark energy and dark matter models, modified gravity, or other non-standard physics in the future.}
+      \field{day}{1}
+      \field{eprinttype}{arxiv}
+      \field{issn}{1475-7516}
+      \field{journaltitle}{Journal of Cosmology and Astroparticle Physics}
+      \field{month}{6}
+      \field{number}{6}
+      \field{shortjournal}{J. Cosmol. Astropart. Phys.}
+      \field{shorttitle}{{DISCO}-{DJ} I}
+      \field{title}{{DISCO}-{DJ} I: a differentiable Einstein-Boltzmann solver for cosmology}
+      \field{urlday}{2}
+      \field{urlmonth}{7}
+      \field{urlyear}{2026}
+      \field{volume}{2024}
+      \field{year}{2024}
+      \field{dateera}{ce}
+      \field{urldateera}{ce}
+      \field{pages}{063}
+      \range{pages}{1}
+      \verb{doi}
+      \verb 10.1088/1475-7516/2024/06/063
+      \endverb
+      \verb{eprint}
+      \verb 2311.03291 [astro-ph.CO]
+      \endverb
+      \verb{urlraw}
+      \verb http://arxiv.org/abs/2311.03291
+      \endverb
+      \verb{url}
+      \verb http://arxiv.org/abs/2311.03291
+      \endverb
+      \keyw{Astrophysics - Cosmology and Nongalactic Astrophysics}
+    \endentry
+    \entry{huterer_growth_2023}{article}{}{}
+      \name{author}{1}{}{%
+        {{hash=2eb76baeec02d3621d61bea619901cef}{%
+           family={Huterer},
+           familyi={H\bibinitperiod},
+           given={Dragan},
+           giveni={D\bibinitperiod}}}%
+      }
+      \strng{namehash}{2eb76baeec02d3621d61bea619901cef}
+      \strng{fullhash}{2eb76baeec02d3621d61bea619901cef}
+      \strng{fullhashraw}{2eb76baeec02d3621d61bea619901cef}
+      \strng{bibnamehash}{2eb76baeec02d3621d61bea619901cef}
+      \strng{authorbibnamehash}{2eb76baeec02d3621d61bea619901cef}
+      \strng{authornamehash}{2eb76baeec02d3621d61bea619901cef}
+      \strng{authorfullhash}{2eb76baeec02d3621d61bea619901cef}
+      \strng{authorfullhashraw}{2eb76baeec02d3621d61bea619901cef}
+      \field{sortinit}{H}
+      \field{sortinithash}{23a3aa7c24e56cfa16945d55545109b5}
+      \field{labelnamesource}{author}
+      \field{labeltitlesource}{title}
+      \field{abstract}{We review one of the most fruitful areas in cosmology today that bridge theory and data - the temporal growth of large-scale structure. We go over the growth's physical foundations, and derive its behavior in simple cosmological models. While doing so, we explain how measurements of growth can be used to understand theory. We then review how some of the most mature cosmological probes - galaxy clustering, gravitational lensing, the abundance of clusters of galaxies, cosmic velocities, and cosmic microwave background - can be used to probe the growth of structure. We report the current constraints on growth, which are summarized as measurements of the parameter combination \$fσ\_8\$ as a function of redshift, or else as the mass fluctuation amplitude parameter \$S\_8\$. We finally illustrate several statistical approaches, ranging from the "growth index" parameterization to more general comparisons of growth and geometry, that can sharply test the standard cosmological model and indicate the presence of modifications to general relativity.}
+      \field{eprinttype}{arxiv}
+      \field{issn}{0935-4956, 1432-0754}
+      \field{journaltitle}{The Astronomy and Astrophysics Review}
+      \field{month}{12}
+      \field{number}{1}
+      \field{shortjournal}{Astron Astrophys Rev}
+      \field{title}{Growth of Cosmic Structure}
+      \field{urlday}{7}
+      \field{urlmonth}{7}
+      \field{urlyear}{2026}
+      \field{volume}{31}
+      \field{year}{2023}
+      \field{dateera}{ce}
+      \field{urldateera}{ce}
+      \field{pages}{2}
+      \range{pages}{1}
+      \verb{doi}
+      \verb 10.1007/s00159-023-00147-4
+      \endverb
+      \verb{eprint}
+      \verb 2212.05003 [astro-ph.CO]
+      \endverb
+      \verb{urlraw}
+      \verb http://arxiv.org/abs/2212.05003
+      \endverb
+      \verb{url}
+      \verb http://arxiv.org/abs/2212.05003
+      \endverb
+      \keyw{Astrophysics - Cosmology and Nongalactic Astrophysics,General Relativity and Quantum Cosmology,High Energy Physics - Theory}
+    \endentry
+    \entry{kacprzak_cosmogridv1_2023}{article}{}{}
+      \name{author}{5}{}{%
+        {{hash=df483ac6156aa0fcd034e33d2bc9c40d}{%
+           family={Kacprzak},
+           familyi={K\bibinitperiod},
+           given={Tomasz},
+           giveni={T\bibinitperiod}}}%
+        {{hash=098970dbdd25b17069c302d0976fcc6f}{%
+           family={Fluri},
+           familyi={F\bibinitperiod},
+           given={Janis},
+           giveni={J\bibinitperiod}}}%
+        {{hash=b0bbc045c27bc983e70475c843a27564}{%
+           family={Schneider},
+           familyi={S\bibinitperiod},
+           given={Aurel},
+           giveni={A\bibinitperiod}}}%
+        {{hash=be477f762f9072721aa39bdc57e3dceb}{%
+           family={Refregier},
+           familyi={R\bibinitperiod},
+           given={Alexandre},
+           giveni={A\bibinitperiod}}}%
+        {{hash=741a6dd67fd66374105bed2b3da45720}{%
+           family={Stadel},
+           familyi={S\bibinitperiod},
+           given={Joachim},
+           giveni={J\bibinitperiod}}}%
+      }
+      \strng{namehash}{9909968ee437e8d0b6d143f54aebbb20}
+      \strng{fullhash}{6a9ec9122d3d7a09b2421d378447be3a}
+      \strng{fullhashraw}{6a9ec9122d3d7a09b2421d378447be3a}
+      \strng{bibnamehash}{9909968ee437e8d0b6d143f54aebbb20}
+      \strng{authorbibnamehash}{9909968ee437e8d0b6d143f54aebbb20}
+      \strng{authornamehash}{9909968ee437e8d0b6d143f54aebbb20}
+      \strng{authorfullhash}{6a9ec9122d3d7a09b2421d378447be3a}
+      \strng{authorfullhashraw}{6a9ec9122d3d7a09b2421d378447be3a}
+      \field{sortinit}{K}
+      \field{sortinithash}{c02bf6bff1c488450c352b40f5d853ab}
+      \field{labelnamesource}{author}
+      \field{labeltitlesource}{shorttitle}
+      \field{abstract}{We present {CosmoGridV}1: a large set of lightcone simulations for map-level cosmological inference with probes of large scale structure. It is designed for cosmological parameter measurement based on Stage-{III} photometric surveys with non-Gaussian statistics and machine learning. {CosmoGridV}1 spans the \$w\${CDM} model by varying \$Ω\_m\$, \$σ\_8\$, \$w\_0\$, \$H\_0\$, \$n\_s\$, \$Ω\_b\$, and assumes three degenerate neutrinos with \${\textbackslash}sum m\_ν\$ = 0.06 {eV}. This space is covered by 2500 grid points on a Sobol sequence. At each grid point, we run 7 simulations with {PkdGrav}3 and store 69 particle maps at nside=2048 up to \$z\$=3.5, as well as halo catalog snapshots. The fiducial cosmology has 200 independent simulations, along with their stencil derivatives. An important part of {CosmoGridV}1 is the benchmark set of 28 simulations, which include larger boxes, higher particle counts, and higher redshift resolution of shells. They allow for testing if new types of analyses are sensitive to choices made in {CosmoGridV}1. We add baryon feedback effects on the map level, using shell-based baryon correction model. The shells are used to create maps of weak gravitational lensing, intrinsic alignment, and galaxy clustering, using the {UFalcon} code. The main part of {CosmoGridV}1 are the raw particle count shells that can be used to create full-sky maps for a given \$n(z)\$. We also release projected maps for a Stage-{III} forecast, as well as maps used previously in {KiDS}-1000 deep learning constraints with {CosmoGridV}1. The data is available at www.cosmogrid.ai.}
+      \field{day}{1}
+      \field{eprinttype}{arxiv}
+      \field{issn}{1475-7516}
+      \field{journaltitle}{Journal of Cosmology and Astroparticle Physics}
+      \field{month}{2}
+      \field{number}{2}
+      \field{shortjournal}{J. Cosmol. Astropart. Phys.}
+      \field{shorttitle}{{CosmoGridV}1}
+      \field{title}{{CosmoGridV}1: a simulated \$w\${CDM} theory prediction for map-level cosmological inference}
+      \field{urlday}{2}
+      \field{urlmonth}{7}
+      \field{urlyear}{2026}
+      \field{volume}{2023}
+      \field{year}{2023}
+      \field{dateera}{ce}
+      \field{urldateera}{ce}
+      \field{pages}{050}
+      \range{pages}{1}
+      \verb{doi}
+      \verb 10.1088/1475-7516/2023/02/050
+      \endverb
+      \verb{eprint}
+      \verb 2209.04662 [astro-ph.CO]
+      \endverb
+      \verb{urlraw}
+      \verb http://arxiv.org/abs/2209.04662
+      \endverb
+      \verb{url}
+      \verb http://arxiv.org/abs/2209.04662
+      \endverb
+      \keyw{Astrophysics - Cosmology and Nongalactic Astrophysics}
+    \endentry
+    \entry{lesgourgues_massive_2006}{article}{}{}
+      \name{author}{2}{}{%
+        {{hash=b1d70423463e64684eea42af7f584996}{%
+           family={Lesgourgues},
+           familyi={L\bibinitperiod},
+           given={Julien},
+           giveni={J\bibinitperiod}}}%
+        {{hash=e9ebd9027c0c7396bb5415590e80b1c2}{%
+           family={Pastor},
+           familyi={P\bibinitperiod},
+           given={Sergio},
+           giveni={S\bibinitperiod}}}%
+      }
+      \strng{namehash}{3d6a9b37a01404a39f31f858d2369f4a}
+      \strng{fullhash}{3d6a9b37a01404a39f31f858d2369f4a}
+      \strng{fullhashraw}{3d6a9b37a01404a39f31f858d2369f4a}
+      \strng{bibnamehash}{3d6a9b37a01404a39f31f858d2369f4a}
+      \strng{authorbibnamehash}{3d6a9b37a01404a39f31f858d2369f4a}
+      \strng{authornamehash}{3d6a9b37a01404a39f31f858d2369f4a}
+      \strng{authorfullhash}{3d6a9b37a01404a39f31f858d2369f4a}
+      \strng{authorfullhashraw}{3d6a9b37a01404a39f31f858d2369f4a}
+      \field{extraname}{1}
+      \field{sortinit}{L}
+      \field{sortinithash}{7c47d417cecb1f4bd38d1825c427a61a}
+      \field{labelnamesource}{author}
+      \field{labeltitlesource}{title}
+      \field{abstract}{The present experimental results on neutrino flavour oscillations provide evidence for non-zero neutrino masses, but give no hint on their absolute mass scale, which is the target of beta decay and neutrinoless double-beta decay experiments. Crucial complementary information on neutrino masses can be obtained from the analysis of data on cosmological observables, such as the anisotropies of the cosmic microwave background or the distribution of large-scale structure. In this review we describe in detail how free-streaming massive neutrinos affect the evolution of cosmological perturbations. We summarize the current bounds on the sum of neutrino masses that can be derived from various combinations of cosmological data, including the most recent analysis by the {WMAP} team. We also discuss how future cosmological experiments are expected to be sensitive to neutrino masses well into the sub-{eV} range.}
+      \field{eprinttype}{arxiv}
+      \field{issn}{03701573}
+      \field{journaltitle}{Physics Reports}
+      \field{month}{7}
+      \field{number}{6}
+      \field{shortjournal}{Physics Reports}
+      \field{title}{Massive neutrinos and cosmology}
+      \field{urlday}{7}
+      \field{urlmonth}{7}
+      \field{urlyear}{2026}
+      \field{volume}{429}
+      \field{year}{2006}
+      \field{dateera}{ce}
+      \field{urldateera}{ce}
+      \field{pages}{307\bibrangedash 379}
+      \range{pages}{73}
+      \verb{doi}
+      \verb 10.1016/j.physrep.2006.04.001
+      \endverb
+      \verb{eprint}
+      \verb astro-ph/0603494
+      \endverb
+      \verb{urlraw}
+      \verb http://arxiv.org/abs/astro-ph/0603494
+      \endverb
+      \verb{url}
+      \verb http://arxiv.org/abs/astro-ph/0603494
+      \endverb
+      \keyw{Astrophysics,High Energy Physics - Experiment,High Energy Physics - Phenomenology,High Energy Physics - Theory}
+    \endentry
+    \entry{lesgourgues_neutrino_2012}{article}{}{}
+      \name{author}{2}{}{%
+        {{hash=b1d70423463e64684eea42af7f584996}{%
+           family={Lesgourgues},
+           familyi={L\bibinitperiod},
+           given={Julien},
+           giveni={J\bibinitperiod}}}%
+        {{hash=e9ebd9027c0c7396bb5415590e80b1c2}{%
+           family={Pastor},
+           familyi={P\bibinitperiod},
+           given={Sergio},
+           giveni={S\bibinitperiod}}}%
+      }
+      \strng{namehash}{3d6a9b37a01404a39f31f858d2369f4a}
+      \strng{fullhash}{3d6a9b37a01404a39f31f858d2369f4a}
+      \strng{fullhashraw}{3d6a9b37a01404a39f31f858d2369f4a}
+      \strng{bibnamehash}{3d6a9b37a01404a39f31f858d2369f4a}
+      \strng{authorbibnamehash}{3d6a9b37a01404a39f31f858d2369f4a}
+      \strng{authornamehash}{3d6a9b37a01404a39f31f858d2369f4a}
+      \strng{authorfullhash}{3d6a9b37a01404a39f31f858d2369f4a}
+      \strng{authorfullhashraw}{3d6a9b37a01404a39f31f858d2369f4a}
+      \field{extraname}{2}
+      \field{sortinit}{L}
+      \field{sortinithash}{7c47d417cecb1f4bd38d1825c427a61a}
+      \field{labelnamesource}{author}
+      \field{labeltitlesource}{title}
+      \field{abstract}{Neutrinos can play an important role in the evolution of the Universe, modifying some of the cosmological observables. In this contribution we summarize the main aspects of cosmological relic neutrinos and we describe how the precision of present cosmological data can be used to learn about neutrino properties, in particular their mass, providing complementary information to beta decay and neutrinoless double-beta decay experiments. We show how the analysis of current cosmological observations, such as the anisotropies of the cosmic microwave background or the distribution of large-scale structure, provides an upper bound on the sum of neutrino masses of order 1 {eV} or less, with very good perspectives from future cosmological measurements which are expected to be sensitive to neutrino masses well into the sub-{eV} range.}
+      \field{eprinttype}{arxiv}
+      \field{issn}{1687-7357, 1687-7365}
+      \field{journaltitle}{Advances in High Energy Physics}
+      \field{shortjournal}{Advances in High Energy Physics}
+      \field{title}{Neutrino mass from Cosmology}
+      \field{urlday}{7}
+      \field{urlmonth}{7}
+      \field{urlyear}{2026}
+      \field{volume}{2012}
+      \field{year}{2012}
+      \field{dateera}{ce}
+      \field{urldateera}{ce}
+      \field{pages}{1\bibrangedash 34}
+      \range{pages}{34}
+      \verb{doi}
+      \verb 10.1155/2012/608515
+      \endverb
+      \verb{eprint}
+      \verb 1212.6154 [hep-ph]
+      \endverb
+      \verb{urlraw}
+      \verb http://arxiv.org/abs/1212.6154
+      \endverb
+      \verb{url}
+      \verb http://arxiv.org/abs/1212.6154
+      \endverb
+      \keyw{Astrophysics - Cosmology and Nongalactic Astrophysics,High Energy Physics - Phenomenology}
+    \endentry
+    \entry{libeskind_tracing_2018}{article}{}{}
+      \name{author}{30}{}{%
+        {{hash=856cbd179ecb6b6f27126ac651f22a02}{%
+           family={Libeskind},
+           familyi={L\bibinitperiod},
+           given={Noam\bibnamedelima I.},
+           giveni={N\bibinitperiod\bibinitdelim I\bibinitperiod}}}%
+        {{hash=a83107a581d06a042060ef66cdc6a13e}{%
+           family={Weygaert},
+           familyi={W\bibinitperiod},
+           given={Rien\bibnamedelimb van\bibnamedelima de},
+           giveni={R\bibinitperiod\bibinitdelim v\bibinitperiod\bibinitdelim d\bibinitperiod}}}%
+        {{hash=a5ffe16069597e841603aa1059b9657f}{%
+           family={Cautun},
+           familyi={C\bibinitperiod},
+           given={Marius},
+           giveni={M\bibinitperiod}}}%
+        {{hash=4c6243bf8a7c72134fa93a9fd2d5af71}{%
+           family={Falck},
+           familyi={F\bibinitperiod},
+           given={Bridget},
+           giveni={B\bibinitperiod}}}%
+        {{hash=bad09d40ed9d17041785d365f52bfd80}{%
+           family={Tempel},
+           familyi={T\bibinitperiod},
+           given={Elmo},
+           giveni={E\bibinitperiod}}}%
+        {{hash=f50f04e35e5eb12649a10bc501c23fcc}{%
+           family={Abel},
+           familyi={A\bibinitperiod},
+           given={Tom},
+           giveni={T\bibinitperiod}}}%
+        {{hash=a8bbca33dc20d85705dfcc4b24a7c83a}{%
+           family={Alpaslan},
+           familyi={A\bibinitperiod},
+           given={Mehmet},
+           giveni={M\bibinitperiod}}}%
+        {{hash=3baa3a328bfb0538e53ca1fc3603664e}{%
+           family={Aragoon-Calvo},
+           familyi={A\bibinithyphendelim C\bibinitperiod},
+           given={Miguel\bibnamedelima A.},
+           giveni={M\bibinitperiod\bibinitdelim A\bibinitperiod}}}%
+        {{hash=aff9e8185b29ebb3fe1a25273c88723c}{%
+           family={Forero-Romero},
+           familyi={F\bibinithyphendelim R\bibinitperiod},
+           given={Jaime\bibnamedelima E.},
+           giveni={J\bibinitperiod\bibinitdelim E\bibinitperiod}}}%
+        {{hash=074e7714a11af87902d701a1007cab2d}{%
+           family={Gonzalez},
+           familyi={G\bibinitperiod},
+           given={Roberto},
+           giveni={R\bibinitperiod}}}%
+        {{hash=ea3596c7f26994feac646a53b26d9d8e}{%
+           family={Gottloober},
+           familyi={G\bibinitperiod},
+           given={Stefan},
+           giveni={S\bibinitperiod}}}%
+        {{hash=93d31a82af8d979d70eb089df6657151}{%
+           family={Hahn},
+           familyi={H\bibinitperiod},
+           given={Oliver},
+           giveni={O\bibinitperiod}}}%
+        {{hash=2621e202e48588623ef5bf04a2e494dc}{%
+           family={Hellwing},
+           familyi={H\bibinitperiod},
+           given={Wojciech\bibnamedelima A.},
+           giveni={W\bibinitperiod\bibinitdelim A\bibinitperiod}}}%
+        {{hash=4d098d02f9367284a2fed6f17912ed7d}{%
+           family={Hoffman},
+           familyi={H\bibinitperiod},
+           given={Yehuda},
+           giveni={Y\bibinitperiod}}}%
+        {{hash=28abbab0b467bad512303a8af4b24317}{%
+           family={Jones},
+           familyi={J\bibinitperiod},
+           given={Bernard\bibnamedelimb J.\bibnamedelimi T.},
+           giveni={B\bibinitperiod\bibinitdelim J\bibinitperiod\bibinitdelim T\bibinitperiod}}}%
+        {{hash=68a7d2b749a83ca550e887fdcce6bd12}{%
+           family={Kitaura},
+           familyi={K\bibinitperiod},
+           given={Francisco},
+           giveni={F\bibinitperiod}}}%
+        {{hash=7ac97ba6a8fe165ed7349a8875ca5ddf}{%
+           family={Knebe},
+           familyi={K\bibinitperiod},
+           given={Alexander},
+           giveni={A\bibinitperiod}}}%
+        {{hash=ccdec463688dd4ce512e4b438e9724f1}{%
+           family={Manti},
+           familyi={M\bibinitperiod},
+           given={Serena},
+           giveni={S\bibinitperiod}}}%
+        {{hash=df209370a0e8b0ea219e52d1e686e59b}{%
+           family={Neyrinck},
+           familyi={N\bibinitperiod},
+           given={Mark},
+           giveni={M\bibinitperiod}}}%
+        {{hash=76ee0565ebe489e4621f3bb089316b71}{%
+           family={Nuza},
+           familyi={N\bibinitperiod},
+           given={Sebastiaan\bibnamedelima E.},
+           giveni={S\bibinitperiod\bibinitdelim E\bibinitperiod}}}%
+        {{hash=3e6bb9acaf671893f7afc14d0bbc9959}{%
+           family={Padilla},
+           familyi={P\bibinitperiod},
+           given={Nelson},
+           giveni={N\bibinitperiod}}}%
+        {{hash=ae4d7834f1e3ceae586e8ce56f2cf3d4}{%
+           family={Platen},
+           familyi={P\bibinitperiod},
+           given={Erwin},
+           giveni={E\bibinitperiod}}}%
+        {{hash=4994a6be03fd89d85c7f4d1df9c87a1a}{%
+           family={Ramachandra},
+           familyi={R\bibinitperiod},
+           given={Nesar},
+           giveni={N\bibinitperiod}}}%
+        {{hash=70ac3f98f08627023acbf51251d668cf}{%
+           family={Robotham},
+           familyi={R\bibinitperiod},
+           given={Aaron},
+           giveni={A\bibinitperiod}}}%
+        {{hash=a5b039d4ea28150e4bfba377aa1c438a}{%
+           family={Saar},
+           familyi={S\bibinitperiod},
+           given={Enn},
+           giveni={E\bibinitperiod}}}%
+        {{hash=db514de65f5d56ad219e317ddcb07957}{%
+           family={Shandarin},
+           familyi={S\bibinitperiod},
+           given={Sergei},
+           giveni={S\bibinitperiod}}}%
+        {{hash=578054ab6392f16e96daec305afb766b}{%
+           family={Steinmetz},
+           familyi={S\bibinitperiod},
+           given={Matthias},
+           giveni={M\bibinitperiod}}}%
+        {{hash=f56fa0601c753a35776f809edfc64e99}{%
+           family={Stoica},
+           familyi={S\bibinitperiod},
+           given={Radu\bibnamedelima S.},
+           giveni={R\bibinitperiod\bibinitdelim S\bibinitperiod}}}%
+        {{hash=0cba360a70519f0ee433b2229f66490f}{%
+           family={Sousbie},
+           familyi={S\bibinitperiod},
+           given={Thierry},
+           giveni={T\bibinitperiod}}}%
+        {{hash=0b93abe9b5117d7e2caf50e4154b7367}{%
+           family={Yepes},
+           familyi={Y\bibinitperiod},
+           given={Gustavo},
+           giveni={G\bibinitperiod}}}%
+      }
+      \strng{namehash}{60b14a97c84e342fccd29b8574c90dab}
+      \strng{fullhash}{e2c619febb690ea3e688b732ce8cabb4}
+      \strng{fullhashraw}{e2c619febb690ea3e688b732ce8cabb4}
+      \strng{bibnamehash}{60b14a97c84e342fccd29b8574c90dab}
+      \strng{authorbibnamehash}{60b14a97c84e342fccd29b8574c90dab}
+      \strng{authornamehash}{60b14a97c84e342fccd29b8574c90dab}
+      \strng{authorfullhash}{e2c619febb690ea3e688b732ce8cabb4}
+      \strng{authorfullhashraw}{e2c619febb690ea3e688b732ce8cabb4}
+      \field{sortinit}{L}
+      \field{sortinithash}{7c47d417cecb1f4bd38d1825c427a61a}
+      \field{labelnamesource}{author}
+      \field{labeltitlesource}{title}
+      \field{abstract}{The cosmic web is one of the most striking features of the distribution of galaxies and dark matter on the largest scales in the Universe. It is composed of dense regions packed full of galaxies, long filamentary bridges, flattened sheets and vast low density voids. The study of the cosmic web has focused primarily on the identification of such features, and on understanding the environmental effects on galaxy formation and halo assembly. As such, a variety of different methods have been devised to classify the cosmic web -- depending on the data at hand, be it numerical simulations, large sky surveys or other. In this paper we bring twelve of these methods together and apply them to the same data set in order to understand how they compare. In general these cosmic web classifiers have been designed with different cosmological goals in mind, and to study different questions. Therefore one would not \{{\textbackslash}it a priori\} expect agreement between different techniques however, many of these methods do converge on the identification of specific features. In this paper we study the agreements and disparities of the different methods. For example, each method finds that knots inhabit higher density regions than filaments, etc. and that voids have the lowest densities. For a given web environment, we find substantial overlap in the density range assigned by each web classification scheme. We also compare classifications on a halo-by-halo basis; for example, we find that 9 of 12 methods classify around a third of group-mass haloes (i.e. \$M\_\{{\textbackslash}rm halo\}{\textbackslash}sim10{\textasciicircum}\{13.5\}h{\textasciicircum}\{-1\}M\_\{{\textbackslash}odot\}\$) as being in filaments. Lastly, so that any future cosmic web classification scheme can be compared to the 12 methods used here, we have made all the data used in this paper public.}
+      \field{day}{1}
+      \field{eprinttype}{arxiv}
+      \field{issn}{0035-8711, 1365-2966}
+      \field{journaltitle}{Monthly Notices of the Royal Astronomical Society}
+      \field{month}{1}
+      \field{number}{1}
+      \field{title}{Tracing the cosmic web}
+      \field{urlday}{4}
+      \field{urlmonth}{7}
+      \field{urlyear}{2026}
+      \field{volume}{473}
+      \field{year}{2018}
+      \field{dateera}{ce}
+      \field{urldateera}{ce}
+      \field{pages}{1195\bibrangedash 1217}
+      \range{pages}{23}
+      \verb{doi}
+      \verb 10.1093/mnras/stx1976
+      \endverb
+      \verb{eprint}
+      \verb 1705.03021 [astro-ph.CO]
+      \endverb
+      \verb{urlraw}
+      \verb http://arxiv.org/abs/1705.03021
+      \endverb
+      \verb{url}
+      \verb http://arxiv.org/abs/1705.03021
+      \endverb
+      \keyw{Astrophysics - Cosmology and Nongalactic Astrophysics}
+    \endentry
+    \entry{list_disco-dj_2026}{article}{}{}
+      \name{author}{4}{}{%
+        {{hash=933ac8d07f2e51ff8aa3420f82ab823a}{%
+           family={List},
+           familyi={L\bibinitperiod},
+           given={Florian},
+           giveni={F\bibinitperiod}}}%
+        {{hash=93d31a82af8d979d70eb089df6657151}{%
+           family={Hahn},
+           familyi={H\bibinitperiod},
+           given={Oliver},
+           giveni={O\bibinitperiod}}}%
+        {{hash=6b0d647aa8f16caaf297954b77361b6e}{%
+           family={Flöss},
+           familyi={F\bibinitperiod},
+           given={Thomas},
+           giveni={T\bibinitperiod}}}%
+        {{hash=35f978597d7ec113c61ebf44f9988c92}{%
+           family={Winkler},
+           familyi={W\bibinitperiod},
+           given={Lukas},
+           giveni={L\bibinitperiod}}}%
+      }
+      \strng{namehash}{439c8166c48bf8bebf126954c1553cf4}
+      \strng{fullhash}{eec85dacaae86f73f8d2e6d7a663f257}
+      \strng{fullhashraw}{eec85dacaae86f73f8d2e6d7a663f257}
+      \strng{bibnamehash}{439c8166c48bf8bebf126954c1553cf4}
+      \strng{authorbibnamehash}{439c8166c48bf8bebf126954c1553cf4}
+      \strng{authornamehash}{439c8166c48bf8bebf126954c1553cf4}
+      \strng{authorfullhash}{eec85dacaae86f73f8d2e6d7a663f257}
+      \strng{authorfullhashraw}{eec85dacaae86f73f8d2e6d7a663f257}
+      \field{sortinit}{L}
+      \field{sortinithash}{7c47d417cecb1f4bd38d1825c427a61a}
+      \field{labelnamesource}{author}
+      \field{labeltitlesource}{shorttitle}
+      \field{abstract}{The mildly non-linear regime of cosmic structure formation holds much of the information that upcoming large-scale structure surveys aim to exploit, making fast and accurate predictions on these scales essential. We present the \$N\$-body module of {DISCO}-{DJ} ({DIfferentiable} Simulations for {COsmology} - Done with Jax), designed to deliver high-fidelity, {GPU}-accelerated, and differentiable particle-mesh simulations tailored for cosmological inference. Theory-informed time integrators such as the recently introduced {BullFrog} method allow for accurate predictions already with few time steps (e.g. \$6\$ steps for per-cent-level accuracy in terms of the present-day power spectrum at \$k {\textbackslash}approx 0.2 {\textbackslash}, h / {\textbackslash}mathrm\{Mpc\}\$ using \$N = 512{\textasciicircum}3\$ particles, which takes just a few seconds). To control discreteness effects and achieve high accuracy, the code incorporates a suite of advanced techniques, for example a custom non-uniform {FFT} implementation for force evaluation. Both forward- and reverse-mode differentiation are supported, with memory requirements independent of the number of time steps; in the reverse case, this is achieved through an adjoint formulation. We extensively study the effect of various numerical parameters on the accuracy. As an application of {DISCO}-{DJ}, we perform field-level inference by recovering \$σ\_8\$ and the initial conditions from a noisy Gadget matter density field. Coupled with our recently introduced Einstein--Boltzmann solver, the {DISCO}-{DJ} ecosystem provides a self-consistent, fully differentiable pipeline for modelling the large-scale structure of the universe. The code is available at https://github.com/cosmo-sims/{DISCO}-{DJ}.}
+      \field{day}{1}
+      \field{eprinttype}{arxiv}
+      \field{issn}{1475-7516}
+      \field{journaltitle}{Journal of Cosmology and Astroparticle Physics}
+      \field{month}{6}
+      \field{number}{6}
+      \field{shortjournal}{J. Cosmol. Astropart. Phys.}
+      \field{shorttitle}{{DISCO}-{DJ} {II}}
+      \field{title}{{DISCO}-{DJ} {II}: a differentiable particle-mesh code for cosmology}
+      \field{urlday}{2}
+      \field{urlmonth}{7}
+      \field{urlyear}{2026}
+      \field{volume}{2026}
+      \field{year}{2026}
+      \field{dateera}{ce}
+      \field{urldateera}{ce}
+      \field{pages}{033}
+      \range{pages}{1}
+      \verb{doi}
+      \verb 10.1088/1475-7516/2026/06/033
+      \endverb
+      \verb{eprint}
+      \verb 2510.05206 [astro-ph.CO]
+      \endverb
+      \verb{urlraw}
+      \verb http://arxiv.org/abs/2510.05206
+      \endverb
+      \verb{url}
+      \verb http://arxiv.org/abs/2510.05206
+      \endverb
+      \keyw{Astrophysics - Cosmology and Nongalactic Astrophysics,Astrophysics - Instrumentation and Methods for Astrophysics}
+    \endentry
+    \entry{potter_pkdgrav3_2016}{online}{}{}
+      \name{author}{3}{}{%
+        {{hash=b670f41d095e00b1a9f7f731ca18294b}{%
+           family={Potter},
+           familyi={P\bibinitperiod},
+           given={Douglas},
+           giveni={D\bibinitperiod}}}%
+        {{hash=741a6dd67fd66374105bed2b3da45720}{%
+           family={Stadel},
+           familyi={S\bibinitperiod},
+           given={Joachim},
+           giveni={J\bibinitperiod}}}%
+        {{hash=0587fd628442a39f33181dac51af9781}{%
+           family={Teyssier},
+           familyi={T\bibinitperiod},
+           given={Romain},
+           giveni={R\bibinitperiod}}}%
+      }
+      \strng{namehash}{8a4be568614476bec0686164e034a2d0}
+      \strng{fullhash}{8a4be568614476bec0686164e034a2d0}
+      \strng{fullhashraw}{8a4be568614476bec0686164e034a2d0}
+      \strng{bibnamehash}{8a4be568614476bec0686164e034a2d0}
+      \strng{authorbibnamehash}{8a4be568614476bec0686164e034a2d0}
+      \strng{authornamehash}{8a4be568614476bec0686164e034a2d0}
+      \strng{authorfullhash}{8a4be568614476bec0686164e034a2d0}
+      \strng{authorfullhashraw}{8a4be568614476bec0686164e034a2d0}
+      \field{sortinit}{P}
+      \field{sortinithash}{ff3bcf24f47321b42cb156c2cc8a8422}
+      \field{labelnamesource}{author}
+      \field{labeltitlesource}{shorttitle}
+      \field{abstract}{We report on the successful completion of a 2 trillion particle cosmological simulation to z=0 run on the Piz Daint supercomputer ({CSCS}, Switzerland), using 4000+ {GPU} nodes for a little less than 80h of wall-clock time or 350,000 node hours. Using multiple benchmarks and performance measurements on the {US} Oak Ridge National Laboratory Titan supercomputer, we demonstrate that our code {PKDGRAV}3, delivers, to our knowledge, the fastest time-to-solution for large-scale cosmological N-body simulations. This was made possible by using the Fast Multipole Method in conjunction with individual and adaptive particle time steps, both deployed efficiently (and for the first time) on supercomputers with {GPU}-accelerated nodes. The very low memory footprint of {PKDGRAV}3 allowed us to run the first ever benchmark with 8 trillion particles on Titan, and to achieve perfect scaling up to 18000 nodes and a peak performance of 10 Pflops.}
+      \field{day}{27}
+      \field{langid}{english}
+      \field{month}{9}
+      \field{shorttitle}{{PKDGRAV}3}
+      \field{title}{{PKDGRAV}3: Beyond Trillion Particle Cosmological Simulations for the Next Era of Galaxy Surveys}
+      \field{titleaddon}{{arXiv}.org}
+      \field{urlday}{3}
+      \field{urlmonth}{7}
+      \field{urlyear}{2026}
+      \field{year}{2016}
+      \field{dateera}{ce}
+      \field{urldateera}{ce}
+      \verb{urlraw}
+      \verb https://arxiv.org/abs/1609.08621v1
+      \endverb
+      \verb{url}
+      \verb https://arxiv.org/abs/1609.08621v1
+      \endverb
+    \endentry
+    \entry{seljak_line_1996}{article}{}{}
+      \name{author}{2}{}{%
+        {{hash=c76e39a7a5b7abe3f3ac79aa8e07be53}{%
+           family={Seljak},
+           familyi={S\bibinitperiod},
+           given={Uros},
+           giveni={U\bibinitperiod}}}%
+        {{hash=8837ada9420e1442e7f43c8356605f48}{%
+           family={Zaldarriaga},
+           familyi={Z\bibinitperiod},
+           given={Matias},
+           giveni={M\bibinitperiod}}}%
+      }
+      \strng{namehash}{f76cb70705326244eb9f505716619ca4}
+      \strng{fullhash}{f76cb70705326244eb9f505716619ca4}
+      \strng{fullhashraw}{f76cb70705326244eb9f505716619ca4}
+      \strng{bibnamehash}{f76cb70705326244eb9f505716619ca4}
+      \strng{authorbibnamehash}{f76cb70705326244eb9f505716619ca4}
+      \strng{authornamehash}{f76cb70705326244eb9f505716619ca4}
+      \strng{authorfullhash}{f76cb70705326244eb9f505716619ca4}
+      \strng{authorfullhashraw}{f76cb70705326244eb9f505716619ca4}
+      \field{sortinit}{S}
+      \field{sortinithash}{b164b07b29984b41daf1e85279fbc5ab}
+      \field{labelnamesource}{author}
+      \field{labeltitlesource}{title}
+      \field{abstract}{We present a new method for calculating linear cosmic microwave background ({CMB}) anisotropy spectra based on integration over sources along the photon past light cone. In this approach the temperature anisotropy is written as a time integral over the product of a geometrical term and a source term. The geometrical term is given by radial eigenfunctions which do not depend on the particular cosmological model. The source term can be expressed in terms of photon, baryon and metric perturbations, all of which can be calculated using a small number of differential equations. This split clearly separates between the dynamical and geometrical effects on the {CMB} anisotropies. More importantly, it allows to significantly reduce the computational time compared to standard methods. This is achieved because the source term, which depends on the model and is generally the most time consuming part of calculation, is a slowly varying function of wavelength and needs to be evaluated only in a small number of points. The geometrical term, which oscillates much more rapidly than the source term, does not depend on the particular model and can be precomputed in advance. Standard methods that do not separate the two terms and require a much higher number of evaluations. The new method leads to about two orders of magnitude reduction in {CPU} time when compared to standard methods and typically requires a few minutes on a workstation for a single model. The method should be especially useful for accurate determinations of cosmological parameters from {CMB} anisotropy and polarization measurements that will become possible with the next generation of experiments. A programm implementing this method can be obtained from the authors.}
+      \field{eprinttype}{arxiv}
+      \field{issn}{0004-637X, 1538-4357}
+      \field{journaltitle}{The Astrophysical Journal}
+      \field{month}{10}
+      \field{shortjournal}{{ApJ}}
+      \field{title}{A Line of Sight Approach to Cosmic Microwave Background Anisotropies}
+      \field{urlday}{7}
+      \field{urlmonth}{7}
+      \field{urlyear}{2026}
+      \field{volume}{469}
+      \field{year}{1996}
+      \field{dateera}{ce}
+      \field{urldateera}{ce}
+      \field{pages}{437}
+      \range{pages}{1}
+      \verb{doi}
+      \verb 10.1086/177793
+      \endverb
+      \verb{eprint}
+      \verb astro-ph/9603033
+      \endverb
+      \verb{urlraw}
+      \verb http://arxiv.org/abs/astro-ph/9603033
+      \endverb
+      \verb{url}
+      \verb http://arxiv.org/abs/astro-ph/9603033
+      \endverb
+      \keyw{Astrophysics}
+    \endentry
+  \enddatalist
+\endrefsection
+\endinput
+

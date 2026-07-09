@@ -1,0 +1,45 @@
+\contentsline {section}{\numberline {1}Introduction}{3}{}%
+\contentsline {section}{\numberline {2}Theoretical Background}{3}{}%
+\contentsline {subsection}{\numberline {2.1}Cosmological Framework}{3}{}%
+\contentsline {subsubsection}{\numberline {2.1.1}The Cosmic Web}{3}{}%
+\contentsline {subsubsection}{\numberline {2.1.2}Matter Power Spectrum and Transfer Function}{3}{}%
+\contentsline {subsubsection}{\numberline {2.1.3}Lightcones and Snapshots}{5}{}%
+\contentsline {subsection}{\numberline {2.2}Cosmological Simulations}{5}{}%
+\contentsline {subsubsection}{\numberline {2.2.1}DISCO-DJ}{5}{}%
+\contentsline {subsubsection}{\numberline {2.2.2}Pkdgrav}{6}{}%
+\contentsline {subsubsection}{\numberline {2.2.3}CosmoGridV1}{7}{}%
+\contentsline {section}{\numberline {3}Methods and implementation}{7}{}%
+\contentsline {subsection}{\numberline {3.1}Pipeline Architecture}{7}{}%
+\contentsline {paragraph}{Approaches.}{7}{}%
+\contentsline {subsection}{\numberline {3.2}IC generation}{8}{}%
+\contentsline {subsubsection}{\numberline {3.2.1}Validation against CosmoGridV1}{8}{}%
+\contentsline {subsubsection}{\numberline {3.2.2}Backscaled initial conditions and hand-off to \textsc {disco}}{8}{}%
+\contentsline {subsection}{\numberline {3.3}Shell Builder}{8}{}%
+\contentsline {subsubsection}{\numberline {3.3.1}Core}{8}{}%
+\contentsline {paragraph}{Time discretization.}{8}{}%
+\contentsline {paragraph}{Accumulation procedure.}{8}{}%
+\contentsline {paragraph}{Output.}{9}{}%
+\contentsline {subsubsection}{\numberline {3.3.2}Crossing Condition}{9}{}%
+\contentsline {paragraph}{Periodic replicas.}{9}{}%
+\contentsline {paragraph}{Linear crossing formula.}{10}{}%
+\contentsline {paragraph}{Shell assignment and pixelization.}{10}{}%
+\contentsline {subsection}{\numberline {3.4}Neural Network}{10}{}%
+\contentsline {subsubsection}{\numberline {3.4.1}Dimensional Reduction}{11}{}%
+\contentsline {subsubsection}{\numberline {3.4.2}Data preparation}{12}{}%
+\contentsline {subsubsection}{\numberline {3.4.3}Network Architecture}{12}{}%
+\contentsline {subsubsection}{\numberline {3.4.4}Training Procedure}{12}{}%
+\contentsline {subsubsection}{\numberline {3.4.5}Validation Strategy}{12}{}%
+\contentsline {section}{\numberline {4}Computational Infrastructure}{12}{}%
+\contentsline {subsection}{\numberline {4.1}Computing Environments}{12}{}%
+\contentsline {subsubsection}{\numberline {4.1.1}Local Development}{12}{}%
+\contentsline {subsubsection}{\numberline {4.1.2}Euler (ETH Zurich)}{13}{}%
+\contentsline {subsubsection}{\numberline {4.1.3}CSCS (Alps / Piz Daint)}{13}{}%
+\contentsline {subsection}{\numberline {4.2}Software Engineering}{13}{}%
+\contentsline {subsubsection}{\numberline {4.2.1}Code Structure}{13}{}%
+\contentsline {subsubsection}{\numberline {4.2.2}Job Scheduling and Submission}{14}{}%
+\contentsline {subsubsection}{\numberline {4.2.3}Job Scheduling and Submission}{14}{}%
+\contentsline {subsubsection}{\numberline {4.2.4}Version Control (GitHub)}{15}{}%
+\contentsline {section}{\numberline {5}Results}{15}{}%
+\contentsline {section}{\numberline {6}Conclusion}{15}{}%
+\contentsline {section}{\numberline {A}Implementation Details}{17}{}%
+\contentsline {subsection}{\numberline {A.1}Job Configuration}{17}{}%
