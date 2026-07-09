@@ -28,7 +28,7 @@
 #SBATCH --error=/capstor/scratch/cscs/damrein/outputs/logs/pkdgrav/pkdgrav_gen_%A_%a.err
 
 # ---- Paths -------------------------------------------------------
-COSMOGRID_DIR="/capstor/scratch/cscs/damrein/cosmogridv1"
+COSMOGRID_DIR="/capstor/scratch/cscs/damrein/grid"
 PKDGRAV_BIN="/users/damrein/pkdgrav/pkdgrav_latest/pkdgrav3/build/pkdgrav3"
 JOB_LIST="/users/damrein/masterProject/pkdgrav/job_list_gen_all.txt"
 LOG_DIR="/capstor/scratch/cscs/damrein/outputs/logs/pkdgrav"
@@ -38,12 +38,12 @@ LOG_DIR="/capstor/scratch/cscs/damrein/outputs/logs/pkdgrav"
 # Before --build-list we define a mask for parameters
 # ============================================================
 
-OMEGA_M_MIN=0.1;  OMEGA_M_MAX=0.6
-SIGMA_8_MIN=0.5;  SIGMA_8_MAX=1.0
-W0_MIN=-1.5;       W0_MAX=-0.5
-H0_MIN=60.0;       H0_MAX=80.0
-OMEGA_B_MIN=0.040; OMEGA_B_MAX=0.060
-N_S_MIN=0.90;      N_S_MAX=1.0
+OMEGA_M_MIN=0.1;  OMEGA_M_MAX=0.5
+SIGMA_8_MIN=0.6;  SIGMA_8_MAX=1.0
+W0_MIN=-1.4;       W0_MAX=-0.6
+H0_MIN=65.0;       H0_MAX=75.0
+OMEGA_B_MIN=0.046; OMEGA_B_MAX=0.051
+N_S_MIN=0.95;      N_S_MAX=0.98
 
 # Returns 0 (true) if params.yml values are inside the mask ranges, 1 otherwise.
 check_mask() {
@@ -115,7 +115,17 @@ if [[ "${1}" == "--build-list" ]]; then
     > "${JOB_LIST}"
     skipped=0
     masked=0
+    excluded=0
     for cosmo_dir in "${COSMOGRID_DIR}"/cosmo_*/; do
+        # Skip cosmologies flagged by IC_preparation.py: CLASS could not compute
+        # sigma8/omega_rad for these (omega_b outside the default BBN YHe table), so
+        # their cosmology.par never got the correct cosmological-parameter block --
+        # generating ICs for them would use wrong/stale cosmology. The flag travels
+        # with the cosmo_* directory regardless of which grid it lives under.
+        if [ -f "${cosmo_dir}EXCLUDED_BBN_OMEGAB.flag" ]; then
+            (( excluded++ )) || true
+            continue
+        fi
         for run_dir in "${cosmo_dir}"run_*/; do
 
             echo "Checking ${run_dir} ..."
@@ -124,12 +134,11 @@ if [[ "${1}" == "--build-list" ]]; then
             if [ ! -f "$cos_file" ] || [ ! -f "$par_file" ]; then
                 continue
             fi
-            # TODO: Uncomment this
-            # Check mask: skip if parameters are outside desired ranges
-            # if ! check_mask "$par_file"; then
-            #     (( masked++ )) || true
-            #     continue
-            # fi
+  
+            if ! check_mask "$par_file"; then
+                (( masked++ )) || true
+                continue
+            fi
 
             # Skip if IC file already exists
             ach_out=$(grep '^achOutName' "$cos_file" | sed 's/.*= *"\(.*\)"/\1/')
@@ -143,6 +152,7 @@ if [[ "${1}" == "--build-list" ]]; then
     N=$(wc -l < "${JOB_LIST}")
     echo "Job list built: ${N} entries to run, ${skipped} skipped (IC already exists)"
     echo "  ${masked} entries skipped due to mask"
+    echo "  ${excluded} cosmologies skipped (EXCLUDED_BBN_OMEGAB.flag)"
     echo ""
     if [ "${N}" -eq 0 ]; then
         echo "Nothing to submit."

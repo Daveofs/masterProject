@@ -18,11 +18,11 @@ SCRATCH_DIR=/capstor/scratch/cscs/damrein
 CONDA_ROOT=/users/damrein/miniforge3
 CONDA_ENV=disco-dj
 
-DISCO_FILE="/capstor/scratch/cscs/damrein/outputs/shells_100_presteps/shells_nside=2048.npz"
-COSMOGRID_FILE="${SCRATCH_DIR}/cosmogridv1/cosmo_000001/run_0/compressed_shells.npz"
+DISCO_FILE="/capstor/scratch/cscs/damrein/outputs/transfer/3855493/cosmo_000122_corrected_fullT.npz"
+COSMOGRID_FILE="/capstor/scratch/cscs/damrein/cosmogridv1/cosmo_000122/run_0/compressed_shells.npz"
 OUT_DIR="${SCRATCH_DIR}/outputs/pixel_histogram"
 
-PY_SCRIPT=/users/damrein/masterProject/tools/plot_pixel_histogram.py
+PY_SCRIPT=/users/damrein/masterProject/vis/plot_pixel_histogram.py
 
 # Shell indices to plot: 5 evenly spaced across the 69 shells (0-based)
 # shell 0  z~[0.000, 0.013]
@@ -40,6 +40,12 @@ NBINS=100
 OMEGA_M=0.3
 H0_H=0.73
 FSKY=1.0
+
+# Legend/stats labels for the two datasets, and the plot title prefix.
+# Edit these to relabel the figures without touching the Python script.
+LABEL_A="CosmogridV1"
+LABEL_B="DISCO corrected"
+TITLE="Pixel count histogram"
 
 # Optional box parameters (set these to enable M_box calculation)
 # Lbox in comoving Mpc/h (h^-1 Mpc). The Python script assumes these units by default.
@@ -84,6 +90,8 @@ echo "  CosmoGridV1: ${COSMOGRID_FILE}"
 echo "  Output dir:  ${OUT_DIR}"
 echo "  Shells:      ${SHELL_INDICES}"
 echo "  Bins:        ${NBINS}"
+echo "  Labels:      ${LABEL_A} / ${LABEL_B}"
+echo "  Title:       ${TITLE}"
 
 # shellcheck disable=SC2086
 PY_CMD=("${PY_SCRIPT}" \
@@ -94,7 +102,10 @@ PY_CMD=("${PY_SCRIPT}" \
     --nbins      "${NBINS}" \
     --omega-m    "${OMEGA_M}" \
     --h          "${H0_H}" \
-    --fsky       "${FSKY}")
+    --fsky       "${FSKY}" \
+    --label-a    "${LABEL_A}" \
+    --label-b    "${LABEL_B}" \
+    --title      "${TITLE}")
 
 if [[ -n "${LBOX_DISCO}" ]]; then
     PY_CMD+=(--lbox-disco "${LBOX_DISCO}")

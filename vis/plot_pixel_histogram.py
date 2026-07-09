@@ -46,7 +46,8 @@ def plot_shell_histogram(
     counts_d: np.ndarray,
     counts_c: np.ndarray,
     nbins: int,
-    label: str,
+    label_a: str = "DISCO-DJ",
+    label_b: str = "CosmoGridV1",
 ):
     """Plot raw pixel-count histograms for one shell on *ax*."""
     counts_d = counts_d.astype(np.float64)
@@ -61,10 +62,10 @@ def plot_shell_histogram(
     bins = np.linspace(lo, hi, nbins + 1)
 
     ax.hist(counts_d, bins=bins, density=False, histtype="step",
-            lw=1.8, color="#2979ff", label=fr"DISCO-DJ  ($\bar{{n}}$={nbar_d:.2f})")
+            lw=1.8, color="#2979ff", label=fr"{label_a}  ($\bar{{n}}$={nbar_d:.2f})")
     ax.hist(counts_c, bins=bins, density=False, histtype="step",
             lw=1.8, color="#e53935", linestyle="--",
-            label=fr"CosmoGridV1  ($\bar{{n}}$={nbar_c:.2f})")
+            label=fr"{label_b}  ($\bar{{n}}$={nbar_c:.2f})")
 
     # Vertical lines at each mean
     ax.axvline(nbar_d, color="#2979ff", lw=1.0, linestyle=":", alpha=0.8)
@@ -72,7 +73,6 @@ def plot_shell_histogram(
 
     ax.set_xlabel("Pixel particle count $n$", fontsize=10)
     ax.set_ylabel("Pixel count", fontsize=10)
-    ax.set_title(label, fontsize=9)
     ax.legend(fontsize=8)
     ax.grid(True, alpha=0.3)
 
@@ -131,6 +131,13 @@ def main():
                         help="Units for --lbox-* (default: 'Mpc/h' = comoving h^-1 Mpc).")
     parser.add_argument("--fsky",     type=float, default=1.0,
                         help="Sky fraction (0-1) for computing comoving shell volume (default: 1.0)")
+    parser.add_argument("--label-a", dest="label_a", default="DISCO-DJ",
+                        help="Legend/stats name for the --disco dataset (default: 'DISCO-DJ').")
+    parser.add_argument("--label-b", dest="label_b", default="CosmoGridV1",
+                        help="Legend/stats name for the --cosmogrid dataset (default: 'CosmoGridV1').")
+    parser.add_argument("--title", dest="title", default="Pixel count histogram",
+                        help="Title prefix for each per-shell plot (default: 'Pixel count histogram'). "
+                             "The shell index/redshift range and stats are appended automatically.")
     args = parser.parse_args()
 
     os.makedirs(args.out_dir, exist_ok=True)
@@ -203,15 +210,15 @@ def main():
         counts_c = shells_c[idx].astype(np.float64)
 
         fig, ax = plt.subplots(figsize=(7, 4.5))
-        plot_shell_histogram(ax, counts_d, counts_c, args.nbins, label)
+        plot_shell_histogram(ax, counts_d, counts_c, args.nbins, args.label_a, args.label_b)
 
         # Statistics annotation (raw counts)
         nbar_d = counts_d.mean()
         nbar_c = counts_c.mean()
         stats_txt = (
-            f"DISCO:      n̄={nbar_d:.4f}  std={counts_d.std():.4f}  "
+            f"{args.label_a}:      n̄={nbar_d:.4f}  std={counts_d.std():.4f}  "
             f"min={counts_d.min():.0f}  max={counts_d.max():.0f}\n"
-            f"CosmoGrid: n̄={nbar_c:.4f}  std={counts_c.std():.4f}  "
+            f"{args.label_b}: n̄={nbar_c:.4f}  std={counts_c.std():.4f}  "
             f"min={counts_c.min():.0f}  max={counts_c.max():.0f}  "
             f"  ratio n̄_D/n̄_C={nbar_d/nbar_c:.4f}"
         )
@@ -238,8 +245,8 @@ def main():
             note_c = "(from Lbox/res)"
             mass_line = (
                 f"\nTheory: M={M_theory:.3e} Msun; "
-                f"DISCO M={Mpart_d:.3e} Msun (ratio={Mpart_d/M_theory:.3f}); "
-                f"CosmoGrid M={Mpart_c:.3e} Msun (ratio={Mpart_c/M_theory:.3f})"
+                f"{args.label_a} M={Mpart_d:.3e} Msun (ratio={Mpart_d/M_theory:.3f}); "
+                f"{args.label_b} M={Mpart_c:.3e} Msun (ratio={Mpart_c/M_theory:.3f})"
             )
             print(f"  Shell {idx}: M_theory={M_theory:.6g} Msun  DISCO M={Mpart_d:.6g} Msun  CosmoGrid M={Mpart_c:.6g} Msun")
             # Expected particle counts from uniform sampling of box
@@ -256,7 +263,7 @@ def main():
         else:
             print(f"  Shell {idx}: Mass comparison skipped (no particle mass available and zero counts)")
 
-        ax.set_title(f"Pixel count histogram – {label}\n{stats_txt}{mass_line}", fontsize=8)
+        ax.set_title(f"{args.title} – {label}\n{stats_txt}{mass_line}", fontsize=8)
 
         fig.tight_layout()
         out_f = Path(args.out_dir) / f"pixel_histogram_shell{idx:03d}.png"

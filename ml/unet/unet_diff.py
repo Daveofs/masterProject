@@ -151,10 +151,17 @@ class DiffUNet(nn.Module):
         return self.out(h)                                # predicted difference (B,1,L,L)
 
 
-def correction_loss(pred_diff, target_diff):
-    """loss = mean( (pixel1 - pixel2)^2 ), pixel1 = corrected (= disco + pred),
-    pixel2 = high; equals mean( (pred_diff - (high - disco))^2 )."""
-    return ((pred_diff - target_diff) ** 2).mean()
+def correction_loss(pred_diff, target_diff, huber_delta: float = 0.1):
+    """Robust pixel loss: Huber(corrected, high) = Huber(pred_diff, high - disco).
+
+    Plain MSE let rare bright/outlier pixels (cluster spikes, shot-noise peaks) dominate
+    a batch's loss (observed: per-batch loss jumping between ~1e-4 and >5 while the
+    median batch was near 0) -- pure batch-to-batch content variance, not divergence,
+    but it drowns out the learning signal from typical batches. Huber is quadratic
+    (== MSE) for small errors and linear beyond huber_delta, so those rare outliers
+    stop dominating the gradient while ordinary batches train the same as before.
+    """
+    return nn.functional.smooth_l1_loss(pred_diff, target_diff, beta=huber_delta)
 
 
 # ---------------------------------------------------------------------------
@@ -190,8 +197,20 @@ def radial_power(img: torch.Tensor, bins: torch.Tensor, counts: torch.Tensor,
 
 
 def spectral_loss(corrected_img: torch.Tensor, target_img: torch.Tensor,
-                  bins: torch.Tensor, counts: torch.Tensor, n_bins: int) -> torch.Tensor:
-    """MSE between log radial power spectra of corrected vs truth patches."""
+                  bins: torch.Tensor, counts: torch.Tensor, n_bins: int,
+                  eps: float = 1e-3) -> torch.Tensor:
+    """Mean squared LOG-RATIO of radial power spectra: mean( (log((Pc+eps)/(Pt+eps)))^2 ).
+
+    Earlier version used (log1p(Pc)-log1p(Pt))^2, which behaves like an ABSOLUTE
+    difference for the small power values at high ell/bin index (log1p(x)~x for
+    x<<1) -- so gradients were dominated by the much larger low-ell power terms, and
+    empirically the model learned to correct only large scales, leaving the
+    corrected/high Cl ratio at high ell glued to the (uncorrected) DISCO/high ratio.
+    The log-RATIO form is scale-invariant per bin: a given FRACTIONAL power error
+    contributes the same loss regardless of whether it's a high- or low-power bin, so
+    small-scale (high-ell) accuracy is no longer drowned out. eps is negligible
+    relative to typical per-bin power (>>1e-3 in these units); it only guards zero bins.
+    """
     pc = radial_power(corrected_img, bins, counts, n_bins)
     pt = radial_power(target_img, bins, counts, n_bins)
-    return (torch.log1p(pc) - torch.log1p(pt)).pow(2).mean()
+    return torch.log((pc + eps) / (pt + eps)).pow(2).mean()

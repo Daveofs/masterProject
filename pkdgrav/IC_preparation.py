@@ -36,7 +36,7 @@ import numpy as np
 import h5py
 import yaml
 
-COSMOGRID_DIR = Path("/capstor/scratch/cscs/damrein/cosmogridv1")
+COSMOGRID_DIR = Path("/capstor/scratch/cscs/damrein/grid")
 K_PIVOT = 0.05
 
 

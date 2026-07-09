@@ -45,8 +45,14 @@ def setup_ddp():
     if "RANK" in os.environ and "WORLD_SIZE" in os.environ:
         local = int(os.environ["LOCAL_RANK"])
         torch.cuda.set_device(local)
+        # 30 min (not 10): rank0-only setup work (val-batch collection) can hit a slow
+        # Lustre day and stall well past 10 min while other ranks idle -- previously
+        # that skew made ranks 1-3 race ahead into DDP()'s internal ALLGATHER before
+        # rank0 arrived, which then hit the (old, shorter) NCCL timeout and crashed the
+        # whole job. The barrier below is the real fix (keeps ranks in lockstep); this
+        # timeout is just headroom so a genuinely slow read doesn't trip NCCL first.
         dist.init_process_group("nccl", device_id=torch.device(f"cuda:{local}"),
-                                timeout=timedelta(minutes=10))
+                                timeout=timedelta(minutes=30))
         return local, int(os.environ["RANK"]), int(os.environ["WORLD_SIZE"])
     return 0, 0, 1
 
@@ -65,6 +71,57 @@ class DownscaledStreamer(ResidualStreamer):
             tc = ud.downscale_nested(tc[None], self.factor)[0]
             hi = ud.downscale_nested(hi[None], self.factor)[0]
         return super()._process_shell(tc, hi, si, n_run, cosmo)
+
+
+def collect_val_batches(streamer, n_batches, batch_size, to_img, L, dev, seed=12345):
+    """Build n_batches FIXED validation batches via light mmap shell reads.
+
+    streamer.batches() (used for training) does a full ~14-28 GB SEQUENTIAL np.load of
+    an entire run pair before yielding anything -- fine for training (amortized over
+    ~100k patches per run) but wasteful here: it stalled every job's startup (DDP init/
+    header print) by tens of seconds to minutes just to gather a handful of validation
+    batches. Instead, mmap each run and slice out only as few individual shells as
+    possible (~200 MB each at full res) via streamer._process_shell, which accepts
+    plain numpy shell arrays regardless of how they were read.
+
+    A single shell yields far more patches than one batch needs (e.g. ~1500 at
+    order=16, patch_frac=0.5, vs. batch_size=128), so we pull MULTIPLE disjoint
+    batches per shell before moving to the next one -- this minimizes the number of
+    distinct files/shells touched (each read is I/O, occasionally slow under
+    filesystem load; observed 100+s tail latency for a single 200MB shell), rather
+    than reading one new shell per batch.
+    """
+    rng = np.random.RandomState(seed)
+    order = list(range(len(streamer.runs)))
+    rng.shuffle(order)
+    out = []
+    for ri in order:
+        if len(out) >= n_batches:
+            break
+        tc_path, hi_path, cosmo = streamer.runs[ri]
+        low_mm = np.load(tc_path, mmap_mode="r")
+        high_mm = np.load(hi_path, mmap_mode="r")
+        n = min(low_mm.shape[0], high_mm.shape[0])
+        for si in rng.permutation(n):
+            if len(out) >= n_batches:
+                break
+            tc = np.asarray(low_mm[si], dtype=np.float32)
+            hi = np.asarray(high_mm[si], dtype=np.float32)
+            x1p, cp, cvec = streamer._process_shell(tc, hi, int(si), n, cosmo)
+            n_from_shell = x1p.shape[0] // batch_size
+            if n_from_shell < 1:
+                continue
+            idx = rng.permutation(x1p.shape[0])
+            cosmo_t = torch.from_numpy(np.repeat(cvec[None], batch_size, 0)).to(dev)
+            for b in range(n_from_shell):
+                if len(out) >= n_batches:
+                    break
+                bi = idx[b * batch_size:(b + 1) * batch_size]
+                x1 = torch.from_numpy(x1p[bi]).to(dev)
+                cond = torch.from_numpy(cp[bi]).to(dev)
+                ci, dt, x1i = to_images(x1, cond, to_img, L)
+                out.append((ci.detach(), dt.detach(), x1i.detach(), cosmo_t.detach()))
+    return out
 
 
 def to_images(x1, cond, to_img, L):
@@ -93,11 +150,17 @@ def train(args):
 
     # NOTE: estimated on full-res shells regardless of --downscale (arcsinh scale is
     # only mildly resolution-dependent; fine for a fast dev tool, not exact).
+    #
+    # Deliberately NOT cross-rank-averaged (no all_reduce here): each rank reads a
+    # DIFFERENT random sample of shells via disk I/O whose latency can vary wildly
+    # under filesystem load (observed: a single 200MB shell read occasionally taking
+    # 100+ seconds instead of ~1s). A collective at this point makes every rank wait
+    # for the SLOWEST rank's I/O -- and it killed a real job (SeqNum=2 ALLREDUCE
+    # timeout at the 30-min NCCL default, before any training step had even run).
+    # Per-rank estimates are already close (same underlying signal statistics), so
+    # the average was a nice-to-have, not a correctness requirement -- skip it.
     sig_scale, resid_scale = estimate_scales(my_runs, args.nside, args.order,
                                              args.softening, seed=rank)
-    if world > 1:
-        t = torch.tensor([sig_scale], device=dev)
-        dist.all_reduce(t, op=dist.ReduceOp.AVG); sig_scale = float(t.item())
 
     mk = lambda rr, seed: DownscaledStreamer(rr, args.nside, args.order, sig_scale,
                                              resid_scale, softening=args.softening,
@@ -110,18 +173,21 @@ def train(args):
     to_img = torch.from_numpy(to_img).to(dev)
     sbins, scounts, sn_bins = ud.radial_bins(L, dev)
 
-    # FIXED validation set: pull val_batches once from the held-out runs and keep the
-    # tensors. (Calling streamer.batches() repeatedly would spawn a new ~28 GB producer
-    # thread each time -> host OOM. A fixed set is also the correct validation scheme:
-    # the exact same batches are scored at every checkpoint, so the curve is comparable.)
+    # FIXED validation set, built once via light mmap shell reads (see
+    # collect_val_batches) -- avoids the multi-GB-per-run full sequential load that
+    # otherwise stalls every job's startup, and gives the correct validation scheme:
+    # the exact same batches are scored at every checkpoint, so the curve is comparable.
     val_data = []
     if is_main():
-        vit = mk(val_runs, 7000).batches(args.batch_size, dev)
-        for _ in range(args.val_batches):
-            x1, cond, cosmo = next(vit)
-            ci, dt, x1i = to_images(x1, cond, to_img, L)
-            val_data.append((ci.detach(), dt.detach(), x1i.detach(), cosmo.detach()))
-        del vit                          # abandon the single producer (bounded RAM)
+        val_data = collect_val_batches(mk(val_runs, 7000), args.val_batches,
+                                       args.batch_size, to_img, L, dev)
+    if world > 1:
+        # Rank 0 alone can hit a slow-Lustre day here while ranks 1..N-1 have nothing
+        # to do -- without this barrier they'd race ahead into DDP()'s internal
+        # ALLGATHER and time out waiting for rank 0 (this crashed a real run). Block
+        # everyone here instead, where the (now 30 min) process-group timeout applies
+        # to a single well-understood wait rather than an opaque collective mismatch.
+        dist.barrier()
 
     net = ud.DiffUNet(in_ch=1, out_ch=1, base=args.base,
                       ch_mult=tuple(int(m) for m in args.ch_mult.split(",")),
@@ -165,7 +231,7 @@ def train(args):
                     "softening": args.softening, "val_every": args.val_every,
                     "val_batches": args.val_batches, "n_val": args.n_val,
                     "lambda_spec": args.lambda_spec, "downscale": args.downscale,
-                    "ema_decay": 0.99}, tmp)
+                    "huber_delta": args.huber_delta, "ema_decay": 0.99}, tmp)
         os.replace(tmp, ckpt_path)
         np.save(tr_path, np.array(train_hist, dtype=np.float64))
         np.save(va_path, np.array(val_hist, dtype=np.float64) if val_hist else np.zeros((0, 4)))
@@ -178,7 +244,7 @@ def train(args):
         for ci, dt, x1i, cosmo in val_data:
             with torch.autocast("cuda", dtype=torch.bfloat16, enabled=args.amp):
                 pred = raw(ci, cosmo)
-                pl = ud.correction_loss(pred, dt)
+                pl = ud.correction_loss(pred, dt, args.huber_delta)
                 sl = ud.spectral_loss(ci + pred, x1i, sbins, scounts, sn_bins)
             tp += pl.item(); ts += sl.item()
         net.train()
@@ -204,7 +270,7 @@ def train(args):
         opt.zero_grad()
         with torch.autocast("cuda", dtype=torch.bfloat16, enabled=args.amp):
             pred = net(ci, cosmo)
-            pixel_l = ud.correction_loss(pred, dt)
+            pixel_l = ud.correction_loss(pred, dt, args.huber_delta)
             spec_l = ud.spectral_loss(ci + pred, x1i, sbins, scounts, sn_bins)
             loss = pixel_l + args.lambda_spec * spec_l
         finite = torch.isfinite(loss).to(torch.float32).detach()
@@ -258,6 +324,9 @@ def main():
     p.add_argument("--bottleneck", type=int, default=64)
     p.add_argument("--lambda-spec", type=float, default=0.5,
                    help="weight of the radial-power-spectrum loss term added to pixel MSE")
+    p.add_argument("--huber-delta", type=float, default=0.1,
+                   help="Huber transition point for the pixel term (robust to outlier "
+                        "pixels/batches); large delta recovers plain MSE")
     p.add_argument("--softening", type=float, default=1.0)
     p.add_argument("--patch-frac", type=float, default=0.5)
     p.add_argument("--n-val", type=int, default=3)

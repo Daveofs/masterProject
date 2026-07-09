@@ -26,10 +26,21 @@ export UENV_REPO_PATH=/capstor/scratch/cscs/damrein/.uenv-images
 VENV=/capstor/scratch/cscs/damrein/venvs/sphereflow
 DATA_ROOT="/capstor/scratch/cscs/damrein/cosmogridv1"
 
-RUN_NAME=${RUN_NAME:-diff_v1}
-DOWNSCALE=${DOWNSCALE:-1}       # e.g. DOWNSCALE=8 for a fast dev run (32x32 patches)
+RUN_NAME=${RUN_NAME:-diff_small}
+DOWNSCALE=${DOWNSCALE:-16}       # e.g. DOWNSCALE=8 for a fast dev run (16x16 patches)
+ORDER=${ORDER:-16}               # n_patches(order) = 12*order^2; fewer/bigger patches
+                                 # per shell at lower order -> ~4x fewer steps/epoch at order=8
 LAMBDA_SPEC=${LAMBDA_SPEC:-0.5} # weight of the radial-power-spectrum loss term
+HUBER_DELTA=${HUBER_DELTA:-0.1} # robust-loss transition point for the pixel term
 EPOCHS=${EPOCHS:-8}
+# Model width/depth: keep matched to the patch size actually being trained on. The
+# defaults (base=64, ch_mult 1,2,4,8 -> 512-wide bottleneck) suit the full-res 128x128
+# patch. At large DOWNSCALE the patch shrinks a lot (e.g. 16x16 at DOWNSCALE=8) and the
+# same big model collapses to a ~1x1 bottleneck and overfits almost instantly (observed:
+# train loss -> 0, validation loss flat and far worse than doing nothing) -- override
+# BASE/CH_MULT down for fast-dev runs, e.g. BASE=16 CH_MULT=1,2,4 at DOWNSCALE=8.
+BASE=${BASE:-64}
+CH_MULT=${CH_MULT:-1,2,4,8}
 OUT_DIR="/capstor/scratch/cscs/damrein/outputs/unetdiff/${RUN_NAME}"
 TEST_COSMO=cosmo_000122
 mkdir -p "$OUT_DIR" /capstor/scratch/cscs/damrein/outputs/logs/unetdiff
@@ -61,8 +72,9 @@ srun uenv run pytorch/v2.9.1:v2 --view=default -- bash -c "
     unet/train_unet_diff.py \
       --data-root  '${DATA_ROOT}' \
       --test-cosmo ${TEST_COSMO} \
-      --nside 2048 --order 16 --downscale ${DOWNSCALE} \
-      --base 64 --ch-mult 1,2,4,8 --bottleneck 64 --lambda-spec ${LAMBDA_SPEC} \
+      --nside 2048 --order ${ORDER} --downscale ${DOWNSCALE} \
+      --base ${BASE} --ch-mult ${CH_MULT} --bottleneck 64 \
+      --lambda-spec ${LAMBDA_SPEC} --huber-delta ${HUBER_DELTA} \
       --n-val 3 --epochs ${EPOCHS} --batch-size 128 --patch-frac 0.5 --lr 1e-4 \
       --log-every 50 --val-every 500 --ckpt-every 500 \
       --out-dir '${OUT_DIR}'

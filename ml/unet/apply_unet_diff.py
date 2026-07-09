@@ -72,40 +72,54 @@ def od_cl(m, lmax):
 
 
 def plot_loss_curves(model_dir, out_dir, ck):
+    import textwrap
     tr = Path(model_dir) / "train_history.npy"
     va = Path(model_dir) / "val_history.npy"
     if not tr.exists():
         return
     h = np.load(tr)
-    fig, ax = plt.subplots(figsize=(9, 5))
+    fig, ax = plt.subplots(figsize=(10, 6.5))
     ax.plot(h[:, 0], h[:, 1], color="0.8", lw=0.7, label="train (per-batch)")
     ema_d = float(ck.get("ema_decay", 0.99))
     ax.plot(h[:, 0], h[:, 2], color="steelblue", lw=2.0,
             label=f"train EMA (decay {ema_d})")
+    n_val, n_val_batches = int(ck.get("n_val", 3)), int(ck.get("val_batches", 20))
+    val_every = int(ck.get("val_every", 500))
     if va.exists() and np.load(va).size:
         v = np.load(va)
         ax.plot(v[:, 0], v[:, 1], color="tomato", lw=2.0, marker="o", ms=4,
-                label=f"validation, combined ({int(ck.get('n_val',3))} held-out runs, "
-                      f"{int(ck.get('val_batches',20))} fixed batches)")
+                label="VALIDATION, combined (held-out runs, never trained on)")
         if v.shape[1] >= 4:                       # (step, combined, pixel, spectral)
             ax.plot(v[:, 0], v[:, 2], color="tomato", lw=1.2, ls="--", alpha=0.7,
                     label="validation, pixel term")
             ax.plot(v[:, 0], v[:, 3], color="darkorange", lw=1.2, ls=":", alpha=0.9,
                     label="validation, spectral term")
     ax.set_xlabel("step"); ax.set_ylabel("loss"); ax.set_yscale("log")
-    ax.legend(fontsize=9)
+    ax.legend(fontsize=9, loc="upper right")
+
+    # Loss + validation SCHEME stated in the title (plain text, manually wrapped --
+    # matplotlib does NOT auto-wrap mathtext/long strings, which is why an earlier
+    # version of this title ran off the edge of the figure).
     lam = float(ck.get("lambda_spec", 0.0))
-    # loss + validation SCHEME stated in the title (as requested).
-    ax.set_title(
-        "Residual-correction loss   "
-        r"$\mathcal{L}=\langle(\mathrm{corrected}-\mathrm{high})^2\rangle"
-        f" + {lam:g}\\,"
-        r"\langle(\log(1{+}P_{\mathrm{corr}})-\log(1{+}P_{\mathrm{high}}))^2\rangle$"
-        "\n(pixel MSE in arcsinh-signal space + radial 2D-FFT power-spectrum term "
-        f"(fixes MSE blurring);  validation = same $\\mathcal{{L}}$ on "
-        f"{int(ck.get('n_val',3))} held-out runs every {int(ck.get('val_every',500))} steps)",
-        fontsize=9.5)
-    fig.tight_layout(); fig.savefig(Path(out_dir) / "loss_curve.png", dpi=150)
+    delta = float(ck.get("huber_delta", 0.1))
+    formula = (f"loss = Huber_delta(corrected, high; delta={delta:g})"
+              f"  +  {lam:g} * (log-ratio power-spectrum term)")
+    desc = (
+        "corrected = DISCO + predicted_diff, in arcsinh-signal space. "
+        "Huber term = robust pixel error (quadratic near 0, linear beyond delta, so rare "
+        "outlier pixels/batches don't dominate the gradient). Power-spectrum term = "
+        "mean squared log-RATIO of the 2D-FFT radial power (corrected vs. truth), scale- "
+        "invariant per ell-bin so small-scale (high-ell) errors get equal weight to "
+        "large-scale ones (an earlier absolute-difference version left small scales "
+        "essentially uncorrected). "
+        f"VALIDATION = this same loss computed on {n_val} held-out cosmology runs "
+        f"({n_val_batches} fixed batches, NEVER used for gradients), every {val_every} "
+        "training steps -- the gap between train and validation shows over/underfitting."
+    )
+    title = "Residual-correction loss\n" + formula + "\n" + textwrap.fill(desc, width=100)
+    ax.set_title(title, fontsize=8.8, linespacing=1.4)
+    fig.tight_layout()
+    fig.savefig(Path(out_dir) / "loss_curve.png", dpi=150)
     plt.close(fig)
 
 
