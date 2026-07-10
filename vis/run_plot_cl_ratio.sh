@@ -18,10 +18,10 @@ SCRATCH_DIR=/capstor/scratch/cscs/damrein
 CONDA_ROOT=/users/damrein/miniforge3
 CONDA_ENV=disco-dj
 
-DISCO_FILE="/capstor/scratch/cscs/damrein/cosmogridv1/cosmo_000020/run_0/disco_sim/gpu_grid_3827702/disco_shells_nside=2048.npz"
+DISCO_FILE="/capstor/scratch/cscs/damrein/outputs/transfer/poisson_test/counts_test.npz"
 # Set to "None" or leave empty to make it optional
 DISCO_FILE_1664=None
-COSMOGRID_FILE="/capstor/scratch/cscs/damrein/cosmogridv1/cosmo_000020/run_0/compressed_shells.npz"
+COSMOGRID_FILE="/capstor/scratch/cscs/damrein/cosmogridv1/cosmo_000001/run_0/compressed_shells.npz"
 PARAMS_YML="/capstor/scratch/cscs/damrein/cosmogridv1_fiducial_test2/run_0000/params.yml"
 OUT_DIR="${SCRATCH_DIR}/outputs/cl_ratio"
 

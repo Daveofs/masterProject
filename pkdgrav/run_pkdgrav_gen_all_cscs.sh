@@ -41,9 +41,9 @@ LOG_DIR="/capstor/scratch/cscs/damrein/outputs/logs/pkdgrav"
 OMEGA_M_MIN=0.1;  OMEGA_M_MAX=0.5
 SIGMA_8_MIN=0.6;  SIGMA_8_MAX=1.0
 W0_MIN=-1.4;       W0_MAX=-0.6
-H0_MIN=65.0;       H0_MAX=75.0
+H0_MIN=62.0;       H0_MAX=78.0
 OMEGA_B_MIN=0.046; OMEGA_B_MAX=0.051
-N_S_MIN=0.95;      N_S_MAX=0.98
+N_S_MIN=0.94;      N_S_MAX=0.98
 
 # Returns 0 (true) if params.yml values are inside the mask ranges, 1 otherwise.
 check_mask() {

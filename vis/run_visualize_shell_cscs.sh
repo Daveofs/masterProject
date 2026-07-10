@@ -48,13 +48,13 @@ fi
 
 #FILENAME="CosmoML-shell_z-high=1.46305_z-low=0.980198.fits"
 
-SHELL=/capstor/scratch/cscs/damrein/cosmogridv1/cosmo_000122/run_0/compressed_shells.npz
+SHELL=/capstor/scratch/cscs/damrein/outputs/transfer/poisson_test/counts_test.npz
 # Configuration for the visualization (set to your desired z-bin and nside)
 VMIN=-1.0
 VMAX=1.0
-ZBIN=30
+ZBIN=5
 NSIDE=2048
-NAME_SUFFIX="cosmogrid_000122_nside=${NSIDE}_zbin=${ZBIN}"
+NAME_SUFFIX="disco_poisson_counts_test_nside=${NSIDE}_zbin=${ZBIN}"
 # Colorbar limits for log10(1.01 + delta) – set the same values in both
 # the DISCO run and the CosmoGrid run so the two plots are comparable.
 

@@ -151,8 +151,17 @@ class DiffUNet(nn.Module):
         return self.out(h)                                # predicted difference (B,1,L,L)
 
 
-def correction_loss(pred_diff, target_diff, huber_delta: float = 0.1):
+def correction_loss(pred_diff, target_diff, huber_delta: float = 0.1,
+                    relative: bool = True, eps: float = 1e-6):
     """Robust pixel loss: Huber(corrected, high) = Huber(pred_diff, high - disco).
+
+    relative=True divides BOTH pred and target by the batch's target RMS before the
+    Huber. The target's scale varies ~20x across shells (measured std(diff): 3.09 at
+    shell 3 vs 0.15 at shell 50) => ~400x in squared loss, so faint shells swamped the
+    gradient and made the training curve jump by shell rather than converge. Dividing
+    by a per-batch constant does not change the per-batch optimum (the scale carries no
+    gradient), it only equalizes each batch's contribution. Bonus: the loss becomes
+    interpretable -- ~1.0 means "predicting zero", and it approaches 1 - corr^2.
 
     Plain MSE let rare bright/outlier pixels (cluster spikes, shot-noise peaks) dominate
     a batch's loss (observed: per-batch loss jumping between ~1e-4 and >5 while the
@@ -161,6 +170,10 @@ def correction_loss(pred_diff, target_diff, huber_delta: float = 0.1):
     (== MSE) for small errors and linear beyond huber_delta, so those rare outliers
     stop dominating the gradient while ordinary batches train the same as before.
     """
+    if relative:
+        # target carries no gradient, so this scale is a constant w.r.t. the params.
+        s = target_diff.detach().pow(2).mean().sqrt().clamp_min(eps)
+        pred_diff, target_diff = pred_diff / s, target_diff / s
     return nn.functional.smooth_l1_loss(pred_diff, target_diff, beta=huber_delta)
 
 

@@ -73,7 +73,8 @@ class DownscaledStreamer(ResidualStreamer):
         return super()._process_shell(tc, hi, si, n_run, cosmo)
 
 
-def collect_val_batches(streamer, n_batches, batch_size, to_img, L, dev, seed=12345):
+def collect_val_batches(streamer, n_batches, batch_size, to_img, L, dev, seed=12345,
+                        max_per_shell=2):
     """Build n_batches FIXED validation batches via light mmap shell reads.
 
     streamer.batches() (used for training) does a full ~14-28 GB SEQUENTIAL np.load of
@@ -84,12 +85,16 @@ def collect_val_batches(streamer, n_batches, batch_size, to_img, L, dev, seed=12
     possible (~200 MB each at full res) via streamer._process_shell, which accepts
     plain numpy shell arrays regardless of how they were read.
 
-    A single shell yields far more patches than one batch needs (e.g. ~1500 at
-    order=16, patch_frac=0.5, vs. batch_size=128), so we pull MULTIPLE disjoint
-    batches per shell before moving to the next one -- this minimizes the number of
-    distinct files/shells touched (each read is I/O, occasionally slow under
-    filesystem load; observed 100+s tail latency for a single 200MB shell), rather
-    than reading one new shell per batch.
+    A single shell yields far more patches than one batch needs (3072 at order=16 --
+    _process_shell does NOT apply patch_frac), so we pull a few disjoint batches per
+    shell to limit how many shells must be read (each read is I/O, occasionally slow
+    under filesystem load; observed 100+s tail latency for a single 200MB shell).
+
+    But max_per_shell CAPS that: shells differ enormously (std of the diff target spans
+    ~20x from shell 3 to shell 50), so a validation set drawn from one shell is not
+    representative of the model at all. Without the cap, 3072//128 = 24 >= n_batches
+    meant EVERY validation batch came from the first shell of the first run -- the
+    validation curve was flat and meaninglessly low while real eval was poor.
     """
     rng = np.random.RandomState(seed)
     order = list(range(len(streamer.runs)))
@@ -108,7 +113,7 @@ def collect_val_batches(streamer, n_batches, batch_size, to_img, L, dev, seed=12
             tc = np.asarray(low_mm[si], dtype=np.float32)
             hi = np.asarray(high_mm[si], dtype=np.float32)
             x1p, cp, cvec = streamer._process_shell(tc, hi, int(si), n, cosmo)
-            n_from_shell = x1p.shape[0] // batch_size
+            n_from_shell = min(x1p.shape[0] // batch_size, max_per_shell)
             if n_from_shell < 1:
                 continue
             idx = rng.permutation(x1p.shape[0])
@@ -244,7 +249,7 @@ def train(args):
         for ci, dt, x1i, cosmo in val_data:
             with torch.autocast("cuda", dtype=torch.bfloat16, enabled=args.amp):
                 pred = raw(ci, cosmo)
-                pl = ud.correction_loss(pred, dt, args.huber_delta)
+                pl = ud.correction_loss(pred, dt, args.huber_delta, args.relative_loss)
                 sl = ud.spectral_loss(ci + pred, x1i, sbins, scounts, sn_bins)
             tp += pl.item(); ts += sl.item()
         net.train()
@@ -270,7 +275,7 @@ def train(args):
         opt.zero_grad()
         with torch.autocast("cuda", dtype=torch.bfloat16, enabled=args.amp):
             pred = net(ci, cosmo)
-            pixel_l = ud.correction_loss(pred, dt, args.huber_delta)
+            pixel_l = ud.correction_loss(pred, dt, args.huber_delta, args.relative_loss)
             spec_l = ud.spectral_loss(ci + pred, x1i, sbins, scounts, sn_bins)
             loss = pixel_l + args.lambda_spec * spec_l
         finite = torch.isfinite(loss).to(torch.float32).detach()
@@ -324,6 +329,11 @@ def main():
     p.add_argument("--bottleneck", type=int, default=64)
     p.add_argument("--lambda-spec", type=float, default=0.5,
                    help="weight of the radial-power-spectrum loss term added to pixel MSE")
+    p.add_argument("--relative-loss", action="store_true", default=True,
+                   help="scale the pixel loss by the batch's target RMS so shells with "
+                        "wildly different diff amplitudes contribute equally (default on)")
+    p.add_argument("--absolute-loss", dest="relative_loss", action="store_false",
+                   help="use the raw (unnormalized) pixel loss")
     p.add_argument("--huber-delta", type=float, default=0.1,
                    help="Huber transition point for the pixel term (robust to outlier "
                         "pixels/batches); large delta recovers plain MSE")

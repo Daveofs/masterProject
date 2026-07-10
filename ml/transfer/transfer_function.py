@@ -51,6 +51,51 @@ def _alm(vec, N_alm):
     return (vec[:N_alm] + 1j * vec[N_alm:]).astype(np.complex128)
 
 
+def _debias_mean(m_unclipped: np.ndarray, tol: float = 1e-9, max_iter: int = 50) -> np.ndarray:
+    """Undo the clip-at-0 mean bias with a pure ADDITIVE shift-then-reclip.
+
+    Flooring negative pixels at 0 always raises the mean (it only ever removes
+    negative mass, never adds it back) -- measured up to +25% on the faintest
+    shells even in --log-density mode, because those shells are so sparse that
+    most pixels sit exactly at the log1p(rho)=0 boundary already, so almost ANY
+    correction pushes a large fraction of them slightly negative. An ADDITIVE
+    shift (subtract a constant, reclip) only touches the ell=0/monopole term in
+    the region where no pixel is reclipped by it, unlike a multiplicative /
+    mass-conserving rescale -- tested and found to distort Cl at ALL ell by
+    roughly scale^2, since it rescales the already-good small-scale structure
+    too. Solve for the shift c with mean(clip(m_unclipped,0) - c, 0) ==
+    mean(m_unclipped) (the unclipped mean tracks the true mean far better than
+    the clipped one -- measured within 0.5-5% on shells where clipping fires on
+    30-70% of pixels) via bisection (monotonic in c; no closed form since
+    clipping is piecewise)."""
+    m_clipped = np.clip(m_unclipped, 0.0, None)
+    target = m_unclipped.mean()
+    lo, hi = 0.0, float(m_clipped.max())
+    if hi <= 0.0:
+        return m_clipped
+    for _ in range(max_iter):
+        c = 0.5 * (lo + hi)
+        if np.clip(m_clipped - c, 0.0, None).mean() > target:
+            lo = c
+        else:
+            hi = c
+        if hi - lo < tol:
+            break
+    return np.clip(m_clipped - 0.5 * (lo + hi), 0.0, None)
+
+
+def alm_fname(kind: str, lmax: int, log_density: bool) -> str:
+    """kind: 'low' or 'high'. log_density selects the log1p(rho) alm variant
+    (written by preprocess_alms.py --log-density) instead of the raw-density one.
+    See apply()'s --log-density branch for why: correcting log-density and
+    reconstructing via expm1 is always >= -1 (density >= 0 with a tiny clip for
+    fp noise) with NO large clipping bias, unlike correcting density directly and
+    flooring negative excursions at 0 -- which, measured on real data, inflates
+    the mean of shot-noise shells by ~20% and biases Cl by the same amount at
+    ALL ell (proven: pre-clip corrected/high ~1.00, post-clip ~1.2)."""
+    return f"{kind}{'_log' if log_density else ''}_alms_lmax{lmax}.npy"
+
+
 def ell_of_flat_index(lmax: int) -> np.ndarray:
     ell = np.empty((lmax + 1) * (lmax + 2) // 2, dtype=np.int64)
     for m in range(lmax + 1):
@@ -130,11 +175,11 @@ def smooth_cl(cl: np.ndarray, window: int) -> np.ndarray:
     return 10.0 ** uniform_filter1d(log_cl, size=window, mode="nearest")
 
 
-def _run_cls(run_dir: Path, lmax: int):
+def _run_cls(run_dir: Path, lmax: int, log_density: bool = False):
     """Per-shell (Cl_low, Cl_high) for a run from its preprocessed alms."""
     N_alm = (lmax + 1) * (lmax + 2) // 2
-    low = np.load(run_dir / f"low_alms_lmax{lmax}.npy", mmap_mode="r")
-    high = np.load(run_dir / f"high_alms_lmax{lmax}.npy", mmap_mode="r")
+    low = np.load(run_dir / alm_fname("low", lmax, log_density), mmap_mode="r")
+    high = np.load(run_dir / alm_fname("high", lmax, log_density), mmap_mode="r")
     n = min(low.shape[0], high.shape[0])
     cl_low = np.empty((n, lmax + 1))
     cl_high = np.empty((n, lmax + 1))
@@ -163,8 +208,8 @@ def fit(args):
             continue
         rs = [r for r in sorted(c.iterdir()) if r.is_dir() and r.name.startswith("run_")]
         for ld in (rs or [c]):
-            lo = ld / f"low_alms_lmax{lmax}.npy"
-            hi = ld / f"high_alms_lmax{lmax}.npy"
+            lo = ld / alm_fname("low", lmax, args.log_density)
+            hi = ld / alm_fname("high", lmax, args.log_density)
             if lo.exists() and hi.exists():
                 runs.append((lo, hi))
     if not runs:
@@ -211,9 +256,10 @@ def fit(args):
     R = np.clip(np.nan_to_num(R, nan=0.0, posinf=1.0, neginf=0.0), 0.0, 1.0).astype(np.float32)
 
     Path(args.out).parent.mkdir(parents=True, exist_ok=True)
-    np.savez(args.out, T=T, R=R, lmax=lmax, mean_low=mean_low.astype(np.float32),
-             mean_high=mean_high.astype(np.float32))
-    print(f"[fit] saved transfer function T{T.shape} (mean r={R.mean():.3f}) to {args.out}", flush=True)
+    np.savez(args.out, T=T, R=R, lmax=lmax, log_density=args.log_density,
+             mean_low=mean_low.astype(np.float32), mean_high=mean_high.astype(np.float32))
+    print(f"[fit] saved transfer function T{T.shape} (mean r={R.mean():.3f}, "
+          f"log_density={args.log_density}) to {args.out}", flush=True)
 
 
 # ---------------------------------------------------------------------------
@@ -225,7 +271,8 @@ def fit(args):
 # (T = sqrt(Cl_high / Cl_low)); output of `emulate` is a transfer.npz in the exact
 # schema `apply` / prepare_tcorr_dataset already consume.
 
-def _discover_runs(data_dir: Path, lmax: int, test_cosmo: str, include_test: bool):
+def _discover_runs(data_dir: Path, lmax: int, test_cosmo: str, include_test: bool,
+                   log_density: bool = False):
     cosmos = sorted(d for d in data_dir.iterdir()
                     if d.is_dir() and d.name.startswith("cosmo_"))
     runs = []
@@ -234,8 +281,8 @@ def _discover_runs(data_dir: Path, lmax: int, test_cosmo: str, include_test: boo
             continue
         rs = [r for r in sorted(c.iterdir()) if r.is_dir() and r.name.startswith("run_")]
         for ld in (rs or [c]):
-            if (ld / f"low_alms_lmax{lmax}.npy").exists() and \
-               (ld / f"high_alms_lmax{lmax}.npy").exists():
+            if (ld / alm_fname("low", lmax, log_density)).exists() and \
+               (ld / alm_fname("high", lmax, log_density)).exists():
                 runs.append(ld)
     return runs
 
@@ -248,7 +295,7 @@ def train(args):
     data_dir = Path(args.data_dir)
     lmax = args.lmax
     ell = np.arange(lmax + 1)
-    runs = _discover_runs(data_dir, lmax, args.test_cosmo, args.include_test)
+    runs = _discover_runs(data_dir, lmax, args.test_cosmo, args.include_test, args.log_density)
     if not runs:
         raise RuntimeError(f"No low/high alm files (lmax={lmax}) found under {data_dir}")
     mode = "INCLUDING test (sanity)" if args.include_test else f"excluding {args.test_cosmo}"
@@ -265,12 +312,12 @@ def train(args):
     r_counts = None
     for ld in runs:
         cosmo = load_cosmo(ld)
-        cl_low, cl_high = _run_cls(ld, lmax)
+        cl_low, cl_high = _run_cls(ld, lmax, args.log_density)
         n_shells = cl_low.shape[0]
         z = shell_redshifts(ld, n_shells, args.info_npz)
         N_alm = (lmax + 1) * (lmax + 2) // 2
-        low_alm = np.load(ld / f"low_alms_lmax{lmax}.npy", mmap_mode="r")
-        high_alm = np.load(ld / f"high_alms_lmax{lmax}.npy", mmap_mode="r")
+        low_alm = np.load(ld / alm_fname("low", lmax, args.log_density), mmap_mode="r")
+        high_alm = np.load(ld / alm_fname("high", lmax, args.log_density), mmap_mode="r")
         if sum_cross is None:
             sum_cross = np.zeros((n_shells, lmax + 1))
             sum_low = np.zeros((n_shells, lmax + 1))
@@ -326,16 +373,22 @@ def train(args):
     Path(args.out).parent.mkdir(parents=True, exist_ok=True)
     joblib.dump({"model": model, "scaler": scaler, "lmax": lmax,
                  "smooth_window": args.smooth_window, "R": R,
+                 "log_density": args.log_density,
                  "cosmo_keys": COSMO_KEYS, "feature_order":
                  ["log10(l+1)", "z", *COSMO_KEYS, "log10(Cl_low)"]}, args.out)
     print(f"[train] saved emulator to {args.out}", flush=True)
 
     # ---- loss / validation-score curve plot ----
+    # sklearn's MLPRegressor (solver='adam') always uses squared-error loss with L2
+    # weight decay for training (loss_curve_), and R^2 (coefficient of determination)
+    # as the early-stopping validation metric (validation_scores_) -- neither is
+    # user-configurable, so state the exact formulas actually being optimized/
+    # monitored directly on the plot rather than just the generic curve shapes.
     try:
         import matplotlib
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
-        fig, ax1 = plt.subplots(figsize=(8, 5))
+        fig, ax1 = plt.subplots(figsize=(8, 5.5))
         ax1.plot(model.loss_curve_, color="steelblue", label="training loss")
         ax1.set_xlabel("iteration"); ax1.set_ylabel("training loss", color="steelblue")
         ax1.set_yscale("log")
@@ -343,7 +396,15 @@ def train(args):
             ax2 = ax1.twinx()
             ax2.plot(model.validation_scores_, color="tomato", label="validation R2")
             ax2.set_ylabel("validation R2", color="tomato")
-        fig.tight_layout()
+        formula_txt = (
+            r"training loss: $L=\frac{1}{2N}\sum_i(T_i-\hat T_i)^2"
+            r"+\frac{\alpha}{2N}\sum_j w_j^2$" + f"   (alpha={args.alpha:g}, "
+            f"N={X.shape[0]:,} samples/batch stat)\n"
+            r"validation score (10% held out, early_stopping): "
+            r"$R^2=1-\frac{\sum_i(T_i-\hat T_i)^2}{\sum_i(T_i-\bar T)^2}$"
+        )
+        fig.suptitle(formula_txt, fontsize=9, y=0.99)
+        fig.tight_layout(rect=(0, 0, 1, 0.90))
         loss_png = Path(args.out).with_suffix("").with_suffix(".loss.png")
         fig.savefig(loss_png, dpi=150); plt.close(fig)
         print(f"[train] saved loss curve to {loss_png}", flush=True)
@@ -374,6 +435,7 @@ def emulate(args):
     model, scaler = bundle["model"], bundle["scaler"]
     lmax = int(bundle["lmax"])
     smooth_window = int(bundle.get("smooth_window", 1))
+    log_density = bool(bundle.get("log_density", False))
     ell = np.arange(lmax + 1)
 
     run = Path(args.run_dir)
@@ -384,7 +446,7 @@ def emulate(args):
     # or would it predict about the same T regardless (i.e. ignoring cosmo)?
     mean_cosmo = scaler.mean_[2:2 + len(COSMO_KEYS)]
     N_alm = (lmax + 1) * (lmax + 2) // 2
-    low = np.load(run / f"low_alms_lmax{lmax}.npy", mmap_mode="r")
+    low = np.load(run / alm_fname("low", lmax, log_density), mmap_mode="r")
     n_shells = low.shape[0]
     z = shell_redshifts(run, n_shells, args.info_npz)
 
@@ -419,9 +481,9 @@ def emulate(args):
 
     Path(args.out).parent.mkdir(parents=True, exist_ok=True)
     if R is not None:
-        np.savez(args.out, T=T, R=R, lmax=lmax)
+        np.savez(args.out, T=T, R=R, lmax=lmax, log_density=log_density)
     else:
-        np.savez(args.out, T=T, lmax=lmax)
+        np.savez(args.out, T=T, lmax=lmax, log_density=log_density)
     print(f"[emulate] saved emulated transfer function T{T.shape} to {args.out}\n"
           f"          -> feed to `transfer_function.py apply --transfer {args.out}`",
           flush=True)
@@ -445,13 +507,32 @@ def apply(args):
     # job). The grainy high-ell texture on faint shells is inherent -- those modes
     # are shot noise, so only the POWER is recoverable, not the true structure;
     # recovering structure is what the generative sphere-flow is for, not this.
-    R = tf["R"] if (args.wiener and "R" in tf.files) else None
+    #
+    # --stochastic (constrained realization) fixes the real-space overshoot seen
+    # with plain full T: scaling EVERY mode (including r<1 ones) by T amplifies
+    # DISCO's own single-realization noise by up to T, which still averages to
+    # Cl_high over many maps but overshoots std/max for any ONE map (measured:
+    # pixel-histogram std and max both exceed CosmoGrid's on shells 10/50/60, and
+    # shell 3's corrected/high ratio scatters +-15-20% at high ell -- far more
+    # than cosmic variance). Fix: split the correction into a phase-correlated
+    # part (gain r*T, trustworthy since low's phases genuinely track high there)
+    # and the REMAINING power T^2*(1-r^2)*Cl_low, filled with an INDEPENDENT
+    # random realization instead of amplified DISCO noise. Still matches Cl_high
+    # exactly in expectation: (r*T)^2 + T^2*(1-r^2) = T^2 = Cl_high/Cl_low.
+    R = tf["R"] if "R" in tf.files else None
+    if args.stochastic and R is None:
+        raise RuntimeError("--stochastic needs R in the transfer file "
+                            "(re-run `fit`/`train`, which always saves it).")
     lmax = int(tf["lmax"])
+    # --log-density: T/R were fit on log1p(rho) alms (see alm_fname), so this run's
+    # low alms and native map must be treated the same way -- auto-detected from
+    # the transfer file so `apply` can't silently mismatch what `fit`/`emulate` used.
+    log_density = bool(tf["log_density"]) if "log_density" in tf.files else False
     N_alm = (lmax + 1) * (lmax + 2) // 2
     ell = ell_of_flat_index(lmax)
 
     run = Path(args.run_dir)
-    low = np.load(run / f"low_alms_lmax{lmax}.npy")
+    low = np.load(run / alm_fname("low", lmax, log_density))
     # Native full-resolution DISCO map (nside=2048 supports ell up to ~3*nside-1,
     # i.e. ~6143 -- roughly double lmax=3000). Reconstructing the corrected map
     # purely via alm2map(..., lmax=lmax) band-limits it to ell<=lmax and throws
@@ -464,34 +545,88 @@ def apply(args):
     n_shells = low.shape[0]
     npix = hp.nside2npix(args.nside)
     corrected = np.zeros((n_shells, npix), dtype=np.float32)
+    rng = np.random.default_rng(args.seed)
 
     for i in range(n_shells):
         Ti = T[min(i, T.shape[0] - 1)].copy()      # per-shell transfer
-        if R is not None:
-            Ti = Ti * R[min(i, R.shape[0] - 1)]      # Wiener/MMSE gain r*T
+        Ri = R[min(i, R.shape[0] - 1)].copy() if R is not None else np.ones_like(Ti)
+        if args.wiener and not args.stochastic:
+            Ti = Ti * Ri                             # Wiener/MMSE gain r*T
         if args.ell_min > 0:                         # leave large scales untouched
             Ti[: args.ell_min] = 1.0
-        tvec = (Ti - 1.0)[ell]                        # per-mode DELTA scale (N_alm,)
+            Ri[: args.ell_min] = 1.0
         v = low[i].astype(np.float64)
-        alm_delta = (v[:N_alm] * tvec + 1j * v[N_alm:] * tvec)
-        delta_map = hp.alm2map(alm_delta, nside=args.nside, lmax=lmax)
-        # Density is a COUNT: it cannot be negative. Adding a linear harmonic
-        # residual (Gaussian-like, can undershoot) to a faint shell -- most of
-        # whose pixels are already empty (density 0) -- drives ~half the pixels
-        # below 0, i.e. delta < -1, which is unphysical and makes log10(1.01+delta)
-        # NaN when plotting. Floor at 0. NOTE: on faint/shot-noise shells this floor
-        # fires for a large fraction of pixels, which is itself the signal that the
-        # transfer function should NOT be boosting those shells (their small scales
-        # are decorrelated -- see r(ell); use the generative sphere-flow instead).
-        m = np.asarray(low_full[i], dtype=np.float64) + delta_map
-        neg = np.mean(m < 0.0)
-        np.clip(m, 0.0, None, out=m)
+        if args.stochastic:
+            gain = Ti * Ri                            # phase-correlated part only
+            tvec = (gain - 1.0)[ell]
+            alm_signal = v[:N_alm] * tvec + 1j * v[N_alm:] * tvec
+            signal_map = hp.alm2map(alm_signal, nside=args.nside, lmax=lmax)
+            # Missing power T^2*(1-r^2) at ell where r<1: DISCO's own alm carries
+            # no usable phase info there, so fill with a FRESH random realization
+            # (uncorrelated with low_alm) instead of amplifying DISCO's noise.
+            cl_low_i = smooth_cl(hp.alm2cl(_alm(v, N_alm), lmax=lmax), args.smooth_window)
+            cl_noise = np.clip(Ti ** 2 - gain ** 2, 0.0, None) * cl_low_i
+            # healpy.synalm draws from numpy's global RNG (no seed kwarg) -> seed
+            # it explicitly per shell so --seed makes the whole run reproducible.
+            np.random.seed(int(rng.integers(0, 2**31 - 1)))
+            alm_noise = hp.synalm(cl_noise, lmax=lmax, new=True)
+            noise_map = hp.alm2map(alm_noise, nside=args.nside, lmax=lmax)
+            delta_map = signal_map + noise_map
+        else:
+            tvec = (Ti - 1.0)[ell]                    # per-mode DELTA scale (N_alm,)
+            alm_delta = (v[:N_alm] * tvec + 1j * v[N_alm:] * tvec)
+            delta_map = hp.alm2map(alm_delta, nside=args.nside, lmax=lmax)
+        rho_native = np.asarray(low_full[i], dtype=np.float64)
+        if log_density:
+            # Correction was fit/applied in log1p(rho) space, so reconstruct via
+            # expm1: ALWAYS >= -1 (i.e. rho >= 0 up to fp noise) for ANY delta_map,
+            # no matter how large the T boost -- unlike adding delta_map straight
+            # to rho, which routinely drives ~half a faint shell's pixels below 0
+            # and, once floored at 0, biases the WHOLE shell's Cl high (measured on
+            # shell 3: pre-clip corrected/high ~1.00 at ell 1-300, post-clip ~1.2 --
+            # the floor itself was the source of the "small-scale overshoot").
+            s_native = np.log1p(rho_native)
+            s_corrected = s_native + delta_map
+            m_unclipped = np.expm1(s_corrected)
+        else:
+            # Density is a COUNT: it cannot be negative. Adding a linear harmonic
+            # residual (Gaussian-like, can undershoot) to a faint shell -- most of
+            # whose pixels are already empty (density 0) -- drives ~half the pixels
+            # below 0, i.e. delta < -1, which is unphysical and makes log10(1.01+delta)
+            # NaN when plotting. Floor at 0. NOTE: on faint/shot-noise shells this floor
+            # fires for a large fraction of pixels and BIASES Cl across all ell (see
+            # --log-density above, which avoids this by construction). --stochastic
+            # reduces (but doesn't eliminate) how often this fires by not riding the
+            # injected power on DISCO's own noise.
+            m_unclipped = rho_native + delta_map
+        neg = np.mean(m_unclipped < 0.0)
+        # Positivity vs Cl: measured on cosmo_000122 shell 3 (nbar=0.104, 59% of
+        # pixels want to go negative), corrected/high Cl by ell band and mean ratio:
+        #   no-clip   : mean 0.998 | 1.00 (l50-150) 0.99 (l400-800) 0.93 (l800-1500)
+        #   clip@0    : mean 1.215 | 1.17            0.88            0.74
+        #   debias    : mean 0.998 | 1.04            0.77            0.61
+        # i.e. ANY pixel-wise positivity enforcement destroys small-scale power. A
+        # Gaussian field with nbar~0.1 and enough small-scale power to match
+        # CosmoGrid MUST go negative; CosmoGrid's own shell is not Gaussian, it's a
+        # sparse COUNT field (91.8% zeros). Matching Cl AND positivity AND the
+        # one-point pdf requires re-discretizing (lognormal intensity + Poisson
+        # resample), not clipping. --no-clip therefore yields the Cl-optimal
+        # OVERDENSITY field (rho can be < 0; not a count map) and is the right
+        # output for Cl / weak-lensing work.
+        if args.no_clip:
+            m = m_unclipped
+        elif args.no_debias_mean:
+            m = np.clip(m_unclipped, 0.0, None)
+        else:
+            m = _debias_mean(m_unclipped)
         corrected[i] = m.astype(np.float32)
         if i % 10 == 0 or neg > 0.02:
-            print(f"  corrected shell {i}/{n_shells}"
-                  + (f"  [WARN {neg:.1%} pixels clipped <0 -> shot-noise shell, "
-                     f"transfer boost is adding noise here]" if neg > 0.02 else ""),
-                  flush=True)
+            note = ""
+            if neg > 0.02:
+                note = (f"  [{neg:.1%} pixels < 0 -> shot-noise shell; "
+                        + ("KEPT (--no-clip, Cl-optimal)]" if args.no_clip
+                           else "floored at 0, suppresses small-scale Cl]"))
+            print(f"  corrected shell {i}/{n_shells}{note}", flush=True)
 
     out = Path(args.out); out.parent.mkdir(parents=True, exist_ok=True)
     info_npz = run / args.info_npz              # metadata (shell_info) from high npz
@@ -555,6 +690,15 @@ if __name__ == "__main__":
     pf.add_argument("--include-test", action="store_true",
                     help="SANITY CHECK: include the test cosmology in the fit (expect "
                          "corrected/high ~ 1 by construction). Default is leave-one-out.")
+    pf.add_argument("--log-density", action="store_true",
+                    help="Fit T/R on log1p(rho) alms (preprocess_alms.py --log-density) "
+                         "instead of raw density alms. `apply` reconstructs via expm1, "
+                         "which is always >= -1 (i.e. rho >= 0) for any correction size, "
+                         "eliminating the clip-at-0 bias that inflates Cl on shot-noise "
+                         "shells with plain density-space T (measured: post-clip "
+                         "corrected/high ~1.2 vs ~1.0 pre-clip on a shell where 59% of "
+                         "pixels get clipped). Saved into the output transfer.npz so "
+                         "`apply` auto-detects it -- no matching flag needed there.")
     pf.add_argument("--out", required=True)
     pf.set_defaults(func=fit)
 
@@ -564,6 +708,9 @@ if __name__ == "__main__":
     pt.add_argument("--test-cosmo", default="")
     pt.add_argument("--include-test", action="store_true",
                     help="SANITY CHECK: train on the test cosmology too (default LOO).")
+    pt.add_argument("--log-density", action="store_true",
+                    help="Same as `fit --log-density` -- train on log1p(rho) alms. "
+                         "Saved into the emulator bundle so `emulate` auto-detects it.")
     pt.add_argument("--info-npz", default="compressed_shells.npz",
                     help="npz holding shell_info (per-shell redshifts).")
     pt.add_argument("--hidden", default="256,256,128",
@@ -603,8 +750,46 @@ if __name__ == "__main__":
                           "map lighter than DISCO. Full T (default) matches Cl_high. "
                           "Only meaningful if you deliberately want to suppress the "
                           "shot-noise-dominated high-ell modes at the cost of Cl.")
+    pa.add_argument("--stochastic", action="store_true",
+                     help="Constrained-realization gain instead of plain full T: "
+                          "scale the phase-correlated part by r*T and fill the "
+                          "remaining power T^2*(1-r^2) with an independent random "
+                          "realization instead of amplifying DISCO's own noise. "
+                          "Fixes the real-space overshoot (excess std/max vs "
+                          "CosmoGrid in pixel histograms, noisy corrected/high Cl "
+                          "ratio) seen with plain full T, while still matching "
+                          "Cl_high exactly in expectation. Needs R (always saved "
+                          "by `fit`/`train`). Recommended default going forward.")
+    pa.add_argument("--seed", type=int, default=0,
+                    help="RNG seed for the --stochastic noise realization "
+                         "(per-shell seeds derived from it; reproducible).")
+    pa.add_argument("--smooth-window", type=int, default=21,
+                    help="Boxcar window (log10-Cl space) for smoothing this run's "
+                         "own Cl_low before using it as the --stochastic noise-"
+                         "power target (avoids injecting per-mode sample-variance "
+                         "noise on top of the random realization). 1 disables.")
     pa.add_argument("--ell-min", type=int, default=0,
                     help="Leave ell<ell_min untouched (T=1) — correct only small scales.")
+    pa.add_argument("--no-clip", action="store_true",
+                    help="Do NOT enforce rho>=0: emit the raw corrected field "
+                         "rho_native + delta (an OVERDENSITY field, can go negative "
+                         "on faint shot-noise shells). This is the Cl-OPTIMAL output "
+                         "-- measured on shell 3: mean ratio 0.998 and corrected/high "
+                         "= 1.00/0.99/0.93 at ell 50-150/400-800/800-1500, vs "
+                         "1.215 and 1.17/0.88/0.74 with the default clip. Use for "
+                         "Cl / weak-lensing work. It is NOT a valid count map; for "
+                         "that you need lognormal-intensity + Poisson resampling "
+                         "(clipping cannot give Cl + positivity + the right pdf).")
+    pa.add_argument("--no-debias-mean", action="store_true",
+                    help="Skip the post-clip mean debiasing (see _debias_mean). ON by "
+                         "default: flooring negative pixels at 0 always raises the "
+                         "mean (measured up to +25% on the faintest shells even with "
+                         "--log-density). The debias applies an additive shift-then-"
+                         "reclip that restores the mean to what the UNCLIPPED "
+                         "reconstruction gave (which tracks the true mean much more "
+                         "closely) while touching Cl far less than a multiplicative "
+                         "rescale would (tested: rescale distorts Cl at ALL ell by "
+                         "~scale^2). Pass this flag to get the old raw-clip behavior.")
     pa.add_argument("--plot-shells", type=int, nargs="*", default=[3, 30, 50])
     pa.add_argument("--plot-dir", default="")
     pa.add_argument("--out", required=True)

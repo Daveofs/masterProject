@@ -31,11 +31,12 @@ def _resolve_low(ld, low_name, low_glob):
 
 def process_single_run(task_args):
     """Worker function executed by CPU subprocesses."""
-    ld, low_name, high_name, lmax, low_glob = task_args
+    ld, low_name, high_name, lmax, low_glob, log_density = task_args
 
     # 1. Changed target extensions to raw .npy
-    out_low_path = ld / f"low_alms_lmax{lmax}.npy"
-    out_high_path = ld / f"high_alms_lmax{lmax}.npy"
+    prefix = "_log" if log_density else ""
+    out_low_path = ld / f"low{prefix}_alms_lmax{lmax}.npy"
+    out_high_path = ld / f"high{prefix}_alms_lmax{lmax}.npy"
 
     if out_low_path.exists() and out_high_path.exists():
        return f"[Skipped] {ld.name} (Already transformed)"
@@ -48,12 +49,17 @@ def process_single_run(task_args):
         low_data = np.load(low_path, allow_pickle=False)["shells"]
         high_data = np.load(high_path, allow_pickle=False)["shells"]
         n_available = min(low_data.shape[0], high_data.shape[0])
-        
+
         low_alms, high_alms = [], []
-        
+
         for i in range(n_available):
-            alm_low = hp.map2alm(low_data[i], lmax=lmax, iter=1)
-            alm_high = hp.map2alm(high_data[i], lmax=lmax, iter=1)
+            # log1p(rho) is well-defined at rho=0 (-> 0, not -inf) and, unlike raw
+            # rho, reconstructs via expm1 without ever needing a hard floor at 0 --
+            # see transfer_function.py apply()'s --log-density branch.
+            low_map = np.log1p(low_data[i]) if log_density else low_data[i]
+            high_map = np.log1p(high_data[i]) if log_density else high_data[i]
+            alm_low = hp.map2alm(low_map, lmax=lmax, iter=1)
+            alm_high = hp.map2alm(high_map, lmax=lmax, iter=1)
             
             vec_low = np.concatenate([alm_low.real, alm_low.imag]).astype(np.float32)
             vec_high = np.concatenate([alm_high.real, alm_high.imag]).astype(np.float32)
@@ -83,6 +89,10 @@ def main():
     parser.add_argument("--high-npz", type=str, default="compressed_shells.npz")
     parser.add_argument("--lmax", type=int, default=3000)
     parser.add_argument("--num-workers", type=int, default=os.cpu_count())
+    parser.add_argument("--log-density", action="store_true",
+                        help="Write low_log_alms_lmax*.npy/high_log_alms_lmax*.npy "
+                             "(map2alm of log1p(rho) instead of raw rho) alongside "
+                             "-- doesn't touch/require the raw-density alm files.")
     args = parser.parse_args()
 
     data_dir = Path(args.data_dir)
@@ -104,7 +114,8 @@ def main():
     for ld in leaf_dirs:
         low_ok = _resolve_low(ld, args.low_npz, args.low_glob) is not None
         if low_ok and (ld / args.high_npz).exists():
-            tasks.append((ld, args.low_npz, args.high_npz, args.lmax, args.low_glob))
+            tasks.append((ld, args.low_npz, args.high_npz, args.lmax, args.low_glob,
+                          args.log_density))
 
     print(f"Found {len(tasks)} valid execution targets inside: {data_dir}")
     print(f"Spawning {args.num_workers} multi-core processes...")

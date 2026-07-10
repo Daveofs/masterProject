@@ -24,9 +24,9 @@ LOG_DIR=/capstor/scratch/cscs/damrein/outputs/logs/disco_custom
 OUT_DIR=/capstor/scratch/cscs/damrein/outputs
 mkdir -p "${SNAP_DIR}" "${LOG_DIR}" "${OUT_DIR}"
 
-ICS_FILE=//capstor/store/cscs/ska/sk037/jbucko/disco_files_grid00001/snapshot_converted_832.hdf5
-PARAM_YML=/capstor/scratch/cscs/damrein/cosmogridv1_test5/cosmo_000001/run_0/params.yml
-CLASS_PROCESSED=/capstor/scratch/cscs/damrein/cosmogridv1_test5/cosmo_000001/run_0/class_processed.hdf5
+ICS_FILE=/capstor/scratch/cscs/damrein/cosmogridv1/cosmo_000001/run_0/CosmoML_000001_run_0.00000.hdf5
+PARAM_YML=/capstor/scratch/cscs/damrein/cosmogridv1/cosmo_000001/run_0/params.yml
+CLASS_PROCESSED=/capstor/scratch/cscs/damrein/cosmogridv1/cosmo_000001/run_0/class_processed.hdf5
 CONDA_INIT=/users/damrein/miniforge3/etc/profile.d/conda.sh
 CONDA_ENV=disco_custom
 
@@ -44,7 +44,7 @@ echo "simulation_run: ${SIMRUN_BIN}"
 METAINFO_FILE=/capstor/scratch/cscs/damrein/cosmogridv1/CosmoGridV1_metainfo.h5
 COSMO_KEY=cosmo_000001
 RES=832
-RES_PM=1664
+RES_PM=832
 BOXSIZE=900.0
 NUMSTEPS=10
 A_INI=0.01

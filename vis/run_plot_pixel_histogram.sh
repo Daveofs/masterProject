@@ -43,8 +43,16 @@ FSKY=1.0
 
 # Legend/stats labels for the two datasets, and the plot title prefix.
 # Edit these to relabel the figures without touching the Python script.
-LABEL_A="CosmogridV1"
-LABEL_B="DISCO corrected"
+# NOTE: label-a legends the --disco dataset (DISCO_FILE below) and label-b legends
+# the --cosmogrid dataset (COSMOGRID_FILE below) -- see plot_pixel_histogram.py's
+# own --label-a/--label-b help text. These were swapped (fixed 2026-07-09): the
+# plots were showing the corrected map's stats under the "CosmogridV1" legend and
+# vice versa, which is what made DISCO-corrected look like it overshoots CosmoGrid
+# in the pixel histograms -- it doesn't; verified by loading both npz files
+# directly (shell 10: true CosmoGridV1 std=2.7550 max=390, corrected_fullT
+# std=2.5143 max=276 -- corrected is actually slightly BELOW CosmoGrid, not above).
+LABEL_A="DISCO corrected"
+LABEL_B="CosmogridV1"
 TITLE="Pixel count histogram"
 
 # Optional box parameters (set these to enable M_box calculation)
