@@ -5,17 +5,21 @@ Reads the train_log.jsonl that unet_flow_jbucko/train_flow.py writes (one JSON r
 per epoch: {epoch, time_s, lr, train_loss, val_loss}). Train and validation are the
 SAME flow-matching MSE loss < ||v_theta(x_t,t) - (x1-x0)||^2 >; validation is computed
 on HELD-OUT COSMOLOGIES (split_by_cosmo in dataset.py), so a gap between the two curves
-is the generalization gap. No model/training code here -- pure plotting glue.
+is the generalization gap. No model/training code here -- pure plotting glue, on the
+SAME shared figure (analysis.plot_train_val_loss) transfer_function.py's emulator loss
+plot uses, so the two pipelines' training diagnostics are structurally identical.
 """
 from __future__ import annotations
 import argparse
 import json
+import os
+import sys
 from pathlib import Path
 
 import numpy as np
-import matplotlib
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+from analysis.plotting import plot_train_val_loss  # noqa: E402
 
 
 def main():
@@ -32,23 +36,13 @@ def main():
     tr = np.array([r["train_loss"] for r in rows])
     va = np.array([r["val_loss"] for r in rows])
 
-    best_ep = int(ep[np.argmin(va)])
-    best_va = float(va.min())
-
-    fig, ax = plt.subplots(figsize=(9, 5))
-    ax.plot(ep, tr, "-o", ms=3, color="steelblue", label="train")
-    ax.plot(ep, va, "-o", ms=3, color="tomato", label="validation (held-out cosmologies)")
-    ax.axvline(best_ep, color="0.6", ls=":", lw=1.0)
-    ax.scatter([best_ep], [best_va], color="tomato", zorder=5,
-               label=f"best val {best_va:.4f} @ epoch {best_ep}")
-    ax.set_xlabel("epoch"); ax.set_ylabel("flow-matching MSE loss")
-    ax.set_yscale("log"); ax.legend(fontsize=9); ax.grid(True, alpha=0.3)
-    ax.set_title("Conditional flow matching (low->high): train vs validation\n"
-                 r"loss $=\langle\,\|v_\theta(x_t,t)-(x_1-x_0)\|^2\,\rangle$, "
-                 r"$x_0$=low, $x_1$=high, $x_t=(1-t)x_0+t x_1$", fontsize=10)
     out = Path(args.out or (Path(args.run_dir) / "loss_curve.png"))
-    fig.tight_layout(); fig.savefig(out, dpi=150)
-    print(f"[plot] {len(rows)} epochs | best val {best_va:.5f} @ {best_ep} -> {out}", flush=True)
+    plot_train_val_loss(
+        ep, tr, va, out, xlabel="epoch", ylabel="flow-matching MSE loss",
+        val_label="validation (held-out cosmologies)",
+        formula="Conditional flow matching (low->high): train vs validation\n"
+                r"loss $=\langle\,\|v_\theta(x_t,t)-(x_1-x_0)\|^2\,\rangle$, "
+                r"$x_0$=low, $x_1$=high, $x_t=(1-t)x_0+t x_1$")
 
 
 if __name__ == "__main__":

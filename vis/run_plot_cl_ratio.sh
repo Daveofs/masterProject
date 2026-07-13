@@ -18,10 +18,10 @@ SCRATCH_DIR=/capstor/scratch/cscs/damrein
 CONDA_ROOT=/users/damrein/miniforge3
 CONDA_ENV=disco-dj
 
-DISCO_FILE="/capstor/scratch/cscs/damrein/outputs/transfer/poisson_test/counts_test.npz"
+DISCO_FILE="/capstor/scratch/cscs/damrein/grid/cosmo_203356/run_0/disco_sim/gpu_grid_2746372/disco_shells_nside=2048.npz"
 # Set to "None" or leave empty to make it optional
 DISCO_FILE_1664=None
-COSMOGRID_FILE="/capstor/scratch/cscs/damrein/cosmogridv1/cosmo_000001/run_0/compressed_shells.npz"
+COSMOGRID_FILE="/capstor/scratch/cscs/damrein/grid/cosmo_203356/run_0/compressed_shells.npz"
 PARAMS_YML="/capstor/scratch/cscs/damrein/cosmogridv1_fiducial_test2/run_0000/params.yml"
 OUT_DIR="${SCRATCH_DIR}/outputs/cl_ratio"
 
@@ -40,7 +40,7 @@ SHOW_RESID=false
 # Custom legend labels
 LABEL_DISCO="Disco"
 LABEL_DISCO_1664="Ignore"
-LABEL_COSMOGRID="Cosmogridv1 - cosmo_0000001"
+LABEL_COSMOGRID="Cosmogridv1 - cosmo_203356"
 LABEL_THEORY="CCL theory"
 LABEL_RESID="DRF - CosmoGrid (resid)"
 LABEL_RESID_1664="Ignore - CosmoGrid (resid)"

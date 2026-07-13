@@ -79,10 +79,20 @@ class Up(nn.Module):
 
 
 class FlowUNet(nn.Module):
-    """Predicts velocity v_theta(x_t, t). Same 4-level topology as model.UNet."""
+    """Predicts velocity v_theta(x_t, t [, cosmo_z]). Same 4-level topology as model.UNet.
+
+    cosmo_z conditioning (H0->h, Omega_cdm, Ob, Om, ns, s8, w0, redshift -- see
+    dataset.cosmo_z_vector) is injected ONCE, additively, into the bottleneck latent
+    (between self.bottleneck and self.up3) -- not threaded through every FiLM block
+    like the time embedding, since that's the one place requested and it keeps the
+    change small/easy to ablate. use_cosmo_cond defaults to True (added by default);
+    set it False to reproduce the original, unconditioned model for comparison -- the
+    two are architecturally identical everywhere except this one addition.
+    """
 
     def __init__(self, in_channels: int = 1, out_channels: int = 1,
-                 base_channels: int = 32, time_emb_dim: int = 128):
+                 base_channels: int = 32, time_emb_dim: int = 128,
+                 use_cosmo_cond: bool = True, cosmo_z_dim: int = 8):
         super().__init__()
         c = base_channels
         self.time_embed = nn.Sequential(
@@ -99,6 +109,18 @@ class FlowUNet(nn.Module):
         self.down3 = Down(c * 4, c * 8, emb_dim)
         self.bottleneck = Down(c * 8, c * 16, emb_dim)
 
+        self.use_cosmo_cond = use_cosmo_cond
+        if use_cosmo_cond:
+            bottleneck_ch = c * 16
+            self.cosmo_mlp = nn.Sequential(
+                nn.Linear(cosmo_z_dim, bottleneck_ch), nn.SiLU(inplace=True),
+                nn.Linear(bottleneck_ch, bottleneck_ch),
+            )
+            # zero-init: this addition starts as v=0 contribution (a no-op, identical
+            # to use_cosmo_cond=False at init), same stability rationale as the head.
+            nn.init.zeros_(self.cosmo_mlp[-1].weight)
+            nn.init.zeros_(self.cosmo_mlp[-1].bias)
+
         self.up3 = Up(c * 16, c * 8, c * 8, emb_dim)
         self.up2 = Up(c * 8, c * 4, c * 4, emb_dim)
         self.up1 = Up(c * 4, c * 2, c * 2, emb_dim)
@@ -110,7 +132,8 @@ class FlowUNet(nn.Module):
         nn.init.zeros_(self.head.weight)
         nn.init.zeros_(self.head.bias)
 
-    def forward(self, x: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, t: torch.Tensor,
+               cosmo_z: torch.Tensor | None = None) -> torch.Tensor:
         emb = self.time_embed(t)
 
         x0 = self.stem(x, emb)
@@ -118,6 +141,12 @@ class FlowUNet(nn.Module):
         x2 = self.down2(x1, emb)
         x3 = self.down3(x2, emb)
         xb = self.bottleneck(x3, emb)
+
+        if self.use_cosmo_cond:
+            if cosmo_z is None:
+                raise ValueError("this FlowUNet was built with use_cosmo_cond=True: "
+                                 "forward() requires cosmo_z (see dataset.cosmo_z_vector)")
+            xb = xb + self.cosmo_mlp(cosmo_z)[:, :, None, None]
 
         y = self.up3(xb, x3, emb)
         y = self.up2(y, x2, emb)
@@ -128,9 +157,10 @@ class FlowUNet(nn.Module):
 
 
 @torch.no_grad()
-def sample_ode(model: FlowUNet, x0: torch.Tensor, n_steps: int = 4) -> torch.Tensor:
-    """Integrate dx/dt = v_theta(x, t) from t=0 (x0 = low_log) to t=1 (predicted
-    high_log), simple Euler steps. x0 is close to x1 by construction (same
+def sample_ode(model: FlowUNet, x0: torch.Tensor, n_steps: int = 4,
+              cosmo_z: torch.Tensor | None = None) -> torch.Tensor:
+    """Integrate dx/dt = v_theta(x, t [, cosmo_z]) from t=0 (x0 = low_log) to t=1
+    (predicted high_log), simple Euler steps. x0 is close to x1 by construction (same
     large-scale structure), so few steps should suffice - unlike diffusion
     sampling from pure noise, which typically needs dozens+."""
     model.eval()
@@ -138,6 +168,6 @@ def sample_ode(model: FlowUNet, x0: torch.Tensor, n_steps: int = 4) -> torch.Ten
     dt = 1.0 / n_steps
     for i in range(n_steps):
         t = torch.full((x.shape[0],), i * dt, device=x.device, dtype=x.dtype)
-        v = model(x, t)
+        v = model(x, t, cosmo_z=cosmo_z)
         x = x + v * dt
     return x

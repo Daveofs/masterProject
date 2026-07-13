@@ -135,13 +135,27 @@ def smooth_cl(cl: np.ndarray, window: int = 81) -> np.ndarray:
     return 10.0 ** uniform_filter1d(log_cl, size=window, mode="nearest")
 
 
-def _taper(ells: np.ndarray, ell_c: int, taper: int) -> np.ndarray:
-    """1 for ell<<ell_c, 0 for ell>>ell_c, smooth cosine transition over +-taper.
-    A HARD step here (win=1 below ell_c else 0) is itself a measurable Cl bias --
-    on shell 30 (dense, no lognormal difficulty at all) it alone left a flat 0.95
-    that this taper fixed to 0.99-1.01 with no other change."""
-    lo, hi = ell_c - taper, ell_c + taper
-    return 0.5 * (1 + np.cos(np.pi * np.clip((ells - lo) / (hi - lo), 0.0, 1.0)))
+def _r_window(R: np.ndarray, window: int = 41) -> np.ndarray:
+    """The per-ell DISCO/CosmoGrid phase-correlation R(ell) (from transfer_function.py
+    fit/train, same R used by --stochastic there), lightly boxcar-smoothed, IS the
+    correct mixing weight -- not a fixed ell_c cutoff.
+
+    FIXED ell_c=300 (first pass) was wrong: measured R(ell) varies enormously by
+    shell -- shell 3 (faint) drops to 0.56 by ell=1000, but shell 30/50 (dense)
+    stay at R>=0.985 all the way to ell=2500. A fixed cutoff at 300 discarded
+    PERFECTLY GOOD, ~100%-correlated DISCO structure on the dense shells for no
+    reason, replacing real filaments with random noise -- visibly grainier
+    "corrected" patches than either input, even though the aggregate Cl still came
+    out close (power spectra don't see phases, so this damage was invisible to the
+    band-averaged Cl checks and only showed up by eye). R directly controls the
+    win/(1-win^2) split already used by amp/cl_hi_part below, so win=R is not a
+    heuristic -- it is exactly the standard Wiener/constrained-realization
+    correlated-signal-plus-independent-noise decomposition (r*signal +
+    sqrt(1-r^2)*noise preserves total power for any r(ell), keeping ALL the real
+    structure the data actually supports, no more no less)."""
+    from scipy.ndimage import uniform_filter1d
+    r = np.clip(uniform_filter1d(np.clip(R, 0.0, 1.0), size=window, mode="nearest"), 0.0, 1.0)
+    return r
 
 
 def _one_draw(rho_native, source_map, lbar, cl_g, lmax, nside, ells, win, rng):
@@ -170,20 +184,23 @@ def _one_draw(rho_native, source_map, lbar, cl_g, lmax, nside, ells, win, rng):
     return rng.poisson(lam).astype(np.float64), lam
 
 
-def resample_shell(rho_native, cl_high, source_map, lmax, nside, mu, w, rng,
-                   ell_c=300, taper=100, n_avg=4, n_iter=5, damp=0.4, verbose=True):
+def resample_shell(rho_native, cl_high, source_map, R, lmax, nside, mu, w, rng,
+                   n_avg=4, n_iter=5, damp=0.4, verbose=True):
     """One shell: shot-deconvolve -> lognormal target Cl_g -> iteratively calibrated
     Gaussian g -> lambda>0 -> Poisson counts. See module docstring for why a single
-    global amplitude (first pass) left a systematic ~5-10% shape bias and why a
-    hard ell_c cutoff is itself a bias source independent of the lognormal step.
+    global amplitude (first pass) left a systematic ~5-10% shape bias, and why a
+    FIXED ell_c cutoff (second pass) was itself a worse bias -- it discarded good
+    DISCO phase structure on dense shells (R stays ~1 to ell=2500 there) and
+    visibly degraded those images even though the aggregate Cl still looked fine.
 
     `g` must be a genuine GAUSSIAN RANDOM FIELD, not merely a field with a Gaussian
     marginal (rank-order Gaussianizing the source then filtering to Cl_g FAILS: the
     sparse source is nearly white, the filter boosts ell<100 by ~10-12x, resurrects
     a fat tail, lambda_max ~1e9). Build g as DISCO's structure (from the smoothed,
-    hence ~Gaussian, log-density of the corrected map) below ell_c, tapered into an
-    independent Gaussian realization above -- the fitted r(ell) shows low/high are
-    decorrelated there anyway (r=0.056 at ell=2500), so this costs no real info.
+    hence ~Gaussian, log-density of the corrected map), mixed with an independent
+    Gaussian realization using the ACTUAL per-ell phase correlation R(ell) as the
+    mixing weight (see _r_window) -- not a fixed cutoff -- so every shell keeps
+    exactly as much real structure as the data supports.
     """
     npix = hp.nside2npix(nside)
     omega = 4 * np.pi / npix
@@ -203,7 +220,7 @@ def resample_shell(rho_native, cl_high, source_map, lmax, nside, mu, w, rng,
     cl_g = np.clip(xi2cl(xi_g, mu, w, lmax), 0.0, None)
     cl_g[0] = 0.0
 
-    win = _taper(ells, ell_c, taper)
+    win = _r_window(R)
     cl_h_s = smooth_cl(cl_high)
 
     # 3. Damped, averaged fixed-point iteration on a PER-ELL correction to cl_g.
@@ -236,22 +253,178 @@ def resample_shell(rho_native, cl_high, source_map, lmax, nside, mu, w, rng,
     return counts.astype(np.float32)
 
 
+# ---------------------------------------------------------------------------
+# Shell-level PARALLELISM. Different shells are completely independent (no data
+# dependency), but resample_shell's own OMP threading (map2alm/alm2map/anafast at
+# nside=2048, lmax=3000) saturates well before using many-dozens of cores: measured
+# the SAME ~2h wall-clock for n_avg=4/n_iter=5 across 69 shells whether the node had
+# 64 or 288 cpus allocated -- the extra cores were simply never used, since a single
+# shell's SHT calls don't scale that far no matter how high OMP_NUM_THREADS is set.
+# Real speedup needs TASK parallelism across shells (like preprocess_alms.py's
+# --num-workers), combined with a SMALLER per-worker thread count so many shells run
+# concurrently instead of one shell hogging every core.
+#
+# Each worker gets only cheap-to-pickle inputs (a shell index, small (lmax+1,) T/R
+# arrays, file PATHS) and mmap-reads its own shell's slice of the on-disk alm/shell
+# files directly -- deliberately NOT the large (npix,) precomputed arrays (~400MB
+# each at nside=2048), which would make inter-process pickling itself a bottleneck.
+# ---------------------------------------------------------------------------
+
+def _worker_init(threads_per_worker: int):
+    """ProcessPoolExecutor initializer: cap OMP threads per worker so n_workers run
+    concurrently instead of each saturating the whole node. Must happen before any
+    healpy/libsharp call in this (fresh, spawn-context) process reads the env var."""
+    import os
+    os.environ["OMP_NUM_THREADS"] = str(max(1, threads_per_worker))
+
+
+def _resample_one_shell_task(task: dict):
+    """One shell's FULL pipeline (transfer-function residual -> Poisson resample),
+    run in a worker process. See module docstring above for why inputs are paths/
+    small arrays, not the large per-shell maps themselves."""
+    import healpy as hp
+    i = task["i"]
+    lmax, nside = task["lmax"], task["nside"]
+    N_alm = (lmax + 1) * (lmax + 2) // 2
+    ell = np.empty(N_alm, dtype=np.int64)
+    for m in range(lmax + 1):
+        for l in range(m, lmax + 1):
+            ell[m * (2 * lmax + 1 - m) // 2 + l] = l
+
+    run = Path(task["run_dir"])
+    low = np.load(run / task["low_alm_fname"], mmap_mode="r")
+    low_full = np.load(run / f"low_shells_nside={nside}.npy", mmap_mode="r")
+    high_alms = np.load(run / f"high_alms_lmax{lmax}.npy", mmap_mode="r")
+
+    Ti, Ri = task["Ti"], task["Ri"]                    # already ell_min-masked by caller
+    v = np.asarray(low[i], dtype=np.float64)
+    tvec = (Ti - 1.0)[ell]
+    alm_delta = v[:N_alm] * tvec + 1j * v[N_alm:] * tvec
+    delta_map = hp.alm2map(alm_delta, nside=nside, lmax=lmax)
+    rho_native = np.asarray(low_full[i], dtype=np.float64)
+    m_unclipped = rho_native + delta_map
+
+    cl_h_i = hp.alm2cl(_alm(np.asarray(high_alms[i]), N_alm), lmax=lmax)
+    from numpy.polynomial.legendre import leggauss
+    mu, w = leggauss(2 * lmax + 64)
+    rng = np.random.default_rng(task["seed"] + i)
+    counts = resample_shell(rho_native, cl_h_i, m_unclipped, Ri, lmax, nside, mu, w, rng,
+                            n_avg=task["n_avg"], n_iter=task["n_iter"], damp=task["damp"],
+                            verbose=task["verbose"])
+    return i, counts
+
+
+def resample_all_shells_parallel(run_dir, low_alm_fname, lmax, nside, T, R,
+                                 ell_min_per_shell, n_avg=4, n_iter=5, damp=0.4,
+                                 seed=0, n_workers=1, total_cpus=None, verbose=True):
+    """Drop-in replacement for a sequential `for i: resample_shell(...)` loop.
+
+    Two speed levers, in order of how much they're trusted:
+      1. SKIP shells where ell_min_i >= lmax entirely (T forced to 1 at every mode
+         -> the correction is IDENTICALLY ZERO -> m_unclipped == rho_native exactly
+         -- already a valid non-negative integer count map). Running the full
+         lognormal+Poisson machinery there wouldn't just waste ~90s/shell, it would
+         actively REPLACE DISCO's real structure with fresh Poisson noise for a
+         shell --ell-min-mpc says to leave untouched. Free (mathematically exact,
+         not an approximation) and, with --ell-min-mpc 3, cuts real work by ~49%
+         (34/69 shells on cosmo_000122). Always on.
+      2. n_workers > 1: dispatch the REMAINING shells across a process pool so
+         independent shells run concurrently. OFF by default (n_workers=1, plain
+         sequential at whatever OMP_NUM_THREADS the caller set) -- measured 23
+         workers x 12 threads to be dramatically SLOWER than sequential (memory-
+         bandwidth contention from many concurrent large-array SHTs), and OMP
+         threading alone saturates at ~128 threads (measured: 128->256 threads
+         gave zero further speedup on a single shell). Only raise this after
+         validating a specific worker count on THIS hardware -- it is not a safe
+         default lever the way (1) is.
+
+    T, R: (n_shells_T, lmax+1) arrays (transfer.npz's T/R, possibly fewer rows than
+    n_shells -- the last row is reused, matching apply()'s existing convention).
+    ell_min_per_shell: (n_shells,) int array (0 = no restriction).
+    """
+    import os
+    import healpy as hp
+
+    n_shells = len(ell_min_per_shell)
+    npix = 12 * nside * nside
+    total_cpus = total_cpus or os.cpu_count() or n_workers
+    corrected = np.zeros((n_shells, npix), dtype=np.float32)
+
+    tasks, skipped = [], []
+    for i in range(n_shells):
+        Ti = T[min(i, T.shape[0] - 1)].copy()
+        Ri = R[min(i, R.shape[0] - 1)].copy() if R is not None else np.ones(lmax + 1)
+        ell_min_i = int(ell_min_per_shell[i])
+        if ell_min_i > 0:
+            Ti[:ell_min_i] = 1.0
+            Ri[:ell_min_i] = 1.0
+        if ell_min_i >= lmax:
+            skipped.append(i)   # T==1 everywhere -> handled below, no task needed
+            continue
+        tasks.append({"i": i, "run_dir": str(run_dir), "low_alm_fname": low_alm_fname,
+                     "lmax": lmax, "nside": nside, "Ti": Ti, "Ri": Ri,
+                     "n_avg": n_avg, "n_iter": n_iter, "damp": damp, "seed": seed,
+                     "verbose": verbose and (len(tasks) % max(1, n_shells // 20) == 0)})
+
+    if skipped:
+        low_full = np.load(Path(run_dir) / f"low_shells_nside={nside}.npy", mmap_mode="r")
+        for i in skipped:
+            corrected[i] = np.asarray(low_full[i], dtype=np.float32)
+        if verbose:
+            print(f"[poisson-parallel] {len(skipped)}/{n_shells} shells have "
+                  f"ell_min>=lmax (T==1 everywhere) -> passed through as DISCO's "
+                  f"own counts, unmodified, no resample needed", flush=True)
+
+    n_workers = max(1, min(n_workers, len(tasks))) if tasks else 1
+    if verbose:
+        print(f"[poisson-parallel] {len(tasks)} shells need resampling, "
+              f"{n_workers} worker(s)" + (f" x {total_cpus // n_workers} OMP threads "
+              f"each ({total_cpus} cpus total)" if n_workers > 1 else
+              f" (sequential, OMP_NUM_THREADS={os.environ.get('OMP_NUM_THREADS', '?')})"),
+              flush=True)
+
+    if n_workers == 1:
+        # Plain sequential -- see docstring for why this is the trusted default.
+        for n_done, t in enumerate(tasks, 1):
+            i, counts = _resample_one_shell_task(t)
+            corrected[i] = counts
+            if verbose and n_done % max(1, len(tasks) // 10) == 0:
+                print(f"[poisson-parallel] {n_done}/{len(tasks)} shells done", flush=True)
+        return corrected
+
+    from concurrent.futures import ProcessPoolExecutor, as_completed
+    import multiprocessing as mp
+    threads_per_worker = max(1, total_cpus // n_workers)
+    ctx = mp.get_context("spawn")   # fresh interpreter per worker -- avoids inheriting
+    with ProcessPoolExecutor(max_workers=n_workers, mp_context=ctx,
+                             initializer=_worker_init,
+                             initargs=(threads_per_worker,)) as ex:
+        futures = [ex.submit(_resample_one_shell_task, t) for t in tasks]
+        n_done = 0
+        for fut in as_completed(futures):
+            i, counts = fut.result()
+            corrected[i] = counts
+            n_done += 1
+            if verbose and n_done % max(1, len(tasks) // 10) == 0:
+                print(f"[poisson-parallel] {n_done}/{len(tasks)} shells done", flush=True)
+    return corrected
+
+
 def main():
     from numpy.polynomial.legendre import leggauss
     p = argparse.ArgumentParser()
     p.add_argument("--corrected", required=True,
                    help="npz from `transfer_function.py apply --no-clip` (shells key).")
+    p.add_argument("--transfer", required=True,
+                   help="transfer.npz from transfer_function.py fit/emulate -- its R "
+                        "array (per-shell, per-ell DISCO/CosmoGrid phase correlation) "
+                        "is the mixing weight between DISCO's real structure and an "
+                        "independent Gaussian realization (see _r_window). NOT a fixed "
+                        "ell_c cutoff -- that discarded good structure on dense shells.")
     p.add_argument("--run-dir", required=True, help="Run dir with high_alms + low shells.")
     p.add_argument("--lmax", type=int, default=3000)
     p.add_argument("--nside", type=int, default=2048)
     p.add_argument("--seed", type=int, default=0)
-    p.add_argument("--ell-c", type=int, default=300,
-                   help="Below this ell keep DISCO's phases; above it use an "
-                        "independent Gaussian realization (r(ell) shows the phases "
-                        "are noise up there anyway). 300 measured better than 800.")
-    p.add_argument("--taper", type=int, default=100,
-                   help="Cosine-taper width around ell_c. A hard cutoff (taper=0) "
-                        "is itself a measurable Cl bias (flat ~0.95 on shell 30).")
     p.add_argument("--n-avg", type=int, default=4,
                    help="Poisson draws averaged per iteration to denoise the "
                         "feedback ratio (shot noise dominates a single draw).")
@@ -277,6 +450,7 @@ def main():
     corrected = np.load(args.corrected, mmap_mode="r")["shells"]
     low_full = np.load(run / f"low_shells_nside={nside}.npy", mmap_mode="r")
     high_alms = np.load(run / f"high_alms_lmax{lmax}.npy", mmap_mode="r")
+    R_all = np.load(args.transfer)["R"]
 
     n_shells = corrected.shape[0]
     idx = sorted(args.shells) if args.shells else list(range(n_shells))
@@ -287,8 +461,8 @@ def main():
         rho = np.asarray(low_full[i], dtype=np.float64)
         cl_h = hp.alm2cl(_alm(np.asarray(high_alms[i]), n_alm), lmax=lmax)
         src = np.asarray(corrected[i], dtype=np.float64)
-        out[i] = resample_shell(rho, cl_h, src, lmax, nside, mu, w, rng,
-                                ell_c=args.ell_c, taper=args.taper,
+        R_i = R_all[min(i, R_all.shape[0] - 1)]
+        out[i] = resample_shell(rho, cl_h, src, R_i, lmax, nside, mu, w, rng,
                                 n_avg=args.n_avg, n_iter=args.n_iter, damp=args.damp)
 
     outp = Path(args.out); outp.parent.mkdir(parents=True, exist_ok=True)

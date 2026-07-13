@@ -18,12 +18,12 @@
 # ============================================================
 
 #SBATCH --job-name=pkdgrav_gen_all
-#SBATCH --account=sk037
+#SBATCH --account=a0158
 #SBATCH --partition=normal
 #SBATCH --nodes=5
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=50
-#SBATCH --time=02:00:00
+#SBATCH --time=12:00:00
 #SBATCH --output=/capstor/scratch/cscs/damrein/outputs/logs/pkdgrav/pkdgrav_gen_%A_%a.out
 #SBATCH --error=/capstor/scratch/cscs/damrein/outputs/logs/pkdgrav/pkdgrav_gen_%A_%a.err
 

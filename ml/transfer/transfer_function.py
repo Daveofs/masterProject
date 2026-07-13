@@ -139,6 +139,27 @@ def shell_redshifts(run_dir: Path, n_shells: int, info_npz: str) -> np.ndarray:
     return np.arange(n_shells, dtype=np.float64)
 
 
+def ell_min_from_mpc_h(z: np.ndarray, cosmo: np.ndarray, scale_mpc_h: float) -> np.ndarray:
+    """Per-shell ell below which T is forced to 1 (no correction), so a FIXED
+    physical (comoving) scale in Mpc/h -- not a fixed ell -- is what's left
+    untouched. A fixed ell_min corresponds to a DIFFERENT comoving scale at every
+    shell (comoving distance grows with z), which is not what "only correct scales
+    smaller than 3 Mpc/h" means physically.
+
+    Flat-sky/Limber mapping ell(k, chi) ~= k*chi (LoVerde & Afshordi 2008), with
+    k = 2*pi/L the 3D wavenumber for comoving scale L, and chi(z) the comoving
+    distance -- both derived from the SAME cosmology.yml used elsewhere (COSMO_KEYS
+    order: H0, O_cdm, Ob, Om, ns, s8), not a hardcoded fiducial value, so this
+    tracks the actual test cosmology's expansion history.
+    """
+    from astropy.cosmology import FlatLambdaCDM
+    H0, Om = float(cosmo[0]), float(cosmo[3])
+    h = H0 / 100.0
+    chi_mpc_h = FlatLambdaCDM(H0=H0, Om0=Om).comoving_distance(z).value * h  # Mpc/h
+    ell_min = np.ceil(2.0 * np.pi * chi_mpc_h / scale_mpc_h).astype(np.int64)
+    return np.clip(ell_min, 0, None)
+
+
 def build_features(ell: np.ndarray, z: float, cosmo: np.ndarray,
                    cl_low: np.ndarray) -> np.ndarray:
     """Rows of [l, z, H0, O_cdm, Ob, Om, ns, s8, Cl_low] for one shell (per ell).
@@ -359,16 +380,48 @@ def train(args):
     print(f"[train] {X.shape[0]:,} samples x {X.shape[1]} features", flush=True)
 
     scaler = StandardScaler().fit(X)
+    Xs = scaler.transform(X)
     hidden = tuple(int(h) for h in args.hidden.split(","))
+
+    # Manual train/val split + partial_fit loop, NOT model.fit(early_stopping=True):
+    # sklearn's built-in early stopping only exposes validation_scores_ (R^2, a
+    # SCORE that increases as it improves), while loss_curve_ (training) is a LOSS
+    # that decreases -- opposite sign conventions, so they can never be shown as
+    # "both curves decreasing" on the same axis. jbucko's flow loss_curve.png plots
+    # train_loss and val_loss on the SAME formula/footing (see plot_flow_loss.py);
+    # matching that structurally (not just visually) needs a genuine per-iteration
+    # validation LOSS, which requires driving the iterations ourselves.
+    rng_split = np.random.default_rng(0)
+    n = Xs.shape[0]
+    val_idx_mask = rng_split.random(n) < 0.1          # same 10% convention as before
+    X_tr, y_tr = Xs[~val_idx_mask], y[~val_idx_mask]
+    X_va, y_va = Xs[val_idx_mask], y[val_idx_mask]
+
     model = MLPRegressor(hidden_layer_sizes=hidden, activation="relu",
                          solver="adam", alpha=args.alpha, batch_size=4096,
-                         learning_rate_init=1e-3, max_iter=args.max_iter,
-                         early_stopping=True, n_iter_no_change=10,
-                         validation_fraction=0.1, verbose=True, random_state=0)
-    model.fit(scaler.transform(X), y)
-    print(f"[train] final loss={model.loss_:.3e} "
-          f"(val best={getattr(model, 'best_validation_score_', float('nan')):.4f})",
-          flush=True)
+                         learning_rate_init=1e-3, verbose=False, random_state=0)
+    train_loss_hist, val_loss_hist = [], []
+    best_val, best_weights, no_improve, patience = np.inf, None, 0, 10
+    for it in range(args.max_iter):
+        model.partial_fit(X_tr, y_tr)                  # one epoch (adam, batch_size=4096)
+        train_loss = float(np.mean((model.predict(X_tr) - y_tr) ** 2)) / 2
+        val_loss = float(np.mean((model.predict(X_va) - y_va) ** 2)) / 2
+        train_loss_hist.append(train_loss); val_loss_hist.append(val_loss)
+        if val_loss < best_val - 1e-9:
+            best_val, best_weights, no_improve = val_loss, \
+                ([c.copy() for c in model.coefs_], [b.copy() for b in model.intercepts_]), 0
+        else:
+            no_improve += 1
+        if it % 10 == 0:
+            print(f"  iter {it}: train_loss={train_loss:.3e} val_loss={val_loss:.3e}", flush=True)
+        if no_improve >= patience:
+            print(f"[train] early stopping at iter {it} "
+                  f"(no val improvement for {patience} iters)", flush=True)
+            break
+    if best_weights is not None:                       # restore best-val weights
+        model.coefs_, model.intercepts_ = best_weights
+    print(f"[train] final: train_loss={train_loss_hist[-1]:.3e} "
+          f"best_val_loss={best_val:.3e}", flush=True)
 
     Path(args.out).parent.mkdir(parents=True, exist_ok=True)
     joblib.dump({"model": model, "scaler": scaler, "lmax": lmax,
@@ -378,36 +431,23 @@ def train(args):
                  ["log10(l+1)", "z", *COSMO_KEYS, "log10(Cl_low)"]}, args.out)
     print(f"[train] saved emulator to {args.out}", flush=True)
 
-    # ---- loss / validation-score curve plot ----
-    # sklearn's MLPRegressor (solver='adam') always uses squared-error loss with L2
-    # weight decay for training (loss_curve_), and R^2 (coefficient of determination)
-    # as the early-stopping validation metric (validation_scores_) -- neither is
-    # user-configurable, so state the exact formulas actually being optimized/
-    # monitored directly on the plot rather than just the generic curve shapes.
+    # ---- loss / validation-loss curve plot ----
+    # Same shared figure (analysis.plot_train_val_loss) as jbucko's plot_flow_loss.py
+    # -- both curves are plain squared error (no L2 term; alpha's weight decay is an
+    # OPTIMIZER detail, not part of the reported/plotted loss, so train vs val is an
+    # apples-to-apples comparison), so a gap between them is the generalization gap,
+    # directly comparable to jbucko's train-vs-held-out-cosmology gap.
     try:
-        import matplotlib
-        matplotlib.use("Agg")
-        import matplotlib.pyplot as plt
-        fig, ax1 = plt.subplots(figsize=(8, 5.5))
-        ax1.plot(model.loss_curve_, color="steelblue", label="training loss")
-        ax1.set_xlabel("iteration"); ax1.set_ylabel("training loss", color="steelblue")
-        ax1.set_yscale("log")
-        if getattr(model, "validation_scores_", None):
-            ax2 = ax1.twinx()
-            ax2.plot(model.validation_scores_, color="tomato", label="validation R2")
-            ax2.set_ylabel("validation R2", color="tomato")
-        formula_txt = (
-            r"training loss: $L=\frac{1}{2N}\sum_i(T_i-\hat T_i)^2"
-            r"+\frac{\alpha}{2N}\sum_j w_j^2$" + f"   (alpha={args.alpha:g}, "
-            f"N={X.shape[0]:,} samples/batch stat)\n"
-            r"validation score (10% held out, early_stopping): "
-            r"$R^2=1-\frac{\sum_i(T_i-\hat T_i)^2}{\sum_i(T_i-\bar T)^2}$"
-        )
-        fig.suptitle(formula_txt, fontsize=9, y=0.99)
-        fig.tight_layout(rect=(0, 0, 1, 0.90))
+        import sys as _sys
+        _sys.path.insert(0, str(Path(__file__).parent.parent))
+        from analysis.plotting import plot_train_val_loss
         loss_png = Path(args.out).with_suffix("").with_suffix(".loss.png")
-        fig.savefig(loss_png, dpi=150); plt.close(fig)
-        print(f"[train] saved loss curve to {loss_png}", flush=True)
+        plot_train_val_loss(
+            np.arange(len(train_loss_hist)), train_loss_hist, val_loss_hist, loss_png,
+            xlabel="iteration", ylabel="MLP squared-error loss (T emulator)",
+            val_label=f"validation (10% held-out samples, alpha={args.alpha:g})",
+            formula=r"loss $=\frac{1}{2N}\sum_i(T_i-\hat T_i)^2$  "
+                    "(L2 weight decay is an optimizer detail, not shown)")
     except Exception as e:
         print(f"[train] loss plot failed: {e}", flush=True)
 
@@ -547,14 +587,71 @@ def apply(args):
     corrected = np.zeros((n_shells, npix), dtype=np.float32)
     rng = np.random.default_rng(args.seed)
 
+    # PER-SHELL ell_min from a FIXED comoving (Mpc/h) scale -- see ell_min_from_mpc_h.
+    # Confirmed against real Disco/CosmoGrid Cl-ratio diagnostics (2026-07-13): the
+    # simulation-resolution deficit sets in at the SAME fixed comoving scale (~ the
+    # L_box/N_pm PM grid cell) in every shell, but that fixed length maps to a
+    # DIFFERENT ell depending on the shell's own comoving distance -- shell 3
+    # (z~0.05) visibly deviates starting around ell~150-300; shell 65 (z~2.85)
+    # shows NO deviation at all out to ell=3000, because the same 3 Mpc/h scale
+    # only becomes resolvable well beyond lmax that far away. A SINGLE global ell
+    # cannot reproduce this (tried and reverted: median-z reference gave ell_min
+    # ~2939, correcting almost nothing anywhere; nearest-shell reference gave
+    # ell_min~36, correcting almost everything everywhere) -- per-shell conversion
+    # is the physically correct one.
+    if args.ell_min_mpc > 0:
+        z_shells = shell_redshifts(run, n_shells, args.info_npz)
+        cosmo_vec = load_cosmo(run)
+        ell_min_per_shell = ell_min_from_mpc_h(z_shells, cosmo_vec, args.ell_min_mpc)
+        n_uncorrected = int(np.sum(ell_min_per_shell >= lmax))
+        print(f"[apply] --ell-min-mpc {args.ell_min_mpc:g} -> per-shell ell_min "
+              f"range [{ell_min_per_shell.min()}, {ell_min_per_shell.max()}] across "
+              f"{n_shells} shells (z={z_shells.min():.3f}-{z_shells.max():.3f})"
+              + (f"  [{n_uncorrected} distant shells get NO correction: even ell=lmax="
+                 f"{lmax} resolves scales > {args.ell_min_mpc:g} Mpc/h there -- "
+                 f"consistent with those shells showing no measurable Disco/CosmoGrid "
+                 f"deviation within lmax]" if n_uncorrected else ""), flush=True)
+    else:
+        ell_min_per_shell = np.full(n_shells, args.ell_min, dtype=np.int64)
+
+    if args.poisson:
+        # Poisson-resample every shell in ONE call, dispatched across a process pool
+        # (poisson_resample.resample_all_shells_parallel) -- NOT a sequential
+        # per-shell Python loop. Measured: a sequential loop gets the SAME ~2h
+        # wall-clock whether the node has 64 or 288 cpus allocated, because a single
+        # shell's own OMP-threaded SHT calls saturate well before that many cores;
+        # real speedup needs independent shells running CONCURRENTLY. Ignores
+        # --no-clip/--no-debias-mean/--wiener/--stochastic (Poisson replaces all of
+        # them -- see poisson_resample.py's docstring for why clipping/debiasing
+        # can't give Cl + positivity + the one-point pdf at once).
+        import sys as _sys
+        _sys.path.insert(0, str(Path(__file__).parent))
+        import poisson_resample
+        corrected = poisson_resample.resample_all_shells_parallel(
+            run, alm_fname("low", lmax, log_density), lmax, args.nside, T, R,
+            ell_min_per_shell, n_avg=args.poisson_n_avg, n_iter=args.poisson_n_iter,
+            damp=args.poisson_damp, seed=args.seed, n_workers=args.poisson_workers)
+        out = Path(args.out); out.parent.mkdir(parents=True, exist_ok=True)
+        info_npz = run / args.info_npz
+        extra = {}
+        if info_npz.exists():
+            d = np.load(info_npz, allow_pickle=True)
+            extra = {k: d[k] for k in d.files if k != "shells"}
+        np.savez(out, shells=corrected, **extra)
+        print(f"[apply] saved corrected+Poisson shells to {out}", flush=True)
+        if args.plot_shells:
+            _plot_cl(run, corrected, lmax, args.plot_shells, Path(args.plot_dir or out.parent))
+        return
+
     for i in range(n_shells):
         Ti = T[min(i, T.shape[0] - 1)].copy()      # per-shell transfer
         Ri = R[min(i, R.shape[0] - 1)].copy() if R is not None else np.ones_like(Ti)
         if args.wiener and not args.stochastic:
             Ti = Ti * Ri                             # Wiener/MMSE gain r*T
-        if args.ell_min > 0:                         # leave large scales untouched
-            Ti[: args.ell_min] = 1.0
-            Ri[: args.ell_min] = 1.0
+        ell_min_i = int(ell_min_per_shell[i])
+        if ell_min_i > 0:                            # leave large scales untouched
+            Ti[:ell_min_i] = 1.0
+            Ri[:ell_min_i] = 1.0
         v = low[i].astype(np.float64)
         if args.stochastic:
             gain = Ti * Ri                            # phase-correlated part only
@@ -599,6 +696,25 @@ def apply(args):
             # reduces (but doesn't eliminate) how often this fires by not riding the
             # injected power on DISCO's own noise.
             m_unclipped = rho_native + delta_map
+
+        if args.poisson:
+            # Ri already has ell<ell_min forced to 1.0 above when --ell-min(-mpc) is
+            # set, so resample_shell's win=R trusts DISCO's phases fully there (no
+            # random-noise replacement) -- but note the AMPLITUDE at those ell still
+            # gets recalibrated to shot-deconvolved Cl_high (resample_shell always
+            # retargets Cl_high everywhere), not held byte-for-byte equal to DISCO's
+            # own realization. In practice this is a small effect where T~1 was
+            # already true (the whole premise of a small-scale-only correction).
+            cl_h_i = hp.alm2cl(_alm(np.asarray(high_alms[i]), N_alm), lmax=lmax)
+            corrected[i] = poisson_resample.resample_shell(
+                rho_native, cl_h_i, m_unclipped, Ri, lmax, args.nside,
+                pois_mu, pois_w, rng, n_avg=args.poisson_n_avg,
+                n_iter=args.poisson_n_iter, damp=args.poisson_damp,
+                verbose=(i % 10 == 0))
+            if i % 10 == 0:
+                print(f"  corrected+Poisson shell {i}/{n_shells}", flush=True)
+            continue
+
         neg = np.mean(m_unclipped < 0.0)
         # Positivity vs Cl: measured on cosmo_000122 shell 3 (nbar=0.104, 59% of
         # pixels want to go negative), corrected/high Cl by ell band and mean ratio:
@@ -769,7 +885,16 @@ if __name__ == "__main__":
                          "power target (avoids injecting per-mode sample-variance "
                          "noise on top of the random realization). 1 disables.")
     pa.add_argument("--ell-min", type=int, default=0,
-                    help="Leave ell<ell_min untouched (T=1) — correct only small scales.")
+                    help="Leave ell<ell_min untouched (T=1) — correct only small scales. "
+                         "Overridden by --ell-min-mpc when that is > 0.")
+    pa.add_argument("--ell-min-mpc", type=float, default=0.0,
+                    help="Leave comoving scales LARGER than this (Mpc/h) untouched -- "
+                         "i.e. only correct scales smaller than this physical size. "
+                         "Converted to a PER-SHELL ell_min via each shell's own "
+                         "redshift + the test cosmology's params.yml (see "
+                         "ell_min_from_mpc_h), since a fixed ell corresponds to a "
+                         "different physical scale at every shell. 0 disables "
+                         "(falls back to the scalar --ell-min).")
     pa.add_argument("--no-clip", action="store_true",
                     help="Do NOT enforce rho>=0: emit the raw corrected field "
                          "rho_native + delta (an OVERDENSITY field, can go negative "
@@ -792,6 +917,34 @@ if __name__ == "__main__":
                          "~scale^2). Pass this flag to get the old raw-clip behavior.")
     pa.add_argument("--plot-shells", type=int, nargs="*", default=[3, 30, 50])
     pa.add_argument("--plot-dir", default="")
+    pa.add_argument("--poisson", action="store_true",
+                    help="Poisson-resample every shell into valid non-negative integer "
+                         "counts RIGHT AFTER the transfer-function correction (see "
+                         "poisson_resample.py resample_all_shells_parallel) -- no "
+                         "separate stage, no large intermediate --no-clip npz written "
+                         "to disk. Ignores --no-clip/--no-debias-mean/--wiener/"
+                         "--stochastic (Poisson replaces all of them). Shells are "
+                         "processed in PARALLEL across a process pool (see "
+                         "--poisson-workers), not sequentially.")
+    pa.add_argument("--poisson-n-avg", type=int, default=4,
+                    help="See poisson_resample.py --n-avg.")
+    pa.add_argument("--poisson-n-iter", type=int, default=5,
+                    help="See poisson_resample.py --n-iter.")
+    pa.add_argument("--poisson-damp", type=float, default=0.4,
+                    help="See poisson_resample.py --damp.")
+    pa.add_argument("--poisson-workers", type=int, default=1,
+                    help="Worker PROCESSES for --poisson, one independent shell per "
+                         "task. Default 1 (plain sequential, trusted): measured 23 "
+                         "workers x 12 OMP threads each to be dramatically SLOWER "
+                         "than sequential (memory-bandwidth contention from many "
+                         "concurrent large-array SHTs at nside=2048), and OMP "
+                         "threading alone saturates around 128 threads (128->256 "
+                         "measured zero further speedup on one shell) -- so more "
+                         "cpus does not automatically mean faster here. Shells with "
+                         "ell_min>=lmax (T==1 everywhere, e.g. distant shells under "
+                         "--ell-min-mpc) are ALWAYS skipped for free regardless of "
+                         "this setting (exact no-op, not resampled). Only raise "
+                         "this after validating a specific worker count.")
     pa.add_argument("--out", required=True)
     pa.set_defaults(func=apply)
 

@@ -20,7 +20,7 @@
 # ============================================================
 
 #SBATCH --job-name=disco_custom_all
-#SBATCH --account=sk037
+#SBATCH --account=a0158
 #SBATCH --partition=normal
 #SBATCH --nodes=2
 #SBATCH --ntasks-per-node=4
@@ -32,7 +32,7 @@
 set -euo pipefail
 
 # ---- Paths -------------------------------------------------------
-COSMOGRID_DIR="/capstor/scratch/cscs/damrein/cosmogridv1"
+COSMOGRID_DIR="/capstor/scratch/cscs/damrein/grid"
 PROJECT_DIR="/users/damrein/masterProject/disco"
 JOB_LIST="${PROJECT_DIR}/job_list_disco_custom.txt"
 CONDA_ENV="disco_custom"
@@ -45,7 +45,7 @@ METAINFO_FILE="/capstor/scratch/cscs/damrein/cosmogridv1/CosmoGridV1_metainfo.h5
 RES=832
 RES_PM=1664
 BOXSIZE=900.0
-NUMSTEPS=100
+NUMSTEPS=100 # Irrelevant when shells are built, but still needed for the simulation_run command
 A_INI=0.01
 A_END=1.0
 # ------------------------------------------------------------------

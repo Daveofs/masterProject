@@ -22,7 +22,7 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
 
-from dataset import PatchDataset, split_by_cosmo, raw_to_log1p_delta_pair
+from dataset import PatchDataset, split_by_cosmo, raw_to_log1p_delta_pair, cosmo_z_vector
 from flow_model import FlowUNet
 
 
@@ -54,13 +54,19 @@ def run_epoch(model, loader, optimizer, device, train: bool, epoch: int,
             high_raw = batch["high"].to(device, non_blocking=True)
             x0, x1 = raw_to_log1p_delta_pair(low_raw, high_raw)
 
+            # built unconditionally -- forward() ignores it when the model was
+            # constructed with use_cosmo_cond=False, so no branching needed here.
+            cosmo = batch["cosmo"].to(device, non_blocking=True)
+            z = batch["z"].to(device, non_blocking=True).to(x0.dtype)
+            cosmo_z = cosmo_z_vector(cosmo, z).to(x0.dtype)
+
             bs = x0.shape[0]
             t = torch.rand(bs, device=device, dtype=x0.dtype)
             t_bcast = t[:, None, None, None]
             xt = (1 - t_bcast) * x0 + t_bcast * x1
             target_v = x1 - x0
 
-            pred_v = model(xt, t)
+            pred_v = model(xt, t, cosmo_z=cosmo_z)
             loss = torch.nn.functional.mse_loss(pred_v, target_v)
 
             if train:
@@ -99,6 +105,11 @@ def main():
     p.add_argument("--num-workers", type=int, default=8)
     p.add_argument("--base-channels", type=int, default=32)
     p.add_argument("--time-emb-dim", type=int, default=128)
+    p.add_argument("--use-cosmo-cond", action=argparse.BooleanOptionalAction, default=True,
+                   help="condition FlowUNet on cosmology (H0,Omega_cdm,Ob,Om,ns,s8,w0) + "
+                        "shell redshift, injected at the bottleneck latent (see "
+                        "flow_model.FlowUNet). Default: on. Pass --no-use-cosmo-cond to "
+                        "train the original, unconditioned model for an A/B comparison.")
     p.add_argument("--grad-clip", type=float, default=1.0)
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
@@ -166,7 +177,8 @@ def main():
 
     lr = args.lr if args.no_lr_scaling else args.lr * world_size
     model = FlowUNet(in_channels=1, out_channels=1, base_channels=args.base_channels,
-                      time_emb_dim=args.time_emb_dim).to(device)
+                      time_emb_dim=args.time_emb_dim,
+                      use_cosmo_cond=args.use_cosmo_cond).to(device)
     if distributed:
         model = DDP(model, device_ids=[local_rank])
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
@@ -187,7 +199,8 @@ def main():
     log_path = out_dir / "train_log.jsonl"
     n_params = sum(p.numel() for p in (model.module if distributed else model).parameters())
     if is_main:
-        print(f"[train_flow] model has {n_params:,} parameters, device={device}, lr={lr:.2e}")
+        print(f"[train_flow] model has {n_params:,} parameters, device={device}, lr={lr:.2e}, "
+              f"use_cosmo_cond={args.use_cosmo_cond}")
 
     for epoch in range(start_epoch, args.epochs):
         t0 = time.time()

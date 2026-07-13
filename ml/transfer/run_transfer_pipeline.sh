@@ -4,8 +4,8 @@
 #SBATCH --partition=normal
 #SBATCH --account=sk037
 #SBATCH --ntasks-per-node=1
-#SBATCH --cpus-per-task=72
-#SBATCH --time=10:00:00
+#SBATCH --cpus-per-task=128
+#SBATCH --time=02:00:00
 #SBATCH --output=/capstor/scratch/cscs/damrein/outputs/logs/transfer/slurm-%j.out
 #SBATCH --error=/capstor/scratch/cscs/damrein/outputs/logs/transfer/slurm-%j.err
 #SBATCH --chdir=/users/damrein/masterProject/ml
@@ -16,7 +16,9 @@
 #
 #   corrected_alm(ell,m) = low_alm(ell,m) * T(ell, shell),  T = sqrt(<Cl_high>/<Cl_low>)
 #
-# CPU-only (healpy). Four stages:
+# CPU-only (healpy), 128 cpus (measured: a single shell's SHT calls saturate OMP
+# threading around 128 threads -- 128->256 gave ZERO further speedup, measured
+# directly). Four stages:
 #   1. preprocess : map2alm the DISCO (disco_sim/.../disco_shells_nside=2048.npz) and
 #                   CosmoGrid (compressed_shells.npz) shells -> low/high_alms_lmax*.npy
 #                   (one-time; mmap-able -> fast downstream, like the harmonic flow).
@@ -28,36 +30,55 @@
 #        fit     : average Cl ratio over training cosmologies (test cosmo left out).
 #        emulate : train an MLP emulator T=f(l,z,H0,O_cdm,Ob,Om,ns,s8,Cl_low) on the
 #                  training cosmologies, then predict T for the held-out test cosmo.
-#   3. apply --no-clip : scale the test cosmo's low alms by T, alm2map -> a CONTINUOUS
-#                  overdensity field (rho can go negative on faint/shot-noise shells)
-#                  + Cl-ratio plots. --no-clip is the Cl-OPTIMAL choice: measured
-#                  2026-07-09 that ANY positivity enforcement (clip@0, additive mean-
-#                  debias) SUPPRESSES small-scale Cl (shell 3 at ell 800-1500: no-clip
-#                  0.93, clip 0.74, debias 0.61) because a Gaussian-ish field with
-#                  nbar~0.1 and CosmoGrid's small-scale power MUST go negative -- the
-#                  true CosmoGrid shell is a sparse COUNT field (91.8% exact zeros),
-#                  not Gaussian, so clipping always distorts the shape, not just the
-#                  sign. This stage's output is therefore NOT a valid count map (no
-#                  exact zeros, has negatives) -- correct for Cl/lensing work, wrong
-#                  for anything that reads it as a density/count map (histograms,
-#                  log(delta) plots, mollview will look "too bright").
-#   4. poisson_resample.py : turns stage 3's output into a valid non-negative INTEGER
-#                  count map via lognormal-intensity + Poisson resampling (shot-noise
-#                  deconvolution -> lognormal transform -> Gaussian-random-field g,
-#                  DISCO's phases below --ell-c tapered into an independent Gaussian
-#                  realization above (r(ell) shows phases are noise there anyway) ->
-#                  lambda=lbar*exp(g-sigma^2/2) -> Poisson draw). Measured 2026-07-09
-#                  on shells 3/10/30: mean exact, sparsity within ~1pp of truth,
-#                  Cl_counts/Cl_high within ~1-7% at every ell band tested -- i.e. this
-#                  is the stage that recovers what --no-clip sacrifices, WITHOUT giving
-#                  back the Cl accuracy (unlike clip/debias). ~150s/shell (n_avg=4 x
-#                  n_iter=5 Poisson draws for the per-ell Cl calibration) -> budget
-#                  ~3h for all 69 shells; that is why this script's time limit is 10h.
+#                  Writes emulator.loss.png (train vs held-out LOSS, both decreasing,
+#                  same shared figure -- analysis.plot_train_val_loss -- as jbucko's
+#                  loss_curve.png) and a validation example-patch grid + pctile-band
+#                  power ratio (plot_example_patches.py, shells 5/10/15/30/50,
+#                  labeled with which cosmology was validated).
+#   3. apply --poisson --ell-min-mpc 3 : the transfer-function correction AND the
+#                  lognormal+Poisson re-discretization into valid non-negative
+#                  INTEGER counts happen in ONE step, per shell, right after each
+#                  shell's correction is computed (poisson_resample.resample_shell
+#                  called directly from apply()'s loop -- no separate stage, no
+#                  13.9GB continuous intermediate ever written to disk). --ell-min-mpc
+#                  3 leaves comoving scales LARGER than 3 Mpc/h untouched (T=1
+#                  there) -- converted to a PER-SHELL ell via each shell's own
+#                  redshift + the test cosmology's params.yml (ell_min_from_mpc_h),
+#                  since a fixed ell corresponds to a different physical scale at
+#                  every shell (comoving distance grows with z). The Poisson step's
+#                  phase-mixing weight is the ACTUAL fitted R(ell) per shell, not a
+#                  fixed ell_c cutoff -- a fixed cutoff was measured to discard
+#                  perfectly-good, ~100%-correlated DISCO structure on dense shells
+#                  and visibly degrade those images even though band-averaged Cl
+#                  still looked fine (Cl is phase-blind). No --plot-shells here
+#                  (individual cl_shell*.png removed by request -- the summary
+#                  plots in stage 4 are what we keep).
+#                  SPEED: shells with ell_min_i>=lmax (T==1 everywhere, e.g. distant
+#                  shells under --ell-min-mpc 3) are skipped for free -- exactly
+#                  DISCO's own counts, unmodified, since the correction is
+#                  identically zero there (not an approximation). On cosmo_000122
+#                  this is 34/69 shells -> the ~2h-for-69-shells sequential cost
+#                  (measured; 128 vs 288 cpus made no difference -- see
+#                  poisson_resample.py's parallelism note for why) drops to ~35
+#                  shells x ~90s = ~52 min. A tried 23-worker process pool was
+#                  measured to be SLOWER than sequential (memory-bandwidth
+#                  contention) -- --poisson-workers defaults to 1 (sequential) for
+#                  that reason; do not raise it without re-validating on this
+#                  hardware.
+#   4. plot_example_patches.py + infer_full_sky_transfer.py : the SAME shared
+#                  ../analysis/ tools (transforms/plotting/radial_power/full_sky) that
+#                  unet_flow_jbucko's pipeline uses, run on stage 3's FINAL count map.
+#                  patch grid = flat-patch triptych + 2D-FFT power ratio + pctile band
+#                  (matches jbucko's example_patches.png); full-sky grid = gnomonic
+#                  zoom + the REAL angular Cl ratio, example_full_sky.png ONLY (no
+#                  individual cl_shell*.png -- --shell-indices left empty by request).
+#                  End state: just the summary plots (loss+validation, patch grid,
+#                  full-sky grid), no per-shell Cl clutter.
 # ============================================================================
 
 source /users/damrein/miniforge3/etc/profile.d/conda.sh
 conda activate deepSphere
-export OMP_NUM_THREADS=14        # healpy map2alm is OpenMP-parallel (libsharp)
+export OMP_NUM_THREADS=8         # light default; heavy stages override inline below
 
 DATA=/capstor/scratch/cscs/damrein/cosmogridv1
 LMAX=3000
@@ -73,26 +94,24 @@ SAMPLE_FRAC=${SAMPLE_FRAC:-1.0}   # <1.0 subsamples ell per shell (faster traini
 INCLUDE_TEST=${INCLUDE_TEST:-}
 FIT_FLAGS=""
 [ -n "$INCLUDE_TEST" ] && FIT_FLAGS="--include-test"
-# Stage 4 (Poisson resample) cost/quality knobs -- see poisson_resample.py docstring.
-# Set SKIP_POISSON=1 to stop after stage 3 (Cl-optimal continuous field only).
-SKIP_POISSON=${SKIP_POISSON:-}
-ELL_C=${ELL_C:-300}
-TAPER=${TAPER:-100}
+# Stage 3 (transfer correction + Poisson, merged) knobs -- see poisson_resample.py
+# and transfer_function.py apply()'s --ell-min-mpc/--poisson-* docstrings.
+ELL_MIN_MPC=${ELL_MIN_MPC:-3.0}
 N_AVG=${N_AVG:-4}
 N_ITER=${N_ITER:-5}
 DAMP=${DAMP:-0.4}
 OUT=/capstor/scratch/cscs/damrein/outputs/transfer/${SLURM_JOB_ID}
 mkdir -p "$OUT" /capstor/scratch/cscs/damrein/outputs/logs/transfer
 
-echo "==== transfer-function pipeline | data=$DATA | lmax=$LMAX | test=$TEST_COSMO | method=$METHOD ===="
+echo "==== transfer-function pipeline | data=$DATA | lmax=$LMAX | test=$TEST_COSMO | method=$METHOD | ell_min_mpc=$ELL_MIN_MPC ===="
 
-# ---- 1. Preprocess alms (skips runs already done). 5 workers x 14 OMP threads. ----
+# ---- 1. Preprocess alms (skips runs already done). More workers -- full node. ----
 echo "[stage 1] preprocessing alms"
-python preprocess/preprocess_alms.py \
+OMP_NUM_THREADS=14 python preprocess/preprocess_alms.py \
     --data-dir "$DATA" \
     --low-glob "disco_sim/*/disco_shells_nside=2048.npz" \
     --high-npz compressed_shells.npz \
-    --lmax $LMAX --num-workers 5
+    --lmax $LMAX --num-workers 20
 
 # ---- 2. Build T(ell, shell) via the chosen method (test cosmology left out) ----
 if [ "$METHOD" = "emulate" ]; then
@@ -114,26 +133,30 @@ else
         --test-cosmo $TEST_COSMO $FIT_FLAGS --out "$OUT/transfer.npz"
 fi
 
-# ---- 3. Apply to the held-out test cosmology, NO positivity clip (Cl-optimal) ----
-echo "[stage 3] applying to $TEST_COSMO (--no-clip: Cl-optimal continuous field)"
-python transfer/transfer_function.py apply \
+# ---- 3. Apply the correction AND Poisson-resample, merged, per shell ----
+echo "[stage 3] apply + Poisson (ell_min_mpc=$ELL_MIN_MPC n_avg=$N_AVG n_iter=$N_ITER damp=$DAMP)"
+COUNTS="$OUT/${TEST_COSMO}_counts.npz"
+OMP_NUM_THREADS=128 python transfer/transfer_function.py apply \
     --transfer "$OUT/transfer.npz" \
     --run-dir "$DATA/$TEST_COSMO/run_0" \
-    --nside 2048 --ell-min 0 --no-clip \
-    --plot-shells 0 3 10 30 50 --plot-dir "$OUT/cl_ratio" \
-    --out "$OUT/${TEST_COSMO}_corrected_noclip.npz"
+    --nside 2048 --ell-min-mpc $ELL_MIN_MPC \
+    --poisson --poisson-n-avg $N_AVG --poisson-n-iter $N_ITER --poisson-damp $DAMP \
+    --out "$COUNTS"
 
-# ---- 4. Lognormal + Poisson resample -> valid non-negative integer count map ----
-if [ -z "$SKIP_POISSON" ]; then
-    echo "[stage 4] lognormal+Poisson resample (ell_c=$ELL_C taper=$TAPER n_avg=$N_AVG n_iter=$N_ITER damp=$DAMP)"
-    python transfer/poisson_resample.py \
-        --corrected "$OUT/${TEST_COSMO}_corrected_noclip.npz" \
-        --run-dir "$DATA/$TEST_COSMO/run_0" \
-        --lmax $LMAX --nside 2048 \
-        --ell-c $ELL_C --taper $TAPER --n-avg $N_AVG --n-iter $N_ITER --damp $DAMP \
-        --out "$OUT/${TEST_COSMO}_counts.npz"
-else
-    echo "[stage 4] SKIPPED (SKIP_POISSON=1) -- output is the continuous --no-clip field only"
-fi
+# ---- 4. Shared analysis/ diagnostics on the FINAL count map (same tools as jbucko) ----
+# Summaries only: example-patch grid (+ pctile band) and example_full_sky.png. No
+# individual cl_shell*.png (--shell-indices left empty).
+echo "[stage 4] example-patch grid (analysis.plot_example_patch_grid + pctile band)"
+python transfer/plot_example_patches.py \
+    --run-dir "$DATA/$TEST_COSMO/run_0" --counts "$COUNTS" \
+    --shells 5 10 15 30 50 --n-per-shell 1 --patch-size 256 --nside 2048 --seed 0 \
+    --out "$OUT/example_patches.png"
+
+echo "[stage 4b] full-sky grid (analysis.plot_example_full_sky_grid), summary only"
+python transfer/infer_full_sky_transfer.py \
+    --run-dir "$DATA/$TEST_COSMO/run_0" --counts "$COUNTS" \
+    --nside 2048 --lmax $LMAX \
+    --shell-indices --example-shells 5 10 15 30 50 \
+    --out-dir "$OUT/full_sky"
 
 echo "transfer-function pipeline ${SLURM_JOB_ID} finished at $(date) -> $OUT"

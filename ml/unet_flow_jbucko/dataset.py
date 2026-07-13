@@ -21,6 +21,25 @@ from torch.utils.data import Dataset
 # order must match make_patch_dataset.py's cosmo_params tuple
 COSMO_FIELDS = ("omega_m", "omega_b", "ns", "sigma8", "w0", "h")
 
+# the exact field order FlowUNet's cosmology+redshift conditioning expects (see
+# flow_model.py). H0 -> h (only h=H0/100 is stored; same convention as the rest of
+# this project). Omega_cdm isn't separately stored either -- only Om (total matter)
+# and Ob (baryons) are -- so it is derived as Om - Ob.
+COSMO_Z_FIELDS = ("h", "omega_cdm", "omega_b", "omega_m", "ns", "sigma8", "w0", "z")
+
+
+def cosmo_z_vector(cosmo, z):
+    """cosmo: (...,6) tensor/array in COSMO_FIELDS order (Om,Ob,ns,s8,w0,h). z: (...,)
+    redshift. Returns (...,8) in COSMO_Z_FIELDS order: [h, Omega_cdm, Ob, Om, ns, s8,
+    w0, z]. The ONE place this ordering is defined -- train_flow.py, apply_flow.py and
+    infer_full_sky.py all call this instead of re-deriving the field order themselves,
+    so training and evaluation can never silently drift apart."""
+    om, ob, ns, s8, w0, h = (cosmo[..., i] for i in range(6))
+    omega_cdm = om - ob
+    if torch.is_tensor(cosmo):
+        return torch.stack([h, omega_cdm, ob, om, ns, s8, w0, z], dim=-1)
+    return np.stack([h, omega_cdm, ob, om, ns, s8, w0, z], axis=-1)
+
 
 def raw_to_log1p_delta_pair(low_raw: torch.Tensor, high_raw: torch.Tensor):
     """Batched GPU version of the per-sample transform previously done in
@@ -60,9 +79,10 @@ class PatchDataset(Dataset):
             "low": torch.from_numpy(np.array(self.low[idx], dtype=np.float32)).unsqueeze(0),
             "high": torch.from_numpy(np.array(self.high[idx], dtype=np.float32)).unsqueeze(0),
             "reso_arcmin": float(m["reso_arcmin"]),
-            "cosmo": torch.from_numpy(cosmo),               # unused by the plain
-                                                             # UNet today, kept for
-                                                             # a future FiLM-conditioned model
+            "cosmo": torch.from_numpy(cosmo),               # (Om,Ob,ns,s8,w0,h) -- see
+                                                             # cosmo_z_vector() for how
+                                                             # FlowUNet actually consumes it
+            "z": float(0.5 * (m["lower_z"] + m["upper_z"])),  # shell midpoint redshift
             "shell_idx": int(m["shell_idx"]),
             "shell_com": float(m["shell_com"]),  # comoving distance (Mpc/h) - drives the HPF cutoff
             "idx": idx,
