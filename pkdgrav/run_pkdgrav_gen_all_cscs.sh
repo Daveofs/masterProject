@@ -29,6 +29,7 @@
 
 # ---- Paths -------------------------------------------------------
 COSMOGRID_DIR="/capstor/scratch/cscs/damrein/grid"
+# Very important to run the latest pkdgrav3 version, some ICs are not generated correctly with older versions.
 PKDGRAV_BIN="/users/damrein/pkdgrav/pkdgrav_latest/pkdgrav3/build/pkdgrav3"
 JOB_LIST="/users/damrein/masterProject/pkdgrav/job_list_gen_all.txt"
 LOG_DIR="/capstor/scratch/cscs/damrein/outputs/logs/pkdgrav"
