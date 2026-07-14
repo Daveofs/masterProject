@@ -82,15 +82,15 @@
 #                  good, ~100%-correlated DISCO structure on dense shells and
 #                  visibly degrade those images even though band-averaged Cl
 #                  still looked fine (Cl is phase-blind). No individual
-#                  cl_shell*.png (removed by request). cl_ratio_by_zbin_grid.png
-#                  is the GENUINE multi-cosmology check (one row per held-out
-#                  cosmology, one column per redshift bin, pctile band) -- the
-#                  same statistic + shared plotting code as
-#                  unet_flow_jbucko/apply_flow.py's example_full_sky.png now
-#                  uses (analysis.plot_cl_ratio_pctile_grid + zbin_shell_samples).
-#                  example_full_sky.png here stays a single-cosmology VISUAL grid
-#                  (gnomonic zoom triptych, judge-by-eye) since that is what
-#                  originally caught the phase-mixing bug that Cl alone missed.
+#                  cl_shell*.png, and no example_full_sky.png (both removed by
+#                  request). cl_ratio_by_zbin_grid.png is THE Cl diagnostic: the
+#                  GENUINE multi-cosmology check (one row per held-out cosmology,
+#                  one column per redshift bin, pctile band) -- the same statistic
+#                  + shared plotting code as unet_flow_jbucko/apply_flow.py's
+#                  example_full_sky.png uses (analysis.plot_cl_ratio_pctile_grid +
+#                  zbin_shell_samples). Our old example_full_sky.png only ever
+#                  showed ONE cosmology at one fixed sky position, so its Cl panel
+#                  was strictly subsumed by the zbin grid.
 #                  SPEED: shells with ell_min_i>=lmax (T==1 everywhere, e.g. distant
 #                  shells under --ell-min-mpc 3) are skipped for free -- exactly
 #                  DISCO's own counts, unmodified, since the correction is
@@ -105,13 +105,21 @@
 #                  without re-validating on this hardware.
 #                  Diagnostics use the SAME shared ../analysis/ tools
 #                  (transforms/plotting/radial_power/full_sky) that
-#                  unet_flow_jbucko's pipeline uses: patch grid = flat-patch
-#                  triptych + 2D-FFT power ratio + pctile band (matches jbucko's
-#                  example_patches.png); full-sky grid = gnomonic zoom + the REAL
-#                  angular Cl ratio, example_full_sky.png (--fullsky-shell-indices
-#                  left empty -- no individual cl_shell*.png by request). End
-#                  state: just the summary plots (loss+validation, patch grid,
-#                  full-sky grid), no per-shell Cl clutter.
+#                  unet_flow_jbucko's pipeline uses. End state, per held-out set:
+#                    example_patches.png            flat-patch triptych + 2D-FFT
+#                                                   power ratio (matches jbucko's)
+#                    patch_power_ratio_pctile_band.png  pooled over all cosmologies
+#                    cl_ratio_by_zbin_grid.png      THE Cl check (cosmology x zbin)
+#                    moments_vs_shell.png /         one-point PDF (pooled), the
+#                    example_histograms.png         check Cl structurally can't do
+#                    kappa_cl_{per_cosmology,pctile_band}.png +
+#                    kappa_moments_scatter.png      weak lensing (--kappa)
+#                  NOTE --kappa-nside/--kappa-lmax default to 1024/2048, NOT the
+#                  old 128/350: nside=128 caps kappa at ell~383, but the transfer
+#                  function is ~1 below ell 350 and does ALL its work above it
+#                  (measured max|T-1| on shells 10-30: 0.002-0.025 for ell<=350 vs
+#                  0.15-1.10 for ell 351-3000), so the old kappa plots were blind
+#                  to the entire correction by construction.
 # ============================================================================
 
 source /users/damrein/miniforge3/etc/profile.d/conda.sh

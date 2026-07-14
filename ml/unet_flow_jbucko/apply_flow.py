@@ -168,6 +168,14 @@ def main():
     p.add_argument("--kappa-lmax", type=int, default=350,
                    help="angular power spectrum lmax for the kappa maps "
                         "(--kappa-nside supports up to ~3*nside-1)")
+    p.add_argument("--kappa-max-cosmologies", type=int, default=3,
+                   help="held-out cosmologies to build kappa maps for. This is THE "
+                        "cost knob of the whole script: each one needs every usable "
+                        "shell (~47 of 69 for zf=1.05) fully reconstructed by tiling "
+                        "the sphere and integrating the flow ODE per patch. Since "
+                        "the tiling geometry got cached (analysis.patch_tiling), the "
+                        "GPU ODE integration is what dominates -- so bound this "
+                        "rather than the (now cheap) tiling. 0 = all held-out.")
     args = p.parse_args()
 
     dev = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -466,13 +474,16 @@ def main():
         # since weak_lensing_ufalcon.py's hardcoded example cosmology was checked
         # and does NOT match the lightcone it actually loads. ---
         if args.kappa:
-            print(f"[eval] kappa: building kappa maps for ALL {len(val_cosmos)} "
-                  f"held-out cosmologies (zi={args.kappa_zi}, zf={args.kappa_zf}, "
+            kappa_cosmos = (list(val_cosmos) if args.kappa_max_cosmologies <= 0
+                           else list(val_cosmos[:args.kappa_max_cosmologies]))
+            print(f"[eval] kappa: building kappa maps for {len(kappa_cosmos)} of "
+                  f"{len(val_cosmos)} held-out cosmologies {kappa_cosmos} "
+                  f"(zi={args.kappa_zi}, zf={args.kappa_zf}, "
                   f"nside={args.kappa_nside}), n(z)={args.kappa_nz}", flush=True)
             kappa_cosmo_labels = []
             kappa_cl_low, kappa_cl_corr, kappa_cl_high = [], [], []
             kappa_mom_low, kappa_mom_corr, kappa_mom_high = [], [], []
-            for c in val_cosmos:
+            for c in kappa_cosmos:
                 c_run_dir = Path(args.data_root) / c / args.run
                 cosmo_params = weak_lensing.load_cosmo_yaml(c_run_dir)
                 shell_info = np.load(c_run_dir / "compressed_shells.npz",

@@ -28,6 +28,15 @@ export PYTHONUNBUFFERED=1
 KAPPA=${KAPPA:-1}
 KAPPA_FLAG=""; [ "${KAPPA}" = "1" ] && KAPPA_FLAG="--kappa"
 
+# SPEED: job 4201387 TIMED OUT at 10h having done only 61 shell reconstructions --
+# full-sky tiling was re-projecting all 12288 gnomonic tiles from scratch for every
+# shell (~8 min/shell of single-threaded CPU, dwarfing the GPU work it was feeding).
+# The tile geometry is value-independent, so it is now built once and reused across
+# every shell AND cosmology (analysis.patch_tiling.gnomonic_index_maps): ~108x faster
+# per shell (~500s -> ~5s), leaving the GPU flow-ODE integration (~1.5 min/shell) as
+# the limiter. --kappa-max-cosmologies is therefore the real cost knob now, not the
+# tiling. NOTE: the index cache costs ~3.2GB RAM at nside=2048/patch=256.
+
 srun --nodes=1 --ntasks=1 --gres=gpu:1 uenv run pytorch/v2.9.1:v2 --view=default -- bash -c "
   source ${VENV}/bin/activate
   python ${PIPE}/plot_flow_loss.py --run-dir '${OUT_DIR}'

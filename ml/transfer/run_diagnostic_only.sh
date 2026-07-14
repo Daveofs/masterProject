@@ -94,11 +94,30 @@ ELL_MIN_MPC=${ELL_MIN_MPC:-3.0}
 N_AVG=${N_AVG:-4}
 N_ITER=${N_ITER:-5}
 DAMP=${DAMP:-0.4}
+KAPPA_NSIDE=${KAPPA_NSIDE:-1024}
+KAPPA_LMAX=${KAPPA_LMAX:-2048}
 OUT=/capstor/scratch/cscs/damrein/outputs/transfer/${SLURM_JOB_ID}
 mkdir -p "$OUT"
 
+# REUSE_COUNTS: point at a previous job's counts/ dir to skip apply()+Poisson
+# (~50 min PER cosmology) and go straight to the plots -- the corrected counts are
+# deterministic given (transfer, seed, ELL_MIN_MPC, N_AVG/N_ITER/DAMP), so this is
+# EXACT as long as none of those changed. This is the fast path when only the
+# DIAGNOSTICS changed (new/updated plots), which is most iterations.
+#   sbatch --export=TRANSFER_JOB=4201972,REUSE_COUNTS=/capstor/scratch/cscs/damrein/outputs/transfer/4201972/counts \
+#       transfer/run_diagnostic_only.sh
+# Defaults to TRANSFER_JOB's OWN counts/ dir if that exists (same job that produced
+# the transfer files also produced counts under the identical knobs).
+if [ -z "$REUSE_COUNTS" ] && [ -d "$TRANSFER_DIR/counts" ]; then
+    REUSE_COUNTS="$TRANSFER_DIR/counts"
+    echo "[info] auto-reusing counts from $REUSE_COUNTS (set REUSE_COUNTS='' to force recompute)"
+fi
+REUSE_FLAG=""
+[ -n "$REUSE_COUNTS" ] && REUSE_FLAG="--reuse-counts '$REUSE_COUNTS'"
+
 echo "==== transfer diagnostics-only | reusing transfer(s) from job $TRANSFER_JOB | ell_min_mpc=$ELL_MIN_MPC ===="
 echo "held-out cosmologies (${#COSMOS_ARR[@]}): ${COSMOS_ARR[@]}"
+echo "kappa: nside=$KAPPA_NSIDE lmax=$KAPPA_LMAX"
 
 RUN_DIRS=""
 for c in "${COSMOS_ARR[@]}"; do RUN_DIRS="$RUN_DIRS $DATA/$c/run_0"; done
@@ -110,10 +129,11 @@ uenv run pytorch/v2.9.1:v2 --view=default -- bash -c "
         --run-dirs $RUN_DIRS \
         --nside 2048 --lmax $LMAX --ell-min-mpc $ELL_MIN_MPC \
         --poisson --poisson-n-avg $N_AVG --poisson-n-iter $N_ITER --poisson-damp $DAMP \
+        $REUSE_FLAG \
         --out-counts-dir '$OUT/counts' \
         --patch-shells 5 10 15 30 50 --n-per-shell 1 --patch-size 256 --seed 0 \
         --fullsky-shells 5 10 15 30 50 \
-        --kappa \
+        --kappa --kappa-nside $KAPPA_NSIDE --kappa-lmax $KAPPA_LMAX \
         --out-dir '$OUT/eval'
 "
 

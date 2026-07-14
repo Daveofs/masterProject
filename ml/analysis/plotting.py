@@ -199,6 +199,45 @@ def plot_cl_ratio_pctile_grid(grid, out_path, pctile=(16, 84), suptitle=None,
     return out_path
 
 
+def plot_kappa_cl_grid(cosmo_labels, ells, cl_low_list, cl_corr_list, cl_high_list,
+                       out_path, corrected_label="corrected", suptitle=None):
+    """Per-cosmology kappa Cl -- ONE ROW PER HELD-OUT COSMOLOGY (left: raw Cl loglog,
+    right: ratio to truth), instead of plot_kappa_cl_multi_cosmo's single overlaid
+    axes. The overlay is good for spotting a bias shared across every cosmology, but
+    with more than a handful of cosmologies its lines pile up and per-cosmology
+    behavior becomes unreadable -- this is the same data, faceted, so each cosmology
+    can be judged on its own."""
+    n = len(cosmo_labels)
+    fig, axes = plt.subplots(n, 2, figsize=(12, 3.2 * n), squeeze=False)
+    x = ells[1:]
+    for i, label in enumerate(cosmo_labels):
+        cl_lo, cl_c, cl_hi = cl_low_list[i], cl_corr_list[i], cl_high_list[i]
+        a0, a1 = axes[i, 0], axes[i, 1]
+        a0.loglog(x, cl_lo[1:], ":", color="seagreen", lw=1.2, label="low (DISCO)")
+        a0.loglog(x, cl_c[1:], "-", color="steelblue", lw=1.3, label=corrected_label)
+        a0.loglog(x, cl_hi[1:], "--", color="tomato", lw=1.2, label="high (CosmoGrid)")
+        a0.set_ylabel(f"{label}\n" + r"$C_\ell^{\kappa\kappa}$", fontsize=8)
+        a0.tick_params(labelsize=7)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            a1.semilogx(x, (cl_lo / cl_hi)[1:], ":", color="seagreen", lw=1.2, label="low/high")
+            a1.semilogx(x, (cl_c / cl_hi)[1:], "-", color="steelblue", lw=1.3,
+                       label="corrected/high")
+        a1.axhline(1.0, color="k", ls="--", lw=0.8)
+        a1.set_ylim(0.4, 1.6); a1.set_ylabel(r"$C_\ell/C_\ell^{true}$", fontsize=8)
+        a1.tick_params(labelsize=7)
+        if i == 0:
+            a0.legend(fontsize=7, loc="lower left"); a1.legend(fontsize=7, loc="lower left")
+        if i == n - 1:
+            a0.set_xlabel(r"$\ell$", fontsize=8); a1.set_xlabel(r"$\ell$", fontsize=8)
+    if suptitle:
+        fig.suptitle(suptitle, fontsize=11)
+    fig.tight_layout()
+    out_path = Path(out_path); out_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(out_path, dpi=300); plt.close(fig)
+    print(f"[plotting] kappa Cl grid ({n} cosmologies) -> {out_path}", flush=True)
+    return out_path
+
+
 def plot_kappa_cl_multi_cosmo(cosmo_labels, ells, cl_low_list, cl_corr_list, cl_high_list,
                               out_path, corrected_label="corrected", suptitle=None):
     """ONE weak-lensing kappa-map Cl comparison across ALL held-out cosmologies at

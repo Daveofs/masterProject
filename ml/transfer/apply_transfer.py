@@ -13,12 +13,24 @@ nside=2048) result to disk and reading it back just to plot it.
 Validates on MULTIPLE held-out cosmologies at once (--run-dirs takes one or more),
 mirroring unet_flow_jbucko/apply_flow.py's split_by_cosmo-based held-out set rather
 than a single fixed test cosmology -- pctile-band power ratios and full-sky moments/
-histograms pool patches/pixels across ALL of them; the single visual example grid
-(example_patches.png / example_full_sky.png) uses the first entry, labeled with the
-full held-out set; cl_ratio_by_zbin_grid.png is the genuine multi-cosmology two-point
-check (one row per held-out cosmology, up to --max-cosmologies, one column per
-redshift bin), the same statistic + shared plotting code as apply_flow.py's own
-example_full_sky.png now uses (analysis.plot_cl_ratio_pctile_grid + zbin_shell_samples).
+histograms pool patches/pixels across ALL of them; the visual example grid
+(example_patches.png) draws each row from a random held-out cosmology, labeled with
+the full set.
+
+The Cl diagnostic is cl_ratio_by_zbin_grid.png: one row per held-out cosmology (up to
+--max-cosmologies) x one column per redshift bin, with a percentile band -- the same
+statistic + shared plotting code (analysis.plot_cl_ratio_pctile_grid +
+zbin_shell_samples) as apply_flow.py's example_full_sky.png. Our OWN
+example_full_sky.png (gnomonic-zoom triptych + per-shell Cl) was removed by request:
+it only ever showed one cosmology at one fixed sky position, and its Cl-ratio panel is
+strictly subsumed by cl_ratio_by_zbin_grid.png.
+
+Weak lensing (--kappa) reduces the whole lightcone to ONE kappa map per cosmology and
+emits two views of its Cl -- faceted per-cosmology (kappa_cl_per_cosmology.png) and
+median + 16-84 band ACROSS cosmologies (kappa_cl_pctile_band.png) -- plus
+kappa_moments_scatter.png. NB --kappa-nside must be
+large enough to resolve the ell range the transfer function actually acts on; see its
+help text (the old nside=128 default was blind to the entire correction).
 
   python apply_transfer.py --transfer <transfer.npz> \
       --run-dirs <grid>/cosmo_A/run_0 <grid>/cosmo_B/run_0 <grid>/cosmo_C/run_0 \
@@ -46,15 +58,15 @@ from transfer_function import (_alm, ell_of_flat_index, alm_fname, smooth_cl,   
 import poisson_resample                                                            # noqa: E402
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
-from analysis.transforms import log1p_delta, log1p_delta_pair                      # noqa: E402
+from analysis.transforms import log1p_delta_pair                                   # noqa: E402
 from analysis.radial_power import radial_power                                     # noqa: E402
-from analysis.full_sky import od_cl, gnomonic_crop, zbin_shell_samples             # noqa: E402
+from analysis.full_sky import od_cl, zbin_shell_samples                            # noqa: E402
 from analysis.moments import moments                                               # noqa: E402
 from analysis.plotting import (plot_example_patch_grid, plot_pctile_band_ratio,    # noqa: E402
-                               plot_example_full_sky_grid, plot_cl_shell,           # noqa: E402
+                               plot_cl_shell,                                       # noqa: E402
                                plot_moments_vs_shell, plot_histogram_grid,          # noqa: E402
-                               plot_cl_ratio_pctile_grid, plot_kappa_cl_multi_cosmo,  # noqa: E402
-                               plot_kappa_moments_scatter)                          # noqa: E402
+                               plot_cl_ratio_pctile_grid,                           # noqa: E402
+                               plot_kappa_cl_grid, plot_kappa_moments_scatter)       # noqa: E402
 from analysis import weak_lensing                                                  # noqa: E402
 
 
@@ -348,12 +360,18 @@ def plot_patches(args, run_dirs: list[Path], corrected_by_run: dict):
 # ---------------------------------------------------------------------------
 
 def plot_full_sky(args, run_dirs: list[Path], corrected_by_run: dict):
-    """cl_shell*.png / example_full_sky.png use ONLY run_dirs[0] (one visual
-    example, matching plot_patches / jbucko's val_cosmos[0]); moments_vs_shell.png
-    and example_histograms.png POOL raw pixels from ALL run_dirs per shell, since
-    those are one-point-PDF statistics that only get more informative pooled over
-    more of the held-out set (unlike a single gnomonic-crop image, which needs one
-    fixed sky patch from one fixed map to render at all)."""
+    """Full-sky ONE-POINT-PDF diagnostics (moments_vs_shell.png,
+    example_histograms.png), POOLING raw pixels from ALL run_dirs per shell -- these
+    are marginal-distribution statistics that only get more informative pooled over
+    more of the held-out set, and they are the thing a Cl ratio (two-point,
+    phase-blind) structurally cannot tell you.
+
+    example_full_sky.png (gnomonic-zoom triptych + per-shell Cl ratio) was REMOVED by
+    request: its Cl-ratio panel is strictly worse than cl_ratio_by_zbin_grid.png at
+    the same job (which covers every held-out cosmology x redshift bin with a
+    percentile band, instead of ONE cosmology's hand-picked shells), and its images
+    only ever showed a single cosmology at one fixed sky position. --fullsky-shells
+    now selects which shells the moments/histograms below are computed on."""
     nside = args.nside
     out_dir = Path(args.out_dir); out_dir.mkdir(parents=True, exist_ok=True)
     method_label = "transfer+Poisson" if args.poisson else "transfer (no Poisson)"
@@ -365,8 +383,6 @@ def plot_full_sky(args, run_dirs: list[Path], corrected_by_run: dict):
     low_all0, high_all0 = arrays[run0]
     corrected0 = corrected_by_run[run0]
     all_cosmos = [f"{r.parent.name}/{r.name}" for r in run_dirs]
-    held_out_note = (f" (visual from {all_cosmos[0]}; full held-out validation set, "
-                      f"n={len(run_dirs)}: {all_cosmos})" if len(run_dirs) > 1 else "")
 
     lmax = min(args.lmax, 3 * nside - 1)
     ells = np.arange(lmax + 1)
@@ -377,26 +393,14 @@ def plot_full_sky(args, run_dirs: list[Path], corrected_by_run: dict):
         cl_lo = od_cl(low_shell, lmax); cl_c = od_cl(corr_shell, lmax); cl_hi = od_cl(high_shell, lmax)
         plot_cl_shell(s, ells, cl_lo, cl_c, cl_hi, out_dir / f"cl_shell{s:03d}.png")
 
-    # example_full_sky.png: same layout as unet_flow_jbucko's, for direct comparison.
     if args.fullsky_shells:
-        print(f"[plot_full_sky] building example_full_sky.png for shells "
-              f"{args.fullsky_shells}", flush=True)
-        lon, lat = args.example_rot
-        crop = lambda m: gnomonic_crop(m, nside, lon, lat, args.example_xsize, args.example_reso)
+        print(f"[plot_full_sky] full-sky moments + histograms for shells "
+              f"{args.fullsky_shells}, pooled over {len(run_dirs)} cosmologies", flush=True)
 
-        rows = []
         mom_low, mom_corr, mom_high, hist_rows = [], [], [], []
         for s in args.fullsky_shells:
-            low_shell = np.asarray(low_all0[s], np.float32)
-            corr_shell = np.asarray(corrected0[s], np.float32)
-            high_shell = np.asarray(high_all0[s], np.float32)
-            cl_lo = od_cl(low_shell, lmax); cl_c = od_cl(corr_shell, lmax); cl_hi = od_cl(high_shell, lmax)
-            rows.append((f"shell {s}", crop(log1p_delta(low_shell)), crop(log1p_delta(corr_shell)),
-                        crop(log1p_delta(high_shell)), ells, cl_lo, cl_c, cl_hi))
-
             # full-sky one-point PDF, POOLED across ALL held-out cosmologies (raw
-            # counts, all pixels of shell s from every run) -- the marginal-
-            # distribution check a Cl ratio (two-point, phase-blind) can't provide.
+            # counts, all pixels of shell s from every run).
             low_pool = np.concatenate([np.asarray(arrays[r][0][s], np.float32).ravel()
                                        for r in run_dirs])
             high_pool = np.concatenate([np.asarray(arrays[r][1][s], np.float32).ravel()
@@ -406,12 +410,6 @@ def plot_full_sky(args, run_dirs: list[Path], corrected_by_run: dict):
             mom_low.append(moments(low_pool)); mom_high.append(moments(high_pool))
             mom_corr.append(moments(corr_pool))
             hist_rows.append((f"shell {s}", low_pool, corr_pool, high_pool))
-
-        plot_example_full_sky_grid(
-            rows, out_dir / "example_full_sky.png", corrected_label=f"corrected ({method_label})",
-            suptitle=f"{method_label} full-sky, log1p overdensity (gnomonic zoom @ "
-                    f"lon={lon:g},lat={lat:g}) + real angular Cl ratio"
-                    f"\nvalidated on {all_cosmos[0]}{held_out_note}")
 
         plot_moments_vs_shell(
             args.fullsky_shells, {"low": mom_low, "high (true)": mom_high,
@@ -432,13 +430,14 @@ def plot_cl_zbin_grid(args, run_dirs: list[Path], corrected_by_run: dict):
     """Cl-ratio-by-redshift-bin pctile grid: one row per held-out cosmology (up to
     --max-cosmologies), one column per redshift/shell bin (zbin_shell_samples) --
     the SAME multi-cosmology two-point check unet_flow_jbucko/apply_flow.py's
-    example_full_sky.png now uses (plot_cl_ratio_pctile_grid). This is the genuine
-    "more than one held-out cosmology" validation: example_full_sky.png (above)
-    only ever shows ONE cosmology by eye, so a systematic bias that happens to
-    look fine on that one cosmology would otherwise go undetected. Cheap here
-    (unlike jbucko, which must tile+integrate a flow ODE per patch to reconstruct
-    each shell) because apply() already produced the WHOLE corrected shell
-    in-memory -- no per-patch reconstruction needed, just od_cl on arrays we have."""
+    example_full_sky.png uses (plot_cl_ratio_pctile_grid). THIS is the pipeline's
+    Cl diagnostic: it is the genuine "more than one held-out cosmology" validation,
+    which is why our own single-cosmology example_full_sky.png was dropped -- a
+    systematic bias that happened to look fine on one hand-picked cosmology's
+    shells would go undetected there. Cheap here (unlike jbucko, which must
+    tile+integrate a flow ODE per patch to reconstruct each shell) because apply()
+    already produced the WHOLE corrected shell in-memory -- no per-patch
+    reconstruction needed, just od_cl on arrays we already have."""
     out_dir = Path(args.out_dir)
     nside = args.nside
     lmax = min(args.lmax, 3 * nside - 1)
@@ -531,11 +530,36 @@ def plot_kappa(args, run_dirs: list[Path], corrected_by_run: dict):
 
     kappa_ells = np.arange(args.kappa_lmax + 1)
     suptitle_common = (f"{len(cosmo_labels)} held-out cosmologies ({method_label}) | "
-                      f"n(z)={Path(args.kappa_nz).name} | z in [{args.kappa_zi:g},{args.kappa_zf:g}]")
-    plot_kappa_cl_multi_cosmo(
+                      f"n(z)={Path(args.kappa_nz).name} | z in [{args.kappa_zi:g},{args.kappa_zf:g}]"
+                      f" | kappa nside={args.kappa_nside}, lmax={args.kappa_lmax}")
+
+    # Two views of the SAME kappa Cl, because each answers a different question:
+    #  - _per_cosmology (faceted):   how does each cosmology behave on its own?
+    #    (plot_kappa_cl_multi_cosmo's single-overlay alternative, used by
+    #    unet_flow_jbucko/apply_flow.py, piles every cosmology's lines onto one
+    #    axes -- readable there since it stays to a handful of cosmologies, but
+    #    not the clearer view once you actually want to judge each one)
+    #  - _pctile_band (median+band): the aggregate, with the cosmology-to-cosmology
+    #    SPREAD made explicit -- one kappa map per cosmology means there is no
+    #    within-cosmology spread to band, so the band here is ACROSS cosmologies,
+    #    which is exactly the "does this generalize" question the held-out set exists
+    #    to answer. Same shared plotting code (plot_pctile_band_ratio) as the patch
+    #    and Cl-by-zbin diagnostics use.
+    plot_kappa_cl_grid(
         cosmo_labels, kappa_ells, cl_low, cl_corr, cl_high,
-        out_dir / "kappa_cl_all_cosmologies.png", corrected_label=f"corrected ({method_label})",
-        suptitle=f"weak-lensing kappa Cl, {suptitle_common}")
+        out_dir / "kappa_cl_per_cosmology.png", corrected_label=f"corrected ({method_label})",
+        suptitle=f"weak-lensing kappa Cl per cosmology, {suptitle_common}")
+
+    with np.errstate(divide="ignore", invalid="ignore"):
+        lo_stack = np.array([lo / hi for lo, hi in zip(cl_low, cl_high)])
+        co_stack = np.array([co / hi for co, hi in zip(cl_corr, cl_high)])
+    plot_pctile_band_ratio(
+        kappa_ells[1:], {"low / high (baseline, no model)": lo_stack[:, 1:],
+                        f"corrected ({method_label}) / high": co_stack[:, 1:]},
+        out_dir / "kappa_cl_pctile_band.png", xlabel=r"$\ell$", ylim=(0.4, 1.6),
+        title=f"weak-lensing kappa Cl ratio to truth -- median + 16-84th pctile band "
+              f"ACROSS {len(cosmo_labels)} held-out cosmologies")
+
     plot_kappa_moments_scatter(
         cosmo_labels, mom_low, mom_corr, mom_high,
         out_dir / "kappa_moments_scatter.png", corrected_label=f"corrected ({method_label})",
@@ -606,17 +630,15 @@ def main():
     p.add_argument("--patch-size", type=int, default=256)
     p.add_argument("--n-pctile-patches", type=int, default=200)
 
-    # --- plot_full_sky args ---
+    # --- plot_full_sky args (one-point PDF only; example_full_sky.png removed --
+    # cl_ratio_by_zbin_grid.png is the Cl diagnostic now, see plot_full_sky) ---
     p.add_argument("--fullsky-shell-indices", type=int, nargs="*", default=[],
                    help="Shells for individual cl_shell*.png. Empty (default) skips "
-                        "these -- example_full_sky.png's ratio panel already shows "
-                        "the real Cl ratio for --fullsky-shells.")
+                        "these -- cl_ratio_by_zbin_grid.png already covers the real "
+                        "Cl ratio across every held-out cosmology and redshift bin.")
     p.add_argument("--fullsky-shells", type=int, nargs="*", default=[5, 10, 15, 30, 50],
-                   help="Shells for example_full_sky.png + moments/histograms. "
-                        "Empty to skip.")
-    p.add_argument("--example-rot", type=float, nargs=2, default=[45.0, 45.0])
-    p.add_argument("--example-reso", type=float, default=1.5)
-    p.add_argument("--example-xsize", type=int, default=200)
+                   help="Shells for the full-sky moments/histogram (one-point PDF) "
+                        "plots. Empty to skip.")
     p.add_argument("--lmax", type=int, default=3000)
 
     # --- plot_cl_zbin_grid args (multi-cosmology Cl-ratio-by-redshift-bin pctile
@@ -645,14 +667,34 @@ def main():
                    help="n(z) redshift distribution passed to UFalcon's "
                         "construct_kappa_map -- named explicitly in the kappa "
                         "plots' suptitle so the choice is never ambiguous")
-    p.add_argument("--kappa-nside", type=int, default=128,
-                   help="output kappa map nside (independent of --nside)")
+    p.add_argument("--kappa-nside", type=int, default=1024,
+                   help="output kappa map nside (independent of --nside). 1024 (not "
+                        "128) because the kappa map's own resolution CUTS OFF the "
+                        "diagnostic: nside=128 can only represent ell<~383 (3*nside-1; "
+                        "27.5 arcmin pixels), but the transfer function is ~1 there and "
+                        "does essentially ALL of its work above it -- measured on real "
+                        "transfer_cosmo_000003.npz, max|T-1| over ell<=350 is only "
+                        "0.002-0.025 on shells 10-30 versus 0.15-1.10 over ell 351-3000. "
+                        "At nside=128 the kappa comparison would show corrected ~ low ~ "
+                        "high and say nothing about whether the correction works. "
+                        "nside=1024 reaches ell~3071, covering the corrected band.")
     p.add_argument("--kappa-zi", type=float, default=0.0)
     p.add_argument("--kappa-zf", type=float, default=1.05)
-    p.add_argument("--kappa-lmax", type=int, default=350,
-                   help="angular power spectrum lmax for the kappa maps "
-                        "(--kappa-nside supports up to ~3*nside-1)")
+    p.add_argument("--kappa-lmax", type=int, default=2048,
+                   help="angular power spectrum lmax for the kappa maps (--kappa-nside "
+                        "supports up to ~3*nside-1, so keep this below that). Must reach "
+                        "well past ell~350 or the correction is invisible -- see "
+                        "--kappa-nside.")
 
+    p.add_argument("--reuse-counts", default="",
+                   help="Directory of <cosmo>_counts.npz from a PREVIOUS run (i.e. a "
+                        "previous --out-counts-dir): load those corrected counts "
+                        "instead of recomputing apply()+Poisson (~50 min/cosmology). "
+                        "For iterating on the DIAGNOSTIC PLOTS only -- the counts are "
+                        "deterministic given (transfer, --seed, --ell-min-mpc, "
+                        "--poisson-*), so reusing them is exact ONLY if those are "
+                        "unchanged. Any cosmology missing from the directory is "
+                        "recomputed normally.")
     p.add_argument("--out-dir", required=True, help="Where all plots are written.")
     args = p.parse_args()
 
@@ -679,11 +721,30 @@ def main():
     corrected_by_run = {}
     for run, tpath in zip(run_dirs, transfer_paths):
         cosmo_label = f"{run.parent.name}/{run.name}"
-        print(f"=== [apply_transfer] {cosmo_label}  (transfer={tpath}) ===", flush=True)
         out_path = (Path(args.out_counts_dir) / f"{run.parent.name}_counts.npz"
                    if args.out_counts_dir else None)
         try:
-            corrected_by_run[run] = apply(args, run, tpath, out_path)
+            # --reuse-counts: skip apply()+Poisson entirely and load the corrected
+            # counts a PREVIOUS run already produced. apply()+Poisson costs ~50 min
+            # per cosmology and is fully deterministic given (transfer, --seed,
+            # --ell-min-mpc, --poisson-*), so re-running it just to redraw a plot
+            # burns hours recomputing a byte-identical array. Iterating on the
+            # DIAGNOSTICS (which is most of what we do) is what this is for.
+            # Only valid if those knobs are unchanged -- change any of them and you
+            # must regenerate, not reuse.
+            reuse = (Path(args.reuse_counts) / f"{run.parent.name}_counts.npz"
+                    if args.reuse_counts else None)
+            if reuse and reuse.exists():
+                print(f"=== [apply_transfer] {cosmo_label}  (REUSING counts {reuse}) ===",
+                      flush=True)
+                corrected_by_run[run] = np.load(reuse, mmap_mode="r")["shells"]
+            else:
+                if reuse:
+                    print(f"[apply_transfer] --reuse-counts: {reuse} not found -- "
+                          f"recomputing {cosmo_label} from scratch", flush=True)
+                print(f"=== [apply_transfer] {cosmo_label}  (transfer={tpath}) ===",
+                      flush=True)
+                corrected_by_run[run] = apply(args, run, tpath, out_path)
         except Exception as e:
             print(f"[apply_transfer] ERROR: {cosmo_label} failed ({e!r}) -- "
                   f"skipping it, continuing with the rest", flush=True)
