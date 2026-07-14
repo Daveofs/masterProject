@@ -151,9 +151,9 @@ FIT_FLAGS=""
 [ -n "$INCLUDE_TEST" ] && FIT_FLAGS="--include-test"
 # Stage 3 (transfer correction + Poisson, merged) knobs -- see poisson_resample.py
 # and transfer_function.py apply()'s --ell-min-mpc/--poisson-* docstrings.
-ELL_MIN_MPC=${ELL_MIN_MPC:-3.0}
+ELL_MIN_MPC=${ELL_MIN_MPC:-5.0}
 N_AVG=${N_AVG:-4}
-N_ITER=${N_ITER:-5}
+N_ITER=${N_ITER:-3}
 DAMP=${DAMP:-0.4}
 OUT=/capstor/scratch/cscs/damrein/outputs/transfer/${SLURM_JOB_ID}
 mkdir -p "$OUT" /capstor/scratch/cscs/damrein/outputs/logs/transfer

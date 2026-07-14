@@ -33,7 +33,7 @@ DATA_ROOT="/capstor/scratch/cscs/damrein/cosmogridv1"
 JBUCKO=/users/damrein/masterProject/ml/unet_flow_jbucko
 PIPE=/users/damrein/masterProject/ml/unet_flow_jbucko
 
-NSIDE=${NSIDE:-2048}
+NSIDE=${NSIDE:-512}
 PATCH_SIZE=${PATCH_SIZE:-256}
 NPATCH=${NPATCH:-100000}
 EPOCHS=${EPOCHS:-40}

@@ -277,17 +277,27 @@ def flow_matching_loss(net: SphereFlowNet, x1: torch.Tensor, delta_low: torch.Te
 
 @torch.no_grad()
 def sample_ode(net: SphereFlowNet, delta_low: torch.Tensor, cosmo: torch.Tensor,
-               steps: int = 50, x0: Optional[torch.Tensor] = None) -> torch.Tensor:
-    """Integrate dx/dt = v_theta from noise to a delta_high realization (Euler)."""
+               steps: int = 50, x0: Optional[torch.Tensor] = None,
+               amp: bool = False) -> torch.Tensor:
+    """Integrate dx/dt = v_theta from noise to a delta_high realization (Euler).
+
+    amp=True runs each net() call under bf16 autocast (same dtype/pattern as
+    flow_matching_loss's training-time autocast) -- the gather-based ChebConv
+    supports it natively and this workload is memory-bandwidth-bound (see
+    laplacian_to_gather's docstring), so bf16 roughly halves bytes moved per
+    step. The Euler accumulator x stays fp32: net(...) returns bf16 under
+    autocast, but `x (fp32) + bf16_tensor * dt` type-promotes to fp32
+    automatically, so precision doesn't degrade across the 50 additive steps."""
     if delta_low.dim() == 1:
         delta_low = delta_low[None]
     if cosmo.dim() == 1:
         cosmo = cosmo[None]
     x = torch.randn_like(delta_low) if x0 is None else x0
     dt = 1.0 / steps
-    for s in range(steps):
-        t = torch.full((x.shape[0],), s * dt, device=x.device)
-        x = x + net(x, t, delta_low, cosmo) * dt
+    with torch.autocast("cuda", dtype=torch.bfloat16, enabled=amp and x.is_cuda):
+        for s in range(steps):
+            t = torch.full((x.shape[0],), s * dt, device=x.device)
+            x = x + net(x, t, delta_low, cosmo) * dt
     return x
 
 

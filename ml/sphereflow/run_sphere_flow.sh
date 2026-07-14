@@ -135,14 +135,23 @@ if [ "$STAGE1_RC" -ne 0 ]; then
     exit 0
 fi
 
-# ---- stage 2: evaluate flow vs DISCO baseline vs CosmoGrid ----
+# ---- stage 2: quick 3-shell smoke test (flow vs DISCO baseline vs CosmoGrid).
+#      apply_sphere_flow.py now also does the fuller patch/full-sky/zbin-grid
+#      comparison suite (see run_sphere_flow_compare.sh) -- narrowed back down
+#      here to just cl_shell{003,030,050}.png so this post-training check stays
+#      fast. TEST_COSMO must match apply_sphere_flow.py's --run-dirs (defaults
+#      to cosmo_000122/run_0, the cosmology this checkpoint was actually held
+#      out on -- only override TEST_COSMO above if you also change --test-cosmo
+#      in stage 1). ----
 srun --nodes=1 --ntasks=1 uenv run pytorch/v2.9.1:v2 --view=default -- bash -c "
   source ${VENV}/bin/activate
   python sphereflow/apply_sphere_flow.py \
       --model-dir '${OUT_DIR}' \
       --data-root '${DATA_ROOT}' \
-      --test-cosmo ${TEST_COSMO} \
-      --shell-indices 3 30 50 --steps 50 --lmax 3000
+      --run-dirs '${DATA_ROOT}/${TEST_COSMO}/run_0' \
+      --patch-shells --fullsky-shells --n-zbins 0 \
+      --fullsky-shell-indices 3 30 50 --steps 50 --lmax 3000 \
+      --out-dir '${OUT_DIR}/eval'
 "
 
 echo "sphere-flow v3 job ${SLURM_JOB_ID} finished at $(date)"
