@@ -31,9 +31,9 @@ COSMO_Z_FIELDS = ("h", "omega_cdm", "omega_b", "omega_m", "ns", "sigma8", "w0", 
 def cosmo_z_vector(cosmo, z):
     """cosmo: (...,6) tensor/array in COSMO_FIELDS order (Om,Ob,ns,s8,w0,h). z: (...,)
     redshift. Returns (...,8) in COSMO_Z_FIELDS order: [h, Omega_cdm, Ob, Om, ns, s8,
-    w0, z]. The ONE place this ordering is defined -- train_flow.py, apply_flow.py and
-    infer_full_sky.py all call this instead of re-deriving the field order themselves,
-    so training and evaluation can never silently drift apart."""
+    w0, z]. The ONE place this ordering is defined -- train_flow.py and apply_flow.py
+    both call this instead of re-deriving the field order themselves, so training and
+    evaluation can never silently drift apart."""
     om, ob, ns, s8, w0, h = (cosmo[..., i] for i in range(6))
     omega_cdm = om - ob
     if torch.is_tensor(cosmo):

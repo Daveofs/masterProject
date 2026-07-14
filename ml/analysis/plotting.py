@@ -148,6 +148,128 @@ def plot_pctile_band_ratio(x, ratio_stacks: dict, out_path, xlabel=r"$\ell$",
     return out_path
 
 
+def plot_cl_ratio_pctile_grid(grid, out_path, pctile=(16, 84), suptitle=None,
+                              corrected_label="flow / true (after)"):
+    """grid: list of (row_label, panels) -- one row per held-out cosmology. panels:
+    list of (bin_label, shells, ells, lo_stack, co_stack) -- one column per
+    redshift/shell bin (see full_sky.zbin_shell_samples); lo_stack/co_stack:
+    (n_shells_in_bin, n_ell) per-shell Cl-ratio-to-truth arrays (low/true and
+    corrected/true respectively).
+
+    No images here (see plot_example_patch_grid for those) -- this is purely the
+    aggregate two-point check: a median + [pctile] shaded band per curve, so a
+    systematic bias is distinguishable from both per-shell noise (within a column)
+    and cosmology-to-cosmology spread (across rows), all in one figure."""
+    n_rows = len(grid)
+    n_cols = max(len(panels) for _, panels in grid)
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=(4.3 * n_cols, 3.6 * n_rows), squeeze=False)
+    lo_pct, hi_pct = pctile
+    for i, (row_label, panels) in enumerate(grid):
+        for j in range(n_cols):
+            ax = axes[i, j]
+            if j >= len(panels):
+                ax.axis("off")
+                continue
+            bin_label, shells, ells, lo_stack, co_stack = panels[j]
+            lo_stack = np.asarray(lo_stack, dtype=np.float64)
+            co_stack = np.asarray(co_stack, dtype=np.float64)
+            x = ells[1:]
+            for stack, color, label in [(lo_stack, "gray", "low / true (before)"),
+                                        (co_stack, "steelblue", corrected_label)]:
+                med = np.nanmedian(stack, axis=0)[1:]
+                p_lo = np.nanpercentile(stack, lo_pct, axis=0)[1:]
+                p_hi = np.nanpercentile(stack, hi_pct, axis=0)[1:]
+                ax.semilogx(x, med, "-", lw=1.2, color=color, label=label)
+                ax.fill_between(x, p_lo, p_hi, color=color, alpha=0.25)
+            ax.axhline(1.0, color="k", ls="--", lw=0.8)
+            ax.set_title(f"{bin_label} (n={len(shells)}): {[int(s) for s in shells]}", fontsize=8)
+            ax.tick_params(labelsize=7)
+            if i == 0 and j == 0:
+                ax.legend(fontsize=7, loc="lower left")
+            if j == 0:
+                ax.set_ylabel(f"{row_label}\n" + r"$C_\ell/C_\ell^{true}$", fontsize=8)
+            if i == n_rows - 1:
+                ax.set_xlabel(r"$\ell$", fontsize=8)
+    if suptitle:
+        fig.suptitle(suptitle, fontsize=12)
+    fig.tight_layout()
+    out_path = Path(out_path); out_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(out_path, dpi=300); plt.close(fig)
+    print(f"[plotting] Cl-ratio pctile grid ({n_rows}x{n_cols}) -> {out_path}", flush=True)
+    return out_path
+
+
+def plot_kappa_cl_multi_cosmo(cosmo_labels, ells, cl_low_list, cl_corr_list, cl_high_list,
+                              out_path, corrected_label="corrected", suptitle=None):
+    """ONE weak-lensing kappa-map Cl comparison across ALL held-out cosmologies at
+    once (not faceted, not percentile-banded -- one map per cosmology here, so
+    there's no within-cosmology spread to band; the cosmology-to-cosmology spread
+    IS the thing to look at, one thin line per cosmology). cl_*_list: list of
+    (n_ell,) angular power spectra (weak_lensing.kappa_cl), one entry per
+    cosmo_labels, low/corrected/high aligned. Left panel: raw Cl (loglog). Right
+    panel: ratio to truth (semilogx) -- low/true dotted, corrected/true solid, one
+    color per cosmology (tab10), so a systematic bias is visible as a consistent
+    offset across ALL colors while cosmology-specific behavior shows as scatter
+    between them."""
+    n_cosmo = len(cosmo_labels)
+    colors = plt.cm.tab10(np.linspace(0, 1, min(n_cosmo, 10))) if n_cosmo <= 10 \
+        else plt.cm.viridis(np.linspace(0, 1, n_cosmo))
+    fig, ax = plt.subplots(1, 2, figsize=(13, 5))
+    x = ells[1:]
+    for i, label in enumerate(cosmo_labels):
+        c = colors[i % len(colors)]
+        cl_lo, cl_c, cl_hi = cl_low_list[i], cl_corr_list[i], cl_high_list[i]
+        ax[0].loglog(x, cl_lo[1:], ":", color=c, lw=1.0, alpha=0.8)
+        ax[0].loglog(x, cl_c[1:], "-", color=c, lw=1.2, alpha=0.8, label=label)
+        ax[0].loglog(x, cl_hi[1:], "--", color=c, lw=1.0, alpha=0.8)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            ax[1].semilogx(x, (cl_lo / cl_hi)[1:], ":", color=c, lw=1.0, alpha=0.8)
+            ax[1].semilogx(x, (cl_c / cl_hi)[1:], "-", color=c, lw=1.2, alpha=0.8)
+    ax[0].set_xlabel(r"$\ell$"); ax[0].set_ylabel(r"$C_\ell^{\kappa\kappa}$")
+    ax[0].set_title("kappa-map Cl (dotted=low, solid=" + corrected_label + ", dashed=high)")
+    ax[0].legend(fontsize=7, loc="lower left", ncol=max(1, n_cosmo // 8 + 1))
+    ax[1].axhline(1.0, color="k", ls="--", lw=0.8)
+    ax[1].set_xlabel(r"$\ell$"); ax[1].set_ylabel(r"$C_\ell/C_\ell^{true}$")
+    ax[1].set_title(f"ratio to truth ({n_cosmo} held-out cosmologies)")
+    if suptitle:
+        fig.suptitle(suptitle, fontsize=11)
+    fig.tight_layout()
+    out_path = Path(out_path); out_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(out_path, dpi=300); plt.close(fig)
+    print(f"[plotting] kappa Cl, {n_cosmo} cosmologies -> {out_path}", flush=True)
+    return out_path
+
+
+def plot_kappa_moments_scatter(cosmo_labels, moms_low, moms_corr, moms_high, out_path,
+                               corrected_label="corrected", suptitle=None):
+    """Scatter (points, no connecting line) version of plot_moments_vs_shell: there
+    is only ONE kappa map per cosmology (not one per shell depth), so the x-axis is
+    categorical (cosmology), not a continuous depth a line plot would imply.
+    moms_*: list of moments.moments() dicts, one per cosmo_labels entry, low/
+    corrected/high aligned."""
+    fig, axes = plt.subplots(1, 3, figsize=(15, 4.5))
+    panels = [("variance", "variance"), ("skewness", "skewness"),
+             ("excess_kurtosis", "excess kurtosis")]
+    x = np.arange(len(cosmo_labels))
+    series = [("low", moms_low, "darkorange", "o"), (corrected_label, moms_corr, "steelblue", "^"),
+             ("high (true)", moms_high, "tomato", "s")]
+    for ax, (key, title) in zip(axes, panels):
+        for name, moms, color, marker in series:
+            ax.scatter(x, [m[key] for m in moms], color=color, marker=marker, label=name, s=40)
+        ax.set_title(title)
+        ax.set_xticks(x); ax.set_xticklabels(cosmo_labels, rotation=45, ha="right", fontsize=7)
+        ax.tick_params(labelsize=8)
+        if ax is axes[0]:
+            ax.legend(fontsize=8)
+    if suptitle:
+        fig.suptitle(suptitle, fontsize=12)
+    fig.tight_layout()
+    out_path = Path(out_path); out_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(out_path, dpi=300); plt.close(fig)
+    print(f"[plotting] kappa moments scatter, {len(cosmo_labels)} cosmologies -> {out_path}", flush=True)
+    return out_path
+
+
 def plot_histogram_grid(rows, out_path, corrected_label="corrected", n_bins=60,
                         xlabel="pixel value (raw counts)", suptitle=None):
     """rows: list of (row_label, low_vals, corr_vals, high_vals) -- FLAT 1D arrays of

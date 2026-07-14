@@ -37,7 +37,9 @@ Usage
 
 from __future__ import annotations
 import argparse
+import os
 from pathlib import Path
+from concurrent.futures import ProcessPoolExecutor, as_completed
 
 import numpy as np
 import healpy as hp
@@ -197,17 +199,115 @@ def smooth_cl(cl: np.ndarray, window: int) -> np.ndarray:
 
 
 def _run_cls(run_dir: Path, lmax: int, log_density: bool = False):
-    """Per-shell (Cl_low, Cl_high) for a run from its preprocessed alms."""
+    """Per-shell (Cl_low, Cl_high, Cl_cross) for a run from its preprocessed alms,
+    in ONE pass over the alm arrays. `train()` used to call this for just
+    (Cl_low, Cl_high) and then separately reload the SAME low/high alm files and
+    recompute alm2cl(al)/alm2cl(ah) a second time just to also get the cross-
+    spectrum -- doubling both the disk I/O and the SHT compute for no reason.
+    Returning all three here in one loop eliminates that."""
     N_alm = (lmax + 1) * (lmax + 2) // 2
     low = np.load(run_dir / alm_fname("low", lmax, log_density), mmap_mode="r")
     high = np.load(run_dir / alm_fname("high", lmax, log_density), mmap_mode="r")
     n = min(low.shape[0], high.shape[0])
     cl_low = np.empty((n, lmax + 1))
     cl_high = np.empty((n, lmax + 1))
+    cl_cross = np.empty((n, lmax + 1))
     for i in range(n):
-        cl_low[i] = hp.alm2cl(_alm(np.asarray(low[i]), N_alm), lmax=lmax)
-        cl_high[i] = hp.alm2cl(_alm(np.asarray(high[i]), N_alm), lmax=lmax)
-    return cl_low, cl_high
+        al = _alm(np.asarray(low[i]), N_alm)
+        ah = _alm(np.asarray(high[i]), N_alm)
+        cl_low[i] = hp.alm2cl(al, lmax=lmax)
+        cl_high[i] = hp.alm2cl(ah, lmax=lmax)
+        cl_cross[i] = hp.alm2cl(al, ah, lmax=lmax)
+    return cl_low, cl_high, cl_cross
+
+
+def _gather_worker_init(threads_per_worker: int):
+    """ProcessPoolExecutor initializer -- caps each worker's OpenMP threads so
+    N_WORKERS x threads_per_worker stays within the node's cpu budget (matches
+    poisson_resample.py's _worker_init pattern). Must run before this process's
+    first healpy/OpenMP call, which it does since it's the pool's initializer."""
+    os.environ["OMP_NUM_THREADS"] = str(max(1, threads_per_worker))
+
+
+def _gather_fit_task(task):
+    """Worker: per-run (Cl_low, Cl_high, Cl_cross), for `fit`'s parallel gather."""
+    lo, hi, lmax, log_density = task
+    N_alm = (lmax + 1) * (lmax + 2) // 2
+    low = np.load(lo, mmap_mode="r")
+    high = np.load(hi, mmap_mode="r")
+    n = min(low.shape[0], high.shape[0])
+    cl_low = np.empty((n, lmax + 1)); cl_high = np.empty((n, lmax + 1))
+    cl_cross = np.empty((n, lmax + 1))
+    for i in range(n):
+        al = _alm(np.asarray(low[i]), N_alm)
+        ah = _alm(np.asarray(high[i]), N_alm)
+        cl_low[i] = hp.alm2cl(al, lmax=lmax)
+        cl_high[i] = hp.alm2cl(ah, lmax=lmax)
+        cl_cross[i] = hp.alm2cl(al, ah, lmax=lmax)
+    return str(lo.parent), cl_low, cl_high, cl_cross
+
+
+def _gather_train_task(task):
+    """Worker: everything `train()`'s per-run loop body needs, for `train`'s
+    parallel gather -- the alm2cl calls (via _run_cls) are the expensive part;
+    the rest (smoothing, build_features, sampling) is cheap vectorized numpy,
+    bundled in here too so the main process only has to reduce/concatenate."""
+    ld, lmax, log_density, info_npz, smooth_window, sample_frac, seed = task
+    cosmo = load_cosmo(ld)
+    cl_low, cl_high, cl_cross = _run_cls(ld, lmax, log_density)
+    n_shells = cl_low.shape[0]
+    z = shell_redshifts(ld, n_shells, info_npz)
+    cl_low_s = np.stack([smooth_cl(c, smooth_window) for c in cl_low])
+    cl_high_s = np.stack([smooth_cl(c, smooth_window) for c in cl_high])
+    with np.errstate(divide="ignore", invalid="ignore"):
+        T = np.sqrt(np.where(cl_low_s > 0, cl_high_s / cl_low_s, 1.0))
+    T = np.nan_to_num(T, nan=1.0, posinf=1.0, neginf=1.0)
+    ell = np.arange(lmax + 1)
+    rng = np.random.default_rng(seed)
+    Xs, ys = [], []
+    for i in range(n_shells):
+        X = build_features(ell, float(z[i]), cosmo, cl_low_s[i])
+        y = T[i]
+        if sample_frac < 1.0:
+            keep = rng.random(ell.shape[0]) < sample_frac
+            X, y = X[keep], y[keep]
+        Xs.append(X); ys.append(y)
+    return (str(ld), n_shells, cl_low, cl_high, cl_cross, np.concatenate(Xs), np.concatenate(ys),
+           cosmo, z, cl_low_s)
+
+
+def split_val_cosmos(data_dir: Path, val_frac: float = 0.15, seed: int = 0,
+                     low_glob: str = "disco_sim/*/disco_shells_nside=2048.npz",
+                     high_name: str = "compressed_shells.npz") -> list[str]:
+    """Hold out a random FRACTION of whole cosmologies for validation, mirroring
+    unet_flow_jbucko/dataset.py's split_by_cosmo (same default val_frac=0.15) --
+    so both pipelines validate on a comparable multi-cosmology held-out set
+    instead of a single fixed test cosmology.
+
+    Only samples from cosmologies that actually HAVE both low (DISCO) and high
+    (CosmoGrid) source data -- some cosmology directories exist with only the
+    CosmoGrid side present (no disco_sim/ at all, e.g. cosmo_000054), which
+    `fit`/`train`'s own run-discovery silently skips when building the TRAINING
+    set (see _discover_runs's lo.exists()/hi.exists() check) but which crashes
+    `emulate`/`apply_transfer.py` outright if such a cosmology is picked into the
+    HELD-OUT set instead (they assume the run-dir they're given is valid -- no
+    equivalent existence check). Filtering here, at selection time, is the single
+    point that protects every downstream consumer of the held-out list."""
+    data_dir = Path(data_dir)
+    cosmos = sorted(d.name for d in data_dir.iterdir()
+                    if d.is_dir() and d.name.startswith("cosmo_"))
+
+    def _has_data(name: str) -> bool:
+        c = data_dir / name
+        rs = [r for r in sorted(c.iterdir()) if r.is_dir() and r.name.startswith("run_")] or [c]
+        return any((next(r.glob(low_glob), None) is not None) and (r / high_name).exists()
+                  for r in rs)
+
+    cosmos = [c for c in cosmos if _has_data(c)]
+    rng = np.random.default_rng(seed)
+    rng.shuffle(cosmos)
+    n_val = max(1, int(round(len(cosmos) * val_frac)))
+    return sorted(cosmos[:n_val])
 
 
 # ---------------------------------------------------------------------------
@@ -219,13 +319,21 @@ def fit(args):
     lmax = args.lmax
     N_alm = (lmax + 1) * (lmax + 2) // 2
 
+    # Hold out a SET of cosmologies (explicit --test-cosmos, or auto-selected via
+    # --val-frac/--val-seed -- same whole-cosmology-split convention as
+    # unet_flow_jbucko/dataset.py's split_by_cosmo) so validation covers MULTIPLE
+    # cosmologies, not just one -- a single held-out cosmo can't distinguish a
+    # genuinely generalizing T from one that got lucky on that particular cosmology.
+    test_cosmos = set(args.test_cosmos) if args.test_cosmos \
+        else set(split_val_cosmos(data_dir, args.val_frac, args.val_seed))
+
     cosmos = sorted(d for d in data_dir.iterdir()
                     if d.is_dir() and d.name.startswith("cosmo_"))
     runs = []
     for c in cosmos:
-        # Leave the test cosmology out (proper generalization test) unless
-        # --include-test is set (SANITY CHECK: fit on it too, expect ~perfect).
-        if args.test_cosmo and c.name == args.test_cosmo and not args.include_test:
+        # Leave held-out cosmologies out (proper generalization test) unless
+        # --include-test is set (SANITY CHECK: fit on them too, expect ~perfect).
+        if c.name in test_cosmos and not args.include_test:
             continue
         rs = [r for r in sorted(c.iterdir()) if r.is_dir() and r.name.startswith("run_")]
         for ld in (rs or [c]):
@@ -236,27 +344,56 @@ def fit(args):
     if not runs:
         raise RuntimeError(f"No low/high alm files (lmax={lmax}) found under {data_dir}")
     mode = "INCLUDING test (sanity check)" if args.include_test \
-        else f"excluding {args.test_cosmo}"
+        else f"excluding {len(test_cosmos)} held-out cosmologies: {sorted(test_cosmos)}"
     print(f"[fit] {len(runs)} training runs ({mode})", flush=True)
 
     sum_low = sum_high = sum_cross = None
     counts = None
-    for lo, hi in runs:
-        low = np.load(lo, mmap_mode="r")
-        high = np.load(hi, mmap_mode="r")
-        n = min(low.shape[0], high.shape[0])
+
+    def _accumulate(cl_low, cl_high, cl_cross):
+        nonlocal sum_low, sum_high, sum_cross, counts
+        n = cl_low.shape[0]
         if sum_low is None:
             sum_low = np.zeros((n, lmax + 1))
             sum_high = np.zeros((n, lmax + 1))
             sum_cross = np.zeros((n, lmax + 1))
             counts = np.zeros(n)
-        for i in range(min(n, sum_low.shape[0])):
-            al, ah = _alm(np.asarray(low[i]), N_alm), _alm(np.asarray(high[i]), N_alm)
-            sum_low[i] += hp.alm2cl(al, lmax=lmax)
-            sum_high[i] += hp.alm2cl(ah, lmax=lmax)
-            sum_cross[i] += hp.alm2cl(al, ah, lmax=lmax)
-            counts[i] += 1
-        print(f"  processed {lo.parent}", flush=True)
+        m = min(n, sum_low.shape[0])
+        sum_low[:m] += cl_low[:m]; sum_high[:m] += cl_high[:m]
+        sum_cross[:m] += cl_cross[:m]; counts[:m] += 1
+
+    # --gather-workers > 1: dispatch each run's alm2cl work (I/O + SHT, the
+    # expensive part) to a separate process -- these are INDEPENDENT runs
+    # working on much smaller per-shell arrays than the full nside=2048 maps
+    # poisson_resample.py's parallel path handles, so (unlike that path, which
+    # was measured to be memory-bandwidth-bound and net-negative) this is
+    # embarrassingly parallel and safe to scale up. Default 1 (sequential) --
+    # opt in explicitly once validated on your hardware.
+    if args.gather_workers > 1:
+        threads_per_worker = max(1, (os.cpu_count() or args.gather_workers) // args.gather_workers)
+        tasks = [(lo, hi, lmax, args.log_density) for lo, hi in runs]
+        with ProcessPoolExecutor(max_workers=args.gather_workers,
+                                 initializer=_gather_worker_init,
+                                 initargs=(threads_per_worker,)) as ex:
+            futures = {ex.submit(_gather_fit_task, t): t for t in tasks}
+            for fut in as_completed(futures):
+                name, cl_low, cl_high, cl_cross = fut.result()
+                _accumulate(cl_low, cl_high, cl_cross)
+                print(f"  processed {name}", flush=True)
+    else:
+        for lo, hi in runs:
+            low = np.load(lo, mmap_mode="r")
+            high = np.load(hi, mmap_mode="r")
+            n = min(low.shape[0], high.shape[0])
+            cl_low = np.empty((n, lmax + 1)); cl_high = np.empty((n, lmax + 1))
+            cl_cross = np.empty((n, lmax + 1))
+            for i in range(n):
+                al, ah = _alm(np.asarray(low[i]), N_alm), _alm(np.asarray(high[i]), N_alm)
+                cl_low[i] = hp.alm2cl(al, lmax=lmax)
+                cl_high[i] = hp.alm2cl(ah, lmax=lmax)
+                cl_cross[i] = hp.alm2cl(al, ah, lmax=lmax)
+            _accumulate(cl_low, cl_high, cl_cross)
+            print(f"  processed {lo.parent}", flush=True)
 
     mean_low = sum_low / counts[:, None]
     mean_high = sum_high / counts[:, None]
@@ -278,7 +415,8 @@ def fit(args):
 
     Path(args.out).parent.mkdir(parents=True, exist_ok=True)
     np.savez(args.out, T=T, R=R, lmax=lmax, log_density=args.log_density,
-             mean_low=mean_low.astype(np.float32), mean_high=mean_high.astype(np.float32))
+             mean_low=mean_low.astype(np.float32), mean_high=mean_high.astype(np.float32),
+             test_cosmos=np.array(sorted(test_cosmos)))
     print(f"[fit] saved transfer function T{T.shape} (mean r={R.mean():.3f}, "
           f"log_density={args.log_density}) to {args.out}", flush=True)
 
@@ -292,13 +430,13 @@ def fit(args):
 # (T = sqrt(Cl_high / Cl_low)); output of `emulate` is a transfer.npz in the exact
 # schema `apply` / prepare_tcorr_dataset already consume.
 
-def _discover_runs(data_dir: Path, lmax: int, test_cosmo: str, include_test: bool,
+def _discover_runs(data_dir: Path, lmax: int, test_cosmos: set[str], include_test: bool,
                    log_density: bool = False):
     cosmos = sorted(d for d in data_dir.iterdir()
                     if d.is_dir() and d.name.startswith("cosmo_"))
     runs = []
     for c in cosmos:
-        if test_cosmo and c.name == test_cosmo and not include_test:
+        if c.name in test_cosmos and not include_test:
             continue
         rs = [r for r in sorted(c.iterdir()) if r.is_dir() and r.name.startswith("run_")]
         for ld in (rs or [c]):
@@ -316,13 +454,18 @@ def train(args):
     data_dir = Path(args.data_dir)
     lmax = args.lmax
     ell = np.arange(lmax + 1)
-    runs = _discover_runs(data_dir, lmax, args.test_cosmo, args.include_test, args.log_density)
+    # See fit()'s docstring comment: MULTIPLE held-out cosmologies (explicit
+    # --test-cosmos, or auto-selected via --val-frac/--val-seed, same convention
+    # as unet_flow_jbucko's split_by_cosmo), not just one.
+    test_cosmos = set(args.test_cosmos) if args.test_cosmos \
+        else set(split_val_cosmos(data_dir, args.val_frac, args.val_seed))
+    runs = _discover_runs(data_dir, lmax, test_cosmos, args.include_test, args.log_density)
     if not runs:
         raise RuntimeError(f"No low/high alm files (lmax={lmax}) found under {data_dir}")
-    mode = "INCLUDING test (sanity)" if args.include_test else f"excluding {args.test_cosmo}"
+    mode = "INCLUDING test (sanity)" if args.include_test \
+        else f"excluding {len(test_cosmos)} held-out cosmologies: {sorted(test_cosmos)}"
     print(f"[train] {len(runs)} training runs ({mode})", flush=True)
 
-    rng = np.random.default_rng(0)
     Xs, ys = [], []
     # r(ell,shell) (phase cross-correlation, see `fit`) is averaged over training
     # cosmologies rather than emulated: it's mostly a shot-noise/resolution
@@ -331,42 +474,66 @@ def train(args):
     # from directly -- this train-set average is the best available estimate.
     sum_cross = sum_low = sum_high = None
     r_counts = None
-    for ld in runs:
-        cosmo = load_cosmo(ld)
-        cl_low, cl_high = _run_cls(ld, lmax, args.log_density)
-        n_shells = cl_low.shape[0]
-        z = shell_redshifts(ld, n_shells, args.info_npz)
-        N_alm = (lmax + 1) * (lmax + 2) // 2
-        low_alm = np.load(ld / alm_fname("low", lmax, args.log_density), mmap_mode="r")
-        high_alm = np.load(ld / alm_fname("high", lmax, args.log_density), mmap_mode="r")
+    # Stashed from whichever run is accumulated LAST (order depends on completion
+    # order under --gather-workers > 1) -- used below by the cosmo-vector sanity
+    # check, which just needs SOME real (cosmo, z, cl_low) triple, not a specific one.
+    last_cosmo = last_z = last_cl_low_s = None
+
+    def _accumulate(name, n_shells, cl_low, cl_high, cl_cross, X, y, cosmo, z, cl_low_s):
+        nonlocal sum_cross, sum_low, sum_high, r_counts, last_cosmo, last_z, last_cl_low_s
         if sum_cross is None:
             sum_cross = np.zeros((n_shells, lmax + 1))
             sum_low = np.zeros((n_shells, lmax + 1))
             sum_high = np.zeros((n_shells, lmax + 1))
             r_counts = np.zeros(n_shells)
-        for i in range(min(n_shells, sum_cross.shape[0])):
-            al = _alm(np.asarray(low_alm[i]), N_alm)
-            ah = _alm(np.asarray(high_alm[i]), N_alm)
-            sum_cross[i] += hp.alm2cl(al, ah, lmax=lmax)
-            sum_low[i] += hp.alm2cl(al, lmax=lmax)
-            sum_high[i] += hp.alm2cl(ah, lmax=lmax)
-            r_counts[i] += 1
-        # Smooth BEFORE computing the ratio: T's target is otherwise a per-ell,
-        # per-realization noisy ratio (see smooth_cl docstring for why this is
-        # the actual source of the oscillating predictions).
-        cl_low_s = np.stack([smooth_cl(c, args.smooth_window) for c in cl_low])
-        cl_high_s = np.stack([smooth_cl(c, args.smooth_window) for c in cl_high])
-        with np.errstate(divide="ignore", invalid="ignore"):
-            T = np.sqrt(np.where(cl_low_s > 0, cl_high_s / cl_low_s, 1.0))
-        T = np.nan_to_num(T, nan=1.0, posinf=1.0, neginf=1.0)
-        for i in range(n_shells):
-            X = build_features(ell, float(z[i]), cosmo, cl_low_s[i])
-            y = T[i]
-            if args.sample_frac < 1.0:                    # subsample ell for tractability
-                keep = rng.random(ell.shape[0]) < args.sample_frac
-                X, y = X[keep], y[keep]
-            Xs.append(X); ys.append(y)
-        print(f"  gathered {ld} ({n_shells} shells)", flush=True)
+        m = min(n_shells, sum_cross.shape[0])
+        sum_cross[:m] += cl_cross[:m]; sum_low[:m] += cl_low[:m]
+        sum_high[:m] += cl_high[:m]; r_counts[:m] += 1
+        Xs.append(X); ys.append(y)
+        last_cosmo, last_z, last_cl_low_s = cosmo, z, cl_low_s
+        print(f"  gathered {name} ({n_shells} shells)", flush=True)
+
+    # --gather-workers > 1: same rationale as fit()'s parallel path -- runs are
+    # independent, and _gather_train_task bundles the ENTIRE per-run body
+    # (alm2cl + smoothing + feature-building) so a worker returns everything
+    # the main process needs to just accumulate/concatenate. Default 1
+    # (sequential, exactly today's behavior).
+    if args.gather_workers > 1:
+        threads_per_worker = max(1, (os.cpu_count() or args.gather_workers) // args.gather_workers)
+        tasks = [(ld, lmax, args.log_density, args.info_npz, args.smooth_window,
+                 args.sample_frac, i) for i, ld in enumerate(runs)]
+        with ProcessPoolExecutor(max_workers=args.gather_workers,
+                                 initializer=_gather_worker_init,
+                                 initargs=(threads_per_worker,)) as ex:
+            futures = {ex.submit(_gather_train_task, t): t for t in tasks}
+            for fut in as_completed(futures):
+                name, n_shells, cl_low, cl_high, cl_cross, X, y, cosmo, z, cl_low_s = fut.result()
+                _accumulate(name, n_shells, cl_low, cl_high, cl_cross, X, y, cosmo, z, cl_low_s)
+    else:
+        rng = np.random.default_rng(0)
+        for ld in runs:
+            cosmo = load_cosmo(ld)
+            cl_low, cl_high, cl_cross = _run_cls(ld, lmax, args.log_density)
+            n_shells = cl_low.shape[0]
+            z = shell_redshifts(ld, n_shells, args.info_npz)
+            # Smooth BEFORE computing the ratio: T's target is otherwise a per-ell,
+            # per-realization noisy ratio (see smooth_cl docstring for why this is
+            # the actual source of the oscillating predictions).
+            cl_low_s = np.stack([smooth_cl(c, args.smooth_window) for c in cl_low])
+            cl_high_s = np.stack([smooth_cl(c, args.smooth_window) for c in cl_high])
+            with np.errstate(divide="ignore", invalid="ignore"):
+                T = np.sqrt(np.where(cl_low_s > 0, cl_high_s / cl_low_s, 1.0))
+            T = np.nan_to_num(T, nan=1.0, posinf=1.0, neginf=1.0)
+            run_Xs, run_ys = [], []
+            for i in range(n_shells):
+                X = build_features(ell, float(z[i]), cosmo, cl_low_s[i])
+                y = T[i]
+                if args.sample_frac < 1.0:                # subsample ell for tractability
+                    keep = rng.random(ell.shape[0]) < args.sample_frac
+                    X, y = X[keep], y[keep]
+                run_Xs.append(X); run_ys.append(y)
+            _accumulate(str(ld), n_shells, cl_low, cl_high, cl_cross,
+                       np.concatenate(run_Xs), np.concatenate(run_ys), cosmo, z, cl_low_s)
 
     with np.errstate(divide="ignore", invalid="ignore"):
         mean_cross, mean_low_r, mean_high_r = (s / r_counts[:, None]
@@ -397,6 +564,21 @@ def train(args):
     X_tr, y_tr = Xs[~val_idx_mask], y[~val_idx_mask]
     X_va, y_va = Xs[val_idx_mask], y[val_idx_mask]
 
+    # Loss/val-loss are evaluated on a FIXED random SUBSAMPLE, not the full
+    # (multi-million-row) train/val sets: predict() over the full training set
+    # EVERY iteration (just to plot train_loss) was measured to make each
+    # iteration take ~9 minutes on the real ~9M-sample dataset -- 200 iterations
+    # would be tens of hours -- even though partial_fit() itself (the actual
+    # training step) is fast. A fixed subsample gives the same genuine held-out
+    # MSE semantics (matching the plotted formula) at a small, bounded,
+    # iteration-count-independent cost.
+    eval_rng = np.random.default_rng(1)
+    n_eval = 50_000
+    tr_eval_idx = eval_rng.choice(X_tr.shape[0], size=min(n_eval, X_tr.shape[0]), replace=False)
+    va_eval_idx = eval_rng.choice(X_va.shape[0], size=min(n_eval, X_va.shape[0]), replace=False)
+    X_tr_eval, y_tr_eval = X_tr[tr_eval_idx], y_tr[tr_eval_idx]
+    X_va_eval, y_va_eval = X_va[va_eval_idx], y_va[va_eval_idx]
+
     model = MLPRegressor(hidden_layer_sizes=hidden, activation="relu",
                          solver="adam", alpha=args.alpha, batch_size=4096,
                          learning_rate_init=1e-3, verbose=False, random_state=0)
@@ -404,8 +586,8 @@ def train(args):
     best_val, best_weights, no_improve, patience = np.inf, None, 0, 10
     for it in range(args.max_iter):
         model.partial_fit(X_tr, y_tr)                  # one epoch (adam, batch_size=4096)
-        train_loss = float(np.mean((model.predict(X_tr) - y_tr) ** 2)) / 2
-        val_loss = float(np.mean((model.predict(X_va) - y_va) ** 2)) / 2
+        train_loss = float(np.mean((model.predict(X_tr_eval) - y_tr_eval) ** 2)) / 2
+        val_loss = float(np.mean((model.predict(X_va_eval) - y_va_eval) ** 2)) / 2
         train_loss_hist.append(train_loss); val_loss_hist.append(val_loss)
         if val_loss < best_val - 1e-9:
             best_val, best_weights, no_improve = val_loss, \
@@ -426,7 +608,7 @@ def train(args):
     Path(args.out).parent.mkdir(parents=True, exist_ok=True)
     joblib.dump({"model": model, "scaler": scaler, "lmax": lmax,
                  "smooth_window": args.smooth_window, "R": R,
-                 "log_density": args.log_density,
+                 "log_density": args.log_density, "test_cosmos": sorted(test_cosmos),
                  "cosmo_keys": COSMO_KEYS, "feature_order":
                  ["log10(l+1)", "z", *COSMO_KEYS, "log10(Cl_low)"]}, args.out)
     print(f"[train] saved emulator to {args.out}", flush=True)
@@ -452,13 +634,15 @@ def train(args):
         print(f"[train] loss plot failed: {e}", flush=True)
 
     # ---- cosmo-vector sanity check: does the model actually respond to it? ----
-    # Compare T predicted with the LAST training run's real cosmo vector against T
+    # Compare T predicted with SOME training run's real cosmo vector (whichever
+    # was accumulated last -- order depends on completion order under
+    # --gather-workers > 1, but any real run works equally well here) against T
     # predicted with the training-set MEAN cosmo vector (scaler.mean_ stores means
     # in original, unscaled units). If the model ignored cosmo entirely, these
     # would be identical.
     mean_cosmo = scaler.mean_[2:2 + len(COSMO_KEYS)]
-    z_ref, cl_ref = float(z[len(z) // 2]), cl_low_s[len(z) // 2]
-    X_real = build_features(ell, z_ref, cosmo, cl_ref)
+    z_ref = float(last_z[len(last_z) // 2]); cl_ref = last_cl_low_s[len(last_z) // 2]
+    X_real = build_features(ell, z_ref, last_cosmo, cl_ref)
     X_mean = build_features(ell, z_ref, mean_cosmo, cl_ref)
     T_real = model.predict(scaler.transform(X_real))
     T_mean = model.predict(scaler.transform(X_mean))
@@ -529,272 +713,6 @@ def emulate(args):
           flush=True)
 
 
-# ---------------------------------------------------------------------------
-# Apply: corrected_alm = low_alm * T(ell, shell); alm2map
-# ---------------------------------------------------------------------------
-
-def apply(args):
-    tf = np.load(args.transfer)
-    T = tf["T"]                          # (n_shells_train, lmax+1)
-    # r(ell,shell): phase cross-correlation of low vs high (see `fit`/`train`).
-    # NOTE: applying the Wiener gain r*T here (--wiener) is OFF by default because
-    # it makes things WORSE for the stated goal (matching Cl). Where r is small
-    # (faint shells, high ell), r*T << 1, so the residual scale (r*T - 1) is
-    # strongly NEGATIVE -> it SUBTRACTS DISCO's existing power, driving Cl_corr
-    # far BELOW even Cl_disco (measured: 0.019 vs disco 0.52 at ell>1500 on shell
-    # 3) and making the map visibly lighter than DISCO. Plain full T instead
-    # matches Cl_high ~0.9-1.0 across all ell (that IS the transfer function's
-    # job). The grainy high-ell texture on faint shells is inherent -- those modes
-    # are shot noise, so only the POWER is recoverable, not the true structure;
-    # recovering structure is what the generative sphere-flow is for, not this.
-    #
-    # --stochastic (constrained realization) fixes the real-space overshoot seen
-    # with plain full T: scaling EVERY mode (including r<1 ones) by T amplifies
-    # DISCO's own single-realization noise by up to T, which still averages to
-    # Cl_high over many maps but overshoots std/max for any ONE map (measured:
-    # pixel-histogram std and max both exceed CosmoGrid's on shells 10/50/60, and
-    # shell 3's corrected/high ratio scatters +-15-20% at high ell -- far more
-    # than cosmic variance). Fix: split the correction into a phase-correlated
-    # part (gain r*T, trustworthy since low's phases genuinely track high there)
-    # and the REMAINING power T^2*(1-r^2)*Cl_low, filled with an INDEPENDENT
-    # random realization instead of amplified DISCO noise. Still matches Cl_high
-    # exactly in expectation: (r*T)^2 + T^2*(1-r^2) = T^2 = Cl_high/Cl_low.
-    R = tf["R"] if "R" in tf.files else None
-    if args.stochastic and R is None:
-        raise RuntimeError("--stochastic needs R in the transfer file "
-                            "(re-run `fit`/`train`, which always saves it).")
-    lmax = int(tf["lmax"])
-    # --log-density: T/R were fit on log1p(rho) alms (see alm_fname), so this run's
-    # low alms and native map must be treated the same way -- auto-detected from
-    # the transfer file so `apply` can't silently mismatch what `fit`/`emulate` used.
-    log_density = bool(tf["log_density"]) if "log_density" in tf.files else False
-    N_alm = (lmax + 1) * (lmax + 2) // 2
-    ell = ell_of_flat_index(lmax)
-
-    run = Path(args.run_dir)
-    low = np.load(run / alm_fname("low", lmax, log_density))
-    # Native full-resolution DISCO map (nside=2048 supports ell up to ~3*nside-1,
-    # i.e. ~6143 -- roughly double lmax=3000). Reconstructing the corrected map
-    # purely via alm2map(..., lmax=lmax) band-limits it to ell<=lmax and throws
-    # away all genuine small-scale structure the native map already had above
-    # that -- which made the "corrected" map look visibly WORSE (blurrier, peaks
-    # flattened) than either input even though Cl(ell<=lmax) improved. Fix: add
-    # the correction as a RESIDUAL on top of the native map, touching only the
-    # ell<=lmax band (scaled by T-1) and leaving everything above lmax untouched.
-    low_full = np.load(run / f"low_shells_nside={args.nside}.npy", mmap_mode="r")
-    n_shells = low.shape[0]
-    npix = hp.nside2npix(args.nside)
-    corrected = np.zeros((n_shells, npix), dtype=np.float32)
-    rng = np.random.default_rng(args.seed)
-
-    # PER-SHELL ell_min from a FIXED comoving (Mpc/h) scale -- see ell_min_from_mpc_h.
-    # Confirmed against real Disco/CosmoGrid Cl-ratio diagnostics (2026-07-13): the
-    # simulation-resolution deficit sets in at the SAME fixed comoving scale (~ the
-    # L_box/N_pm PM grid cell) in every shell, but that fixed length maps to a
-    # DIFFERENT ell depending on the shell's own comoving distance -- shell 3
-    # (z~0.05) visibly deviates starting around ell~150-300; shell 65 (z~2.85)
-    # shows NO deviation at all out to ell=3000, because the same 3 Mpc/h scale
-    # only becomes resolvable well beyond lmax that far away. A SINGLE global ell
-    # cannot reproduce this (tried and reverted: median-z reference gave ell_min
-    # ~2939, correcting almost nothing anywhere; nearest-shell reference gave
-    # ell_min~36, correcting almost everything everywhere) -- per-shell conversion
-    # is the physically correct one.
-    if args.ell_min_mpc > 0:
-        z_shells = shell_redshifts(run, n_shells, args.info_npz)
-        cosmo_vec = load_cosmo(run)
-        ell_min_per_shell = ell_min_from_mpc_h(z_shells, cosmo_vec, args.ell_min_mpc)
-        n_uncorrected = int(np.sum(ell_min_per_shell >= lmax))
-        print(f"[apply] --ell-min-mpc {args.ell_min_mpc:g} -> per-shell ell_min "
-              f"range [{ell_min_per_shell.min()}, {ell_min_per_shell.max()}] across "
-              f"{n_shells} shells (z={z_shells.min():.3f}-{z_shells.max():.3f})"
-              + (f"  [{n_uncorrected} distant shells get NO correction: even ell=lmax="
-                 f"{lmax} resolves scales > {args.ell_min_mpc:g} Mpc/h there -- "
-                 f"consistent with those shells showing no measurable Disco/CosmoGrid "
-                 f"deviation within lmax]" if n_uncorrected else ""), flush=True)
-    else:
-        ell_min_per_shell = np.full(n_shells, args.ell_min, dtype=np.int64)
-
-    if args.poisson:
-        # Poisson-resample every shell in ONE call, dispatched across a process pool
-        # (poisson_resample.resample_all_shells_parallel) -- NOT a sequential
-        # per-shell Python loop. Measured: a sequential loop gets the SAME ~2h
-        # wall-clock whether the node has 64 or 288 cpus allocated, because a single
-        # shell's own OMP-threaded SHT calls saturate well before that many cores;
-        # real speedup needs independent shells running CONCURRENTLY. Ignores
-        # --no-clip/--no-debias-mean/--wiener/--stochastic (Poisson replaces all of
-        # them -- see poisson_resample.py's docstring for why clipping/debiasing
-        # can't give Cl + positivity + the one-point pdf at once).
-        import sys as _sys
-        _sys.path.insert(0, str(Path(__file__).parent))
-        import poisson_resample
-        corrected = poisson_resample.resample_all_shells_parallel(
-            run, alm_fname("low", lmax, log_density), lmax, args.nside, T, R,
-            ell_min_per_shell, n_avg=args.poisson_n_avg, n_iter=args.poisson_n_iter,
-            damp=args.poisson_damp, seed=args.seed, n_workers=args.poisson_workers)
-        out = Path(args.out); out.parent.mkdir(parents=True, exist_ok=True)
-        info_npz = run / args.info_npz
-        extra = {}
-        if info_npz.exists():
-            d = np.load(info_npz, allow_pickle=True)
-            extra = {k: d[k] for k in d.files if k != "shells"}
-        np.savez(out, shells=corrected, **extra)
-        print(f"[apply] saved corrected+Poisson shells to {out}", flush=True)
-        if args.plot_shells:
-            _plot_cl(run, corrected, lmax, args.plot_shells, Path(args.plot_dir or out.parent))
-        return
-
-    for i in range(n_shells):
-        Ti = T[min(i, T.shape[0] - 1)].copy()      # per-shell transfer
-        Ri = R[min(i, R.shape[0] - 1)].copy() if R is not None else np.ones_like(Ti)
-        if args.wiener and not args.stochastic:
-            Ti = Ti * Ri                             # Wiener/MMSE gain r*T
-        ell_min_i = int(ell_min_per_shell[i])
-        if ell_min_i > 0:                            # leave large scales untouched
-            Ti[:ell_min_i] = 1.0
-            Ri[:ell_min_i] = 1.0
-        v = low[i].astype(np.float64)
-        if args.stochastic:
-            gain = Ti * Ri                            # phase-correlated part only
-            tvec = (gain - 1.0)[ell]
-            alm_signal = v[:N_alm] * tvec + 1j * v[N_alm:] * tvec
-            signal_map = hp.alm2map(alm_signal, nside=args.nside, lmax=lmax)
-            # Missing power T^2*(1-r^2) at ell where r<1: DISCO's own alm carries
-            # no usable phase info there, so fill with a FRESH random realization
-            # (uncorrelated with low_alm) instead of amplifying DISCO's noise.
-            cl_low_i = smooth_cl(hp.alm2cl(_alm(v, N_alm), lmax=lmax), args.smooth_window)
-            cl_noise = np.clip(Ti ** 2 - gain ** 2, 0.0, None) * cl_low_i
-            # healpy.synalm draws from numpy's global RNG (no seed kwarg) -> seed
-            # it explicitly per shell so --seed makes the whole run reproducible.
-            np.random.seed(int(rng.integers(0, 2**31 - 1)))
-            alm_noise = hp.synalm(cl_noise, lmax=lmax, new=True)
-            noise_map = hp.alm2map(alm_noise, nside=args.nside, lmax=lmax)
-            delta_map = signal_map + noise_map
-        else:
-            tvec = (Ti - 1.0)[ell]                    # per-mode DELTA scale (N_alm,)
-            alm_delta = (v[:N_alm] * tvec + 1j * v[N_alm:] * tvec)
-            delta_map = hp.alm2map(alm_delta, nside=args.nside, lmax=lmax)
-        rho_native = np.asarray(low_full[i], dtype=np.float64)
-        if log_density:
-            # Correction was fit/applied in log1p(rho) space, so reconstruct via
-            # expm1: ALWAYS >= -1 (i.e. rho >= 0 up to fp noise) for ANY delta_map,
-            # no matter how large the T boost -- unlike adding delta_map straight
-            # to rho, which routinely drives ~half a faint shell's pixels below 0
-            # and, once floored at 0, biases the WHOLE shell's Cl high (measured on
-            # shell 3: pre-clip corrected/high ~1.00 at ell 1-300, post-clip ~1.2 --
-            # the floor itself was the source of the "small-scale overshoot").
-            s_native = np.log1p(rho_native)
-            s_corrected = s_native + delta_map
-            m_unclipped = np.expm1(s_corrected)
-        else:
-            # Density is a COUNT: it cannot be negative. Adding a linear harmonic
-            # residual (Gaussian-like, can undershoot) to a faint shell -- most of
-            # whose pixels are already empty (density 0) -- drives ~half the pixels
-            # below 0, i.e. delta < -1, which is unphysical and makes log10(1.01+delta)
-            # NaN when plotting. Floor at 0. NOTE: on faint/shot-noise shells this floor
-            # fires for a large fraction of pixels and BIASES Cl across all ell (see
-            # --log-density above, which avoids this by construction). --stochastic
-            # reduces (but doesn't eliminate) how often this fires by not riding the
-            # injected power on DISCO's own noise.
-            m_unclipped = rho_native + delta_map
-
-        if args.poisson:
-            # Ri already has ell<ell_min forced to 1.0 above when --ell-min(-mpc) is
-            # set, so resample_shell's win=R trusts DISCO's phases fully there (no
-            # random-noise replacement) -- but note the AMPLITUDE at those ell still
-            # gets recalibrated to shot-deconvolved Cl_high (resample_shell always
-            # retargets Cl_high everywhere), not held byte-for-byte equal to DISCO's
-            # own realization. In practice this is a small effect where T~1 was
-            # already true (the whole premise of a small-scale-only correction).
-            cl_h_i = hp.alm2cl(_alm(np.asarray(high_alms[i]), N_alm), lmax=lmax)
-            corrected[i] = poisson_resample.resample_shell(
-                rho_native, cl_h_i, m_unclipped, Ri, lmax, args.nside,
-                pois_mu, pois_w, rng, n_avg=args.poisson_n_avg,
-                n_iter=args.poisson_n_iter, damp=args.poisson_damp,
-                verbose=(i % 10 == 0))
-            if i % 10 == 0:
-                print(f"  corrected+Poisson shell {i}/{n_shells}", flush=True)
-            continue
-
-        neg = np.mean(m_unclipped < 0.0)
-        # Positivity vs Cl: measured on cosmo_000122 shell 3 (nbar=0.104, 59% of
-        # pixels want to go negative), corrected/high Cl by ell band and mean ratio:
-        #   no-clip   : mean 0.998 | 1.00 (l50-150) 0.99 (l400-800) 0.93 (l800-1500)
-        #   clip@0    : mean 1.215 | 1.17            0.88            0.74
-        #   debias    : mean 0.998 | 1.04            0.77            0.61
-        # i.e. ANY pixel-wise positivity enforcement destroys small-scale power. A
-        # Gaussian field with nbar~0.1 and enough small-scale power to match
-        # CosmoGrid MUST go negative; CosmoGrid's own shell is not Gaussian, it's a
-        # sparse COUNT field (91.8% zeros). Matching Cl AND positivity AND the
-        # one-point pdf requires re-discretizing (lognormal intensity + Poisson
-        # resample), not clipping. --no-clip therefore yields the Cl-optimal
-        # OVERDENSITY field (rho can be < 0; not a count map) and is the right
-        # output for Cl / weak-lensing work.
-        if args.no_clip:
-            m = m_unclipped
-        elif args.no_debias_mean:
-            m = np.clip(m_unclipped, 0.0, None)
-        else:
-            m = _debias_mean(m_unclipped)
-        corrected[i] = m.astype(np.float32)
-        if i % 10 == 0 or neg > 0.02:
-            note = ""
-            if neg > 0.02:
-                note = (f"  [{neg:.1%} pixels < 0 -> shot-noise shell; "
-                        + ("KEPT (--no-clip, Cl-optimal)]" if args.no_clip
-                           else "floored at 0, suppresses small-scale Cl]"))
-            print(f"  corrected shell {i}/{n_shells}{note}", flush=True)
-
-    out = Path(args.out); out.parent.mkdir(parents=True, exist_ok=True)
-    info_npz = run / args.info_npz              # metadata (shell_info) from high npz
-    extra = {}
-    if info_npz.exists():
-        d = np.load(info_npz, allow_pickle=True)
-        extra = {k: d[k] for k in d.files if k != "shells"}
-    np.savez(out, shells=corrected, **extra)
-    print(f"[apply] saved corrected shells to {out}", flush=True)
-
-    if args.plot_shells:
-        _plot_cl(run, corrected, lmax, args.plot_shells, Path(args.plot_dir or out.parent))
-
-
-def _plot_cl(run, corrected, lmax, shells, out_dir):
-    """Cl-ratio plots: low/high and corrected/high (low,high from preprocessed alms)."""
-    import matplotlib
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
-    N_alm = (lmax + 1) * (lmax + 2) // 2
-    low = np.load(run / f"low_alms_lmax{lmax}.npy", mmap_mode="r")
-    high = np.load(run / f"high_alms_lmax{lmax}.npy", mmap_mode="r")
-    out_dir.mkdir(parents=True, exist_ok=True)
-    ells = np.arange(lmax + 1)
-
-    def cl_alm(v):
-        a = (v[:N_alm] + 1j * v[N_alm:]).astype(np.complex128)
-        return hp.alm2cl(a, lmax=lmax)
-
-    for s in shells:
-        if s >= corrected.shape[0]:
-            continue
-        # All three as DENSITY Cl for consistency: low/high come from the density
-        # alms (map2alm of the density map), so the corrected map's Cl must also be
-        # density (NOT overdensity, which differs by mean^2 and caused a ~mean^2
-        # offset in the ratio plot).
-        cl_l = cl_alm(np.asarray(low[s])); cl_h = cl_alm(np.asarray(high[s]))
-        cl_c = hp.anafast(corrected[s].astype(np.float64), lmax=lmax)
-        fig, ax = plt.subplots(2, 1, figsize=(9, 7), sharex=True)
-        ax[0].loglog(ells, cl_l, label="DISCO (low)", color="seagreen")
-        ax[0].loglog(ells, cl_c, label="corrected", color="steelblue")
-        ax[0].loglog(ells, cl_h, "--", label="CosmoGrid (high)", color="tomato")
-        ax[0].set_ylabel(r"$C_\ell$"); ax[0].legend(); ax[0].set_title(f"shell {s}")
-        with np.errstate(divide="ignore", invalid="ignore"):
-            ax[1].semilogx(ells, cl_l / cl_h, ":", color="seagreen", label="low/high")
-            ax[1].semilogx(ells, cl_c / cl_h, color="steelblue", label="corrected/high")
-        ax[1].axhline(1, color="k", lw=0.8); ax[1].set_ylim(0.5, 1.5)
-        ax[1].set_xlabel(r"$\ell$"); ax[1].set_ylabel("ratio"); ax[1].legend()
-        fig.tight_layout(); fig.savefig(out_dir / f"cl_shell{s:03d}.png", dpi=150); plt.close(fig)
-        print(f"  [plot] {out_dir / f'cl_shell{s:03d}.png'}", flush=True)
-
-
 if __name__ == "__main__":
     p = argparse.ArgumentParser()
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -802,7 +720,16 @@ if __name__ == "__main__":
     pf = sub.add_parser("fit")
     pf.add_argument("--data-dir", required=True)
     pf.add_argument("--lmax", type=int, default=3000)
-    pf.add_argument("--test-cosmo", default="")
+    pf.add_argument("--test-cosmos", nargs="*", default=None,
+                    help="Explicit held-out cosmology name(s). If omitted, "
+                         "auto-selected via --val-frac/--val-seed (whole-cosmology "
+                         "split, same convention as unet_flow_jbucko's "
+                         "split_by_cosmo) so validation covers MULTIPLE "
+                         "cosmologies, not just one.")
+    pf.add_argument("--val-frac", type=float, default=0.15,
+                    help="Fraction of cosmologies to hold out when --test-cosmos "
+                         "is not given explicitly (same default as jbucko).")
+    pf.add_argument("--val-seed", type=int, default=0)
     pf.add_argument("--include-test", action="store_true",
                     help="SANITY CHECK: include the test cosmology in the fit (expect "
                          "corrected/high ~ 1 by construction). Default is leave-one-out.")
@@ -812,16 +739,30 @@ if __name__ == "__main__":
                          "which is always >= -1 (i.e. rho >= 0) for any correction size, "
                          "eliminating the clip-at-0 bias that inflates Cl on shot-noise "
                          "shells with plain density-space T (measured: post-clip "
-                         "corrected/high ~1.2 vs ~1.0 pre-clip on a shell where 59% of "
+                         "corrected/high ~1.2 vs ~1.0 pre-clip on a shell where 59%% of "
                          "pixels get clipped). Saved into the output transfer.npz so "
                          "`apply` auto-detects it -- no matching flag needed there.")
+    pf.add_argument("--gather-workers", type=int, default=1,
+                    help="Process-pool workers for gathering per-run Cls (the "
+                         "expensive alm2cl/IO part). Independent runs, small "
+                         "per-shell arrays -- safe to parallelize (unlike "
+                         "poisson_resample.py's per-shell full-map path, which "
+                         "was measured to be memory-bandwidth-bound). Default 1 "
+                         "(sequential). Remember to also raise OMP_NUM_THREADS "
+                         "for this stage -- it is NOT the file-wide pipeline "
+                         "default of 8.")
     pf.add_argument("--out", required=True)
     pf.set_defaults(func=fit)
 
     pt = sub.add_parser("train", help="Train an MLP emulator T=f(l,z,cosmo,Cl_low).")
     pt.add_argument("--data-dir", required=True)
     pt.add_argument("--lmax", type=int, default=3000)
-    pt.add_argument("--test-cosmo", default="")
+    pt.add_argument("--test-cosmos", nargs="*", default=None,
+                    help="Same as `fit --test-cosmos` -- explicit held-out "
+                         "cosmology name(s), or auto-selected via "
+                         "--val-frac/--val-seed if omitted.")
+    pt.add_argument("--val-frac", type=float, default=0.15)
+    pt.add_argument("--val-seed", type=int, default=0)
     pt.add_argument("--include-test", action="store_true",
                     help="SANITY CHECK: train on the test cosmology too (default LOO).")
     pt.add_argument("--log-density", action="store_true",
@@ -841,6 +782,9 @@ if __name__ == "__main__":
     pt.add_argument("--max-iter", type=int, default=200)
     pt.add_argument("--sample-frac", type=float, default=1.0,
                     help="Randomly keep this fraction of ell per shell (speed).")
+    pt.add_argument("--gather-workers", type=int, default=1,
+                    help="Same as `fit --gather-workers` -- process-pool workers "
+                         "for the per-run Cl-gathering loop. Default 1 (sequential).")
     pt.add_argument("--out", required=True, help="Output emulator .pkl (joblib).")
     pt.set_defaults(func=train)
 
@@ -851,102 +795,6 @@ if __name__ == "__main__":
     pe.add_argument("--info-npz", default="compressed_shells.npz")
     pe.add_argument("--out", required=True, help="transfer.npz (same schema as fit).")
     pe.set_defaults(func=emulate)
-
-    pa = sub.add_parser("apply")
-    pa.add_argument("--transfer", required=True)
-    pa.add_argument("--run-dir", required=True,
-                    help="Test run dir with low_alms_lmax{lmax}.npy (+ high_alms for plots).")
-    pa.add_argument("--info-npz", default="compressed_shells.npz",
-                    help="npz to copy non-shell metadata (shell_info) from.")
-    pa.add_argument("--nside", type=int, default=2048)
-    pa.add_argument("--wiener", action="store_true",
-                     help="Apply the Wiener gain r*T instead of full T. OFF by "
-                          "default: it SUBTRACTS power where r is small (faint "
-                          "shells / high ell), pushing Cl below even DISCO and the "
-                          "map lighter than DISCO. Full T (default) matches Cl_high. "
-                          "Only meaningful if you deliberately want to suppress the "
-                          "shot-noise-dominated high-ell modes at the cost of Cl.")
-    pa.add_argument("--stochastic", action="store_true",
-                     help="Constrained-realization gain instead of plain full T: "
-                          "scale the phase-correlated part by r*T and fill the "
-                          "remaining power T^2*(1-r^2) with an independent random "
-                          "realization instead of amplifying DISCO's own noise. "
-                          "Fixes the real-space overshoot (excess std/max vs "
-                          "CosmoGrid in pixel histograms, noisy corrected/high Cl "
-                          "ratio) seen with plain full T, while still matching "
-                          "Cl_high exactly in expectation. Needs R (always saved "
-                          "by `fit`/`train`). Recommended default going forward.")
-    pa.add_argument("--seed", type=int, default=0,
-                    help="RNG seed for the --stochastic noise realization "
-                         "(per-shell seeds derived from it; reproducible).")
-    pa.add_argument("--smooth-window", type=int, default=21,
-                    help="Boxcar window (log10-Cl space) for smoothing this run's "
-                         "own Cl_low before using it as the --stochastic noise-"
-                         "power target (avoids injecting per-mode sample-variance "
-                         "noise on top of the random realization). 1 disables.")
-    pa.add_argument("--ell-min", type=int, default=0,
-                    help="Leave ell<ell_min untouched (T=1) — correct only small scales. "
-                         "Overridden by --ell-min-mpc when that is > 0.")
-    pa.add_argument("--ell-min-mpc", type=float, default=0.0,
-                    help="Leave comoving scales LARGER than this (Mpc/h) untouched -- "
-                         "i.e. only correct scales smaller than this physical size. "
-                         "Converted to a PER-SHELL ell_min via each shell's own "
-                         "redshift + the test cosmology's params.yml (see "
-                         "ell_min_from_mpc_h), since a fixed ell corresponds to a "
-                         "different physical scale at every shell. 0 disables "
-                         "(falls back to the scalar --ell-min).")
-    pa.add_argument("--no-clip", action="store_true",
-                    help="Do NOT enforce rho>=0: emit the raw corrected field "
-                         "rho_native + delta (an OVERDENSITY field, can go negative "
-                         "on faint shot-noise shells). This is the Cl-OPTIMAL output "
-                         "-- measured on shell 3: mean ratio 0.998 and corrected/high "
-                         "= 1.00/0.99/0.93 at ell 50-150/400-800/800-1500, vs "
-                         "1.215 and 1.17/0.88/0.74 with the default clip. Use for "
-                         "Cl / weak-lensing work. It is NOT a valid count map; for "
-                         "that you need lognormal-intensity + Poisson resampling "
-                         "(clipping cannot give Cl + positivity + the right pdf).")
-    pa.add_argument("--no-debias-mean", action="store_true",
-                    help="Skip the post-clip mean debiasing (see _debias_mean). ON by "
-                         "default: flooring negative pixels at 0 always raises the "
-                         "mean (measured up to +25% on the faintest shells even with "
-                         "--log-density). The debias applies an additive shift-then-"
-                         "reclip that restores the mean to what the UNCLIPPED "
-                         "reconstruction gave (which tracks the true mean much more "
-                         "closely) while touching Cl far less than a multiplicative "
-                         "rescale would (tested: rescale distorts Cl at ALL ell by "
-                         "~scale^2). Pass this flag to get the old raw-clip behavior.")
-    pa.add_argument("--plot-shells", type=int, nargs="*", default=[3, 30, 50])
-    pa.add_argument("--plot-dir", default="")
-    pa.add_argument("--poisson", action="store_true",
-                    help="Poisson-resample every shell into valid non-negative integer "
-                         "counts RIGHT AFTER the transfer-function correction (see "
-                         "poisson_resample.py resample_all_shells_parallel) -- no "
-                         "separate stage, no large intermediate --no-clip npz written "
-                         "to disk. Ignores --no-clip/--no-debias-mean/--wiener/"
-                         "--stochastic (Poisson replaces all of them). Shells are "
-                         "processed in PARALLEL across a process pool (see "
-                         "--poisson-workers), not sequentially.")
-    pa.add_argument("--poisson-n-avg", type=int, default=4,
-                    help="See poisson_resample.py --n-avg.")
-    pa.add_argument("--poisson-n-iter", type=int, default=5,
-                    help="See poisson_resample.py --n-iter.")
-    pa.add_argument("--poisson-damp", type=float, default=0.4,
-                    help="See poisson_resample.py --damp.")
-    pa.add_argument("--poisson-workers", type=int, default=1,
-                    help="Worker PROCESSES for --poisson, one independent shell per "
-                         "task. Default 1 (plain sequential, trusted): measured 23 "
-                         "workers x 12 OMP threads each to be dramatically SLOWER "
-                         "than sequential (memory-bandwidth contention from many "
-                         "concurrent large-array SHTs at nside=2048), and OMP "
-                         "threading alone saturates around 128 threads (128->256 "
-                         "measured zero further speedup on one shell) -- so more "
-                         "cpus does not automatically mean faster here. Shells with "
-                         "ell_min>=lmax (T==1 everywhere, e.g. distant shells under "
-                         "--ell-min-mpc) are ALWAYS skipped for free regardless of "
-                         "this setting (exact no-op, not resampled). Only raise "
-                         "this after validating a specific worker count.")
-    pa.add_argument("--out", required=True)
-    pa.set_defaults(func=apply)
 
     args = p.parse_args()
     args.func(args)

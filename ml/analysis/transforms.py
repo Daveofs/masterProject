@@ -11,8 +11,8 @@ One canonical formula, used two ways:
 eps = 0.5/mean is a small nudge above -1 so log1p(-1)=-inf is never hit by a
 zero-count pixel, EXCEPT for very sparse fields (mean << 1, e.g. shell 0-10 of the
 lightcone) where eps blows up and the floor clips away real structure -- this is a
-property of the data/transform, not a bug (see unet_flow_jbucko/infer_full_sky.py's
-docstring for the full diagnosis).
+property of the data/transform, not a bug (see unet_flow_jbucko/apply_flow.py's
+full-sky section docstring for the full diagnosis).
 """
 from __future__ import annotations
 import numpy as np

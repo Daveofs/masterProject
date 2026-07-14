@@ -34,12 +34,20 @@ import matplotlib.pyplot as plt
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from flow_model import FlowUNet, sample_ode              # noqa: E402
 from dataset import (PatchDataset, split_by_cosmo, raw_to_log1p_delta_pair,  # noqa: E402
-                     cosmo_z_vector)
+                     cosmo_z_vector, COSMO_FIELDS)
 
+# every plotting/tiling/full-sky-power routine comes from ../analysis -- nothing
+# reimplemented here (this is the ONLY diagnostics script for the flow model now;
+# infer_full_sky.py was merged in and deleted, see the full-sky section below).
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 from analysis.plotting import (plot_example_patch_grid, plot_pctile_band_ratio,  # noqa: E402
-                               plot_histogram_grid, plot_moments_vs_shell)
+                               plot_histogram_grid, plot_moments_vs_shell,
+                               plot_cl_shell, plot_cl_ratio_pctile_grid,
+                               plot_kappa_cl_multi_cosmo, plot_kappa_moments_scatter)
 from analysis.moments import moments                      # noqa: E402
+from analysis.patch_tiling import auto_nside_centers, reconstruct_shell  # noqa: E402
+from analysis.full_sky import od_cl, zbin_shell_samples    # noqa: E402
+from analysis import weak_lensing                          # noqa: E402
 
 
 def stack_cosmo_z(ds: PatchDataset, dev, dtype) -> torch.Tensor:
@@ -93,6 +101,73 @@ def main():
                         "one-point PDF (esp. skew/kurtosis of a sparse count field) "
                         "is far noisier per-patch than the power ratio, so this "
                         "needs many patches, unlike the single visual example patch")
+    # --- optional full-sky reconstruction + REAL angular Cl (skipped unless
+    # --data-root is given): the power-ratio panels above are a flat 2D-FFT on one
+    # --patch-dir patch, bounded by that patch's own Nyquist wavenumber -- nowhere
+    # near the full ell~3000 range a real spherical-harmonic transform covers. This
+    # tiles the WHOLE sphere (analysis.patch_tiling) and runs healpy.anafast
+    # (analysis.full_sky.od_cl) to see the real high-ell behavior. ---
+    p.add_argument("--data-root", default=None,
+                   help="prepare_maps.py output (full-sky low/high shell stacks). "
+                        "If given, ALSO reconstructs the whole sphere and computes "
+                        "the real full-sky Cl -> cl_shell*.png, example_full_sky.png, "
+                        "fullsky_moments_vs_shell.png, fullsky_example_histograms.png")
+    p.add_argument("--cosmo", default=None,
+                   help="cosmology for the full-sky reconstruction; default: first "
+                        "held-out (val) cosmology")
+    p.add_argument("--run", default="run_0")
+    p.add_argument("--shell-indices", type=int, nargs="*", default=[0, 34, 68],
+                   help="shells to render as individual cl_shell*.png (2-panel "
+                        "Cl+ratio); pass with no values to skip these")
+    p.add_argument("--nside-centers", type=int, default=None,
+                   help="default: auto-scaled from the data's nside so patch overlap "
+                        "is consistent (see analysis.patch_tiling.auto_nside_centers)")
+    p.add_argument("--fullsky-patch-size", type=int, default=256,
+                   help="gnomonic tile size for full-sky reconstruction -- should "
+                        "match the patch size this checkpoint was trained on")
+    p.add_argument("--lmax", type=int, default=3000)
+    # --- example_full_sky.png: Cl-ratio-by-redshift-bin pctile grid (rows = held-out
+    # cosmologies, columns = redshift/shell bins) -- no images (see example_patches.png
+    # for those), just the aggregate two-point check. Each cell needs
+    # --n-shells-per-zbin full-sky reconstructions, so rows*cols*shells-per-zbin is
+    # the real cost knob -- these defaults are deliberately small; widen once the
+    # per-shell cost on this setup is known (same philosophy as --shell-indices above). ---
+    p.add_argument("--zbin-start", type=int, default=9,
+                   help="first shell in the Cl-ratio-by-redshift-bin grid -- lower "
+                        "shells are typically too sparse for a meaningful Cl ratio "
+                        "(see analysis.transforms's eps-clipping note)")
+    p.add_argument("--n-zbins", type=int, default=3,
+                   help="number of redshift/shell-index bins (columns) spanning "
+                        "[--zbin-start, last shell]")
+    p.add_argument("--n-shells-per-zbin", type=int, default=5,
+                   help="shells sampled (evenly spaced) per bin, each fully "
+                        "reconstructed+Cl'd -- more = smoother percentile band, more compute")
+    p.add_argument("--max-cosmologies", type=int, default=3,
+                   help="held-out cosmologies to include as rows (each row costs "
+                        "--n-zbins * --n-shells-per-zbin full-sky reconstructions)")
+    # --- weak-lensing kappa map diagnostic (analysis.weak_lensing): reduces the
+    # WHOLE usable lightcone [--kappa-zi, --kappa-zf] of low/corrected/high into one
+    # kappa map each via UFalcon, for EVERY held-out cosmology (not capped by
+    # --max-cosmologies -- one kappa map per cosmology is comparatively cheap once
+    # its shells exist, but "corrected" needs every usable shell reconstructed via
+    # full-sky tiling, not just a --n-shells-per-zbin sample, so this is still the
+    # most expensive optional section here). Off by default. ---
+    p.add_argument("--kappa", action="store_true",
+                   help="build weak-lensing kappa maps (low/corrected/high) for "
+                        "EVERY held-out cosmology and compute their Cl + moments. "
+                        "Requires --data-root. Expensive: see module docstring.")
+    p.add_argument("--kappa-nz",
+                   default="/capstor/scratch/cscs/damrein/redshift_distribution/desy3_nz_metacal_bin1.txt",
+                   help="n(z) redshift distribution passed to UFalcon's "
+                        "construct_kappa_map -- named explicitly in the kappa "
+                        "plots' suptitle so the choice is never ambiguous")
+    p.add_argument("--kappa-nside", type=int, default=128,
+                   help="output kappa map nside (independent of --fullsky-patch-size)")
+    p.add_argument("--kappa-zi", type=float, default=0.0)
+    p.add_argument("--kappa-zf", type=float, default=1.05)
+    p.add_argument("--kappa-lmax", type=int, default=350,
+                   help="angular power spectrum lmax for the kappa maps "
+                        "(--kappa-nside supports up to ~3*nside-1)")
     args = p.parse_args()
 
     dev = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -116,9 +191,10 @@ def main():
     rng = np.random.default_rng(args.seed)
 
     # one held-out patch per requested shell, via the patch dataset's own metadata
-    # (shell_idx field) -- for the example_patches.png rows specifically.
-    meta_shell_idx = np.load(Path(args.patch_dir) / "metadata.npy")["shell_idx"]
-    val_shell_idx = meta_shell_idx[val_idx]
+    # (shell_idx field) -- for the example_patches.png rows specifically. Also
+    # reused below by the full-sky section (cosmo params + shell redshift lookup).
+    meta = np.load(Path(args.patch_dir) / "metadata.npy")
+    val_shell_idx = meta["shell_idx"][val_idx]
     example_pick, example_shells = [], []
     for s in args.example_shells:
         cand = val_idx[val_shell_idx == s]
@@ -213,6 +289,7 @@ def main():
                             corrected_label="flow-corrected",
                             suptitle="held-out test patches (log1p overdensity) + "
                                      "per-patch power ratio")
+    
 
     # --- per-shell moments + histograms (raw counts) -- pools ALL held-out patches of
     # each --example-shells shell (capped by --n-stat-patches), not just the single
@@ -247,6 +324,201 @@ def main():
     plot_histogram_grid(
         hist_rows, out_dir / "example_histograms.png", corrected_label="flow-corrected",
         suptitle=f"held-out patches, raw pixel-count histogram per shell ({n_stat} patches/shell)")
+
+    # ============= optional: full-sky reconstruction + REAL angular Cl =============
+    # Skipped entirely unless --data-root is given. Tiles the WHOLE sphere (not one
+    # flat patch) via analysis.patch_tiling and runs the real spherical-harmonic
+    # transform (analysis.full_sky.od_cl) -- the genuine "how does it behave at very
+    # high ell" answer the flat 2D-FFT power ratio above structurally cannot give
+    # (bounded by that patch's own Nyquist wavenumber).
+    if args.data_root:
+        nside = int(np.unique(meta["nside_source"])[0])
+        if len(np.unique(meta["nside_source"])) > 1:
+            raise RuntimeError(f"--patch-dir mixes multiple source nsides: {np.unique(meta['nside_source'])}")
+        nside_centers = args.nside_centers or auto_nside_centers(nside, args.fullsky_patch_size)
+        lmax = min(args.lmax, 3 * nside - 1)
+        ells = np.arange(lmax + 1)
+
+        def lookup_cosmo_z_fs(cosmo_name: str, shell_idx: int) -> np.ndarray:
+            """(8,) cosmo_z vector for one full-sky shell/cosmology -- cosmo params
+            constant per cosmology, redshift constant per shell_idx, both looked up
+            from the patch dataset's own metadata (authoritative, same source
+            train_flow.py used)."""
+            rows_cosmo = meta[meta["cosmo"] == cosmo_name]
+            if len(rows_cosmo) == 0:
+                raise ValueError(f"lookup_cosmo_z_fs: no patch-dir metadata row for "
+                                 f"cosmology {cosmo_name!r}")
+            cosmo_vec = np.array([[rows_cosmo[0][f] for f in COSMO_FIELDS]], dtype=np.float32)
+            rows_shell = meta[meta["shell_idx"] == shell_idx]
+            if len(rows_shell) == 0:
+                raise ValueError(f"lookup_cosmo_z_fs: no patch-dir metadata row for "
+                                 f"shell_idx={shell_idx} (any cosmology)")
+            z = np.array([0.5 * (rows_shell[0]["lower_z"] + rows_shell[0]["upper_z"])], dtype=np.float32)
+            return cosmo_z_vector(cosmo_vec, z)[0]
+
+        def make_predict_batch_fs(cosmo_z_vec: np.ndarray | None):
+            cosmo_z_t = None if cosmo_z_vec is None else torch.from_numpy(cosmo_z_vec).to(dev)
+
+            def predict_batch(low_batch: np.ndarray) -> np.ndarray:
+                low_t = torch.from_numpy(low_batch).unsqueeze(1).to(dev)
+                low_mean = low_t.mean(dim=(2, 3), keepdim=True)
+                eps = 0.5 / low_mean
+                low_log = torch.log1p(torch.maximum(low_t / low_mean - 1.0, -1.0 + eps))
+                cz = (None if cosmo_z_t is None else
+                     cosmo_z_t.unsqueeze(0).expand(low_t.shape[0], -1).to(low_log.dtype))
+                with torch.no_grad():
+                    pred_log = sample_ode(net, low_log, n_steps=args.steps, cosmo_z=cz)
+                pred_delta = torch.expm1(pred_log)
+                return ((1.0 + pred_delta) * low_mean).squeeze(1).cpu().numpy()
+            return predict_batch
+
+        def reconstruct(low_shell, cosmo_name, shell_idx):
+            cosmo_z_vec = lookup_cosmo_z_fs(cosmo_name, shell_idx) if use_cosmo_cond else None
+            predict_batch = make_predict_batch_fs(cosmo_z_vec)
+            return reconstruct_shell(predict_batch, low_shell, nside_centers,
+                                     args.fullsky_patch_size, args.eval_batch)
+
+        # --- single-cosmology diagnostics: standalone cl_shell*.png + full-sky
+        # moments/histograms (--cosmo, default: first held-out cosmology) ---
+        fs_cosmo = args.cosmo
+        if fs_cosmo is None:
+            fs_cosmo = val_cosmos[0]
+            print(f"[eval] --cosmo not given for full-sky reconstruction, using "
+                  f"held-out cosmology {fs_cosmo} (full held-out set: {val_cosmos})", flush=True)
+
+        run_dir = Path(args.data_root) / fs_cosmo / args.run
+        low_full_all = np.load(run_dir / f"low_shells_nside={nside}.npy", mmap_mode="r")
+        high_full_all = np.load(run_dir / f"high_shells_nside={nside}.npy", mmap_mode="r")
+        print(f"[eval] full-sky: {fs_cosmo}/{args.run} nside={nside} "
+              f"nside_centers={nside_centers} ({12*nside_centers**2:,} centers) "
+              f"patch_size={args.fullsky_patch_size}", flush=True)
+
+        for s in args.shell_indices:
+            low_shell = np.asarray(low_full_all[s], np.float32)
+            high_shell = np.asarray(high_full_all[s], np.float32)
+            print(f"[eval] full-sky shell {s}: tiling + predicting...", flush=True)
+            pred_filled = reconstruct(low_shell, fs_cosmo, s)
+            cl_lo, cl_c, cl_hi = od_cl(low_shell, lmax), od_cl(pred_filled, lmax), od_cl(high_shell, lmax)
+            plot_cl_shell(s, ells, cl_lo, cl_c, cl_hi, out_dir / f"cl_shell{s:03d}.png")
+
+        if example_shells:
+            fs_mom_low, fs_mom_pred, fs_mom_high, fs_hist_rows = [], [], [], []
+            for s in example_shells:
+                low_shell = np.asarray(low_full_all[s], np.float32)
+                high_shell = np.asarray(high_full_all[s], np.float32)
+                print(f"[eval] full-sky shell {s}: tiling + predicting (moments/hist)...", flush=True)
+                pred_filled = reconstruct(low_shell, fs_cosmo, s)
+                fs_mom_low.append(moments(low_shell)); fs_mom_high.append(moments(high_shell))
+                fs_mom_pred.append(moments(pred_filled))
+                fs_hist_rows.append((f"shell {s}", low_shell.ravel(), pred_filled.ravel(), high_shell.ravel()))
+            plot_moments_vs_shell(
+                example_shells, {"low": fs_mom_low, "high (true)": fs_mom_high, "flow pred": fs_mom_pred},
+                out_dir / "fullsky_moments_vs_shell.png",
+                suptitle=f"moments vs. shell depth -- full-sky reconstruction (raw counts)\n"
+                        f"{fs_cosmo}/{args.run}")
+            plot_histogram_grid(
+                fs_hist_rows, out_dir / "fullsky_example_histograms.png", corrected_label="flow-corrected",
+                suptitle=f"full-sky raw pixel-count histogram per shell\n{fs_cosmo}/{args.run}")
+
+        # --- example_full_sky.png: Cl-ratio-by-redshift-bin pctile grid. One row per
+        # held-out cosmology (up to --max-cosmologies), one column per redshift/shell
+        # bin (analysis.full_sky.zbin_shell_samples) -- percentile band across
+        # --n-shells-per-zbin sampled shells per bin. No images (already in
+        # example_patches.png); this is purely the aggregate two-point check. ---
+        n_shells_total = low_full_all.shape[0]
+        zbins = zbin_shell_samples(n_shells_total, args.zbin_start, args.n_zbins,
+                                   args.n_shells_per_zbin)
+        grid_cosmos = list(val_cosmos[:args.max_cosmologies])
+        print(f"[eval] full-sky: Cl-ratio-by-redshift-bin grid for {len(grid_cosmos)} "
+              f"cosmologies {grid_cosmos} x {len(zbins)} bins {[b[0] for b in zbins]}", flush=True)
+
+        grid = []
+        for c in grid_cosmos:
+            c_run_dir = Path(args.data_root) / c / args.run
+            c_low_all = np.load(c_run_dir / f"low_shells_nside={nside}.npy", mmap_mode="r")
+            c_high_all = np.load(c_run_dir / f"high_shells_nside={nside}.npy", mmap_mode="r")
+            panels = []
+            for bin_label, shells in zbins:
+                lo_stack, co_stack = [], []
+                for s in shells:
+                    low_shell = np.asarray(c_low_all[int(s)], np.float32)
+                    high_shell = np.asarray(c_high_all[int(s)], np.float32)
+                    print(f"[eval] full-sky {c} shell {s} ({bin_label}): "
+                          f"tiling + predicting...", flush=True)
+                    pred_filled = reconstruct(low_shell, c, int(s))
+                    cl_lo = od_cl(low_shell, lmax); cl_c = od_cl(pred_filled, lmax)
+                    cl_hi = od_cl(high_shell, lmax)
+                    with np.errstate(divide="ignore", invalid="ignore"):
+                        lo_stack.append(cl_lo / cl_hi); co_stack.append(cl_c / cl_hi)
+                panels.append((bin_label, shells, ells, np.array(lo_stack), np.array(co_stack)))
+            grid.append((f"{c}/{args.run}", panels))
+
+        plot_cl_ratio_pctile_grid(
+            grid, out_dir / "example_full_sky.png",
+            suptitle="Full-sky Cl ratio by redshift bin (flow)")
+
+        # --- weak-lensing kappa map diagnostic (analysis.weak_lensing): reduces
+        # the WHOLE usable lightcone into ONE kappa map each for low/corrected/high,
+        # for EVERY held-out cosmology -- the comparison this whole pipeline is
+        # ultimately in service of (kappa maps, not individual shells). Each
+        # cosmology's OWN params.yml is loaded fresh (H0, Om, Ob, O_nu, ... --
+        # "further values" beyond the 6 COSMO_FIELDS this script otherwise uses)
+        # since weak_lensing_ufalcon.py's hardcoded example cosmology was checked
+        # and does NOT match the lightcone it actually loads. ---
+        if args.kappa:
+            print(f"[eval] kappa: building kappa maps for ALL {len(val_cosmos)} "
+                  f"held-out cosmologies (zi={args.kappa_zi}, zf={args.kappa_zf}, "
+                  f"nside={args.kappa_nside}), n(z)={args.kappa_nz}", flush=True)
+            kappa_cosmo_labels = []
+            kappa_cl_low, kappa_cl_corr, kappa_cl_high = [], [], []
+            kappa_mom_low, kappa_mom_corr, kappa_mom_high = [], [], []
+            for c in val_cosmos:
+                c_run_dir = Path(args.data_root) / c / args.run
+                cosmo_params = weak_lensing.load_cosmo_yaml(c_run_dir)
+                shell_info = np.load(c_run_dir / "compressed_shells.npz",
+                                     allow_pickle=True, mmap_mode="r")["shell_info"]
+                lower_z_all = shell_info["lower_z"]; upper_z_all = shell_info["upper_z"]
+                usable = np.where(weak_lensing.usable_shell_mask(
+                    lower_z_all, upper_z_all, args.kappa_zi, args.kappa_zf))[0]
+                lower_z, upper_z = lower_z_all[usable], upper_z_all[usable]
+
+                c_low_all = np.load(c_run_dir / f"low_shells_nside={nside}.npy", mmap_mode="r")
+                c_high_all = np.load(c_run_dir / f"high_shells_nside={nside}.npy", mmap_mode="r")
+                low_shells = np.stack([np.asarray(c_low_all[int(s)], np.float64) for s in usable])
+                high_shells = np.stack([np.asarray(c_high_all[int(s)], np.float64) for s in usable])
+                print(f"[eval] kappa {c}: reconstructing {len(usable)} usable shells "
+                      f"(z in [{lower_z.min():.3f},{upper_z.max():.3f}])...", flush=True)
+                corr_shells = np.stack([
+                    reconstruct(np.asarray(c_low_all[int(s)], np.float32), c, int(s)).astype(np.float64)
+                    for s in usable])
+
+                kw = dict(nside=args.kappa_nside, zi=args.kappa_zi, zf=args.kappa_zf)
+                kappa_low = weak_lensing.kappa_map(low_shells, lower_z, upper_z, cosmo_params, args.kappa_nz, **kw)
+                kappa_corr = weak_lensing.kappa_map(corr_shells, lower_z, upper_z, cosmo_params, args.kappa_nz, **kw)
+                kappa_high = weak_lensing.kappa_map(high_shells, lower_z, upper_z, cosmo_params, args.kappa_nz, **kw)
+
+                kappa_cosmo_labels.append(f"{c}/{args.run}")
+                kappa_cl_low.append(weak_lensing.kappa_cl(kappa_low, args.kappa_lmax))
+                kappa_cl_corr.append(weak_lensing.kappa_cl(kappa_corr, args.kappa_lmax))
+                kappa_cl_high.append(weak_lensing.kappa_cl(kappa_high, args.kappa_lmax))
+                kappa_mom_low.append(moments(kappa_low))
+                kappa_mom_corr.append(moments(kappa_corr))
+                kappa_mom_high.append(moments(kappa_high))
+                print(f"[eval] kappa {c}: done", flush=True)
+
+            kappa_ells = np.arange(args.kappa_lmax + 1)
+            kappa_suptitle_common = (f"{len(kappa_cosmo_labels)} held-out cosmologies (flow) | "
+                                     f"n(z)={Path(args.kappa_nz).name} | "
+                                     f"z in [{args.kappa_zi:g},{args.kappa_zf:g}]")
+            plot_kappa_cl_multi_cosmo(
+                kappa_cosmo_labels, kappa_ells, kappa_cl_low, kappa_cl_corr, kappa_cl_high,
+                out_dir / "kappa_cl_all_cosmologies.png", corrected_label="flow-corrected",
+                suptitle=f"weak-lensing kappa Cl, {kappa_suptitle_common}")
+            plot_kappa_moments_scatter(
+                kappa_cosmo_labels, kappa_mom_low, kappa_mom_corr, kappa_mom_high,
+                out_dir / "kappa_moments_scatter.png", corrected_label="flow-corrected",
+                suptitle=f"weak-lensing kappa map moments, {kappa_suptitle_common}")
+    # ============= end optional full-sky section =============
 
     print(f"[eval] figures -> {out_dir}", flush=True)
 

@@ -48,6 +48,12 @@ if [ "${USE_COSMO_COND}" = "0" ]; then
   COSMO_FLAG="--no-use-cosmo-cond"; COSMO_SUFFIX="_nocosmo"
 fi
 RUN_NAME=${RUN_NAME:-flow_nside${NSIDE}_patch${PATCH_SIZE}_n${NPATCH}_ch${BASE_CH}_b${BATCH}_e${EPOCHS}${COSMO_SUFFIX}}
+# weak-lensing kappa map diagnostic (analysis.weak_lensing, apply_flow.py --kappa):
+# off by default -- reconstructs EVERY usable shell (z<~1.05, ~47/69 here) via
+# full-sky tiling for EVERY held-out cosmology, the most expensive optional section
+# in apply_flow.py. Set KAPPA=1 once the cost of the cheaper sections above is known.
+KAPPA=${KAPPA:-0}
+KAPPA_FLAG=""; [ "${KAPPA}" = "1" ] && KAPPA_FLAG="--kappa"
 
 PATCH_DIR="/capstor/scratch/cscs/damrein/outputs/flowpatches/nside${NSIDE}_${PATCH_SIZE}_${NPATCH}"
 OUT_DIR="/capstor/scratch/cscs/damrein/outputs/flowruns/${RUN_NAME}"
@@ -97,11 +103,20 @@ srun --nodes=1 --ntasks=1 uenv run pytorch/v2.9.1:v2 --view=default -- bash -c "
     --num-workers $((SLURM_CPUS_PER_TASK / 4)) ${COSMO_FLAG}
 "
 
-# ---- stage 3: loss/val plot + apply on held-out test patches (glue) ----
+# ---- stage 3: loss/val plot + apply on held-out test patches + full-sky Cl (glue) ----
 # plot_flow_loss.py: train vs validation flow-matching MSE (formula in the title),
 # comparable to transfer_function.py train()'s emulator.loss.png.
-# apply_flow.py: patch-grid diagnostic (analysis.plot_example_patch_grid) -- flat
-# held-out patches + 2D-FFT power ratio, bounded by that patch's own Nyquist ell.
+# apply_flow.py: flat patch-grid diagnostic (analysis.plot_example_patch_grid, 2D-FFT
+# power ratio bounded by that patch's own Nyquist ell) AND, since --data-root is
+# given, the full-sky reconstruction + REAL angular Cl (analysis.patch_tiling +
+# analysis.full_sky.od_cl, analysis.plot_example_full_sky_grid) -- one script, one
+# --example-shells list shared by both diagnostics so they can never silently
+# diverge. Full-sky reconstruction tiles the WHOLE sphere via one flow ODE
+# integration per patch -- far more expensive per shell than the CPU-only transfer
+# pipeline's real Cl, so the shell selection here is deliberately small for a first
+# run (--shell-indices left empty to skip the redundant lone-Cl plots;
+# --example-shells covers one sparse and one dense shell for a first comparability
+# check -- widen once the per-shell cost on this setup is known).
 srun --nodes=1 --ntasks=1 --gres=gpu:1 uenv run pytorch/v2.9.1:v2 --view=default -- bash -c "
   source ${VENV}/bin/activate
   python ${PIPE}/plot_flow_loss.py --run-dir '${OUT_DIR}'
@@ -109,26 +124,9 @@ srun --nodes=1 --ntasks=1 --gres=gpu:1 uenv run pytorch/v2.9.1:v2 --view=default
     --patch-dir '${PATCH_DIR}' \
     --model     '${OUT_DIR}/best.pt' \
     --out-dir   '${OUT_DIR}/eval' \
-    --steps ${STEPS}
-"
-
-# ---- stage 4: full-sky reconstruction + REAL Cl (analysis.plot_example_full_sky_grid) ----
-# Same shared ../analysis/ tools as transfer/infer_full_sky_transfer.py, so the two
-# pipelines' full-sky diagnostics are directly comparable. Full-sky reconstruction
-# tiles the WHOLE sphere via patch_tiling + one flow ODE integration per patch --
-# far more expensive per shell than the CPU-only transfer pipeline's real Cl, so
-# the shell selection here is deliberately small for a first run (shell-indices
-# left empty to skip the redundant lone-Cl plots; example-shells covers one sparse
-# and one dense shell for a first comparability check -- widen once the per-shell
-# cost on this setup is known).
-srun --nodes=1 --ntasks=1 --gres=gpu:1 uenv run pytorch/v2.9.1:v2 --view=default -- bash -c "
-  source ${VENV}/bin/activate
-  python ${PIPE}/infer_full_sky.py \
+    --steps ${STEPS} \
     --data-root '${DATA_ROOT}' \
-    --model     '${OUT_DIR}/best.pt' \
-    --patch-dir '${PATCH_DIR}' \
-    --out-dir   '${OUT_DIR}/eval' \
     --shell-indices --example-shells 3 30 \
-    --n-ode-steps ${STEPS}
+    --fullsky-patch-size ${PATCH_SIZE} ${KAPPA_FLAG}
 "
 echo "flow-jbucko job ${SLURM_JOB_ID} finished at $(date)"
