@@ -674,26 +674,43 @@ def emulate(args):
     n_shells = low.shape[0]
     z = shell_redshifts(run, n_shells, args.info_npz)
 
-    T = np.empty((n_shells, lmax + 1), dtype=np.float32)
+    # alm2cl (one SHT per shell) can't be batched -- each shell's alm is a genuinely
+    # different array. But the MLP predict() that follows CAN: it was previously
+    # called once PER SHELL (69 separate (lmax+1, 9) predict() calls), each paying
+    # its own Python/BLAS call overhead on a matrix too small to amortize it
+    # (measured: MLPRegressor throughput on matrices this size is dominated by
+    # per-call overhead, not FLOPs -- see transfer_function.py train()'s
+    # OMP_NUM_THREADS/batch-size docstring notes for the same effect during
+    # training). Building ALL shells' features first and predicting ONCE on the
+    # (n_shells*(lmax+1), 9) matrix removes 68 of those 69 redundant calls for
+    # free -- identical output, just not re-paying fixed overhead 69 times.
+    cl_low_all = np.empty((n_shells, lmax + 1))
     for i in range(n_shells):
-        cl_low = smooth_cl(hp.alm2cl(_alm(np.asarray(low[i]), N_alm), lmax=lmax),
-                          smooth_window)
-        X = build_features(ell, float(z[i]), cosmo, cl_low)
-        Ti = model.predict(scaler.transform(X))
-        if i == n_shells // 2:
-            X_mean = build_features(ell, float(z[i]), mean_cosmo, cl_low)
-            T_mean = model.predict(scaler.transform(X_mean))
-            d = np.abs(Ti - T_mean)
-            print(f"  [cosmo check] shell {i}: |T(this cosmo) - T(mean training cosmo)| "
-                  f"max={d.max():.4f} mean={d.mean():.4f} "
-                  f"(near-zero would mean cosmo is being ignored)", flush=True)
-        # Post-hoc smoothing of the OUTPUT is a safety net: even with a smoothed
-        # target/feature, a generic MLP evaluated row-by-row over ell need not be
-        # perfectly smooth in ell. Same window as used for the input features.
-        T[i] = smooth_cl(np.clip(Ti, 1e-6, None), smooth_window).astype(np.float32) \
-            if smooth_window > 1 else Ti.astype(np.float32)
+        cl_low_all[i] = smooth_cl(hp.alm2cl(_alm(np.asarray(low[i]), N_alm), lmax=lmax),
+                                  smooth_window)
         if i % 10 == 0:
-            print(f"  emulated shell {i}/{n_shells}", flush=True)
+            print(f"  gathered Cl_low for shell {i}/{n_shells}", flush=True)
+
+    X_all = np.concatenate([build_features(ell, float(z[i]), cosmo, cl_low_all[i])
+                            for i in range(n_shells)])
+    Ti_all = model.predict(scaler.transform(X_all)).reshape(n_shells, lmax + 1)
+
+    mid = n_shells // 2
+    X_mean = build_features(ell, float(z[mid]), mean_cosmo, cl_low_all[mid])
+    T_mean = model.predict(scaler.transform(X_mean))
+    d = np.abs(Ti_all[mid] - T_mean)
+    print(f"  [cosmo check] shell {mid}: |T(this cosmo) - T(mean training cosmo)| "
+          f"max={d.max():.4f} mean={d.mean():.4f} "
+          f"(near-zero would mean cosmo is being ignored)", flush=True)
+
+    # Post-hoc smoothing of the OUTPUT is a safety net: even with a smoothed
+    # target/feature, a generic MLP evaluated row-by-row over ell need not be
+    # perfectly smooth in ell. Same window as used for the input features.
+    if smooth_window > 1:
+        T = np.stack([smooth_cl(np.clip(Ti_all[i], 1e-6, None), smooth_window)
+                      for i in range(n_shells)]).astype(np.float32)
+    else:
+        T = Ti_all.astype(np.float32)
     # T is a physical amplitude ratio; clip away nonphysical negatives.
     T = np.clip(T, 0.0, None)
     # r(ell,shell) averaged over the training cosmologies (see `train`) -- used by

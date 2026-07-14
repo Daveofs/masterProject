@@ -43,8 +43,33 @@ DATA_ROOT="/capstor/scratch/cscs/damrein/cosmogridv1"
 # RUN_NAME and you OVERWRITE that run's sphere_flow.pth/meta.npz.
 RUN_NAME=${RUN_NAME:-v3_direct_44runs}
 OUT_DIR="/capstor/scratch/cscs/damrein/outputs/sphereflow/${RUN_NAME}"
-TEST_COSMO=cosmo_000122
 mkdir -p "$OUT_DIR" /capstor/scratch/cscs/damrein/outputs/logs/sphereflow
+
+# ---- resolve MULTIPLE held-out cosmologies (not a single TEST_COSMO/--include-
+#      test) -- same split_val_cosmos convention run_transfer_pipeline.sh uses:
+#      the SAME (DATA_ROOT, VAL_FRAC, VAL_SEED) picks the IDENTICAL set, so
+#      sphereflow and the transfer function validate on the same held-out
+#      cosmologies and are directly comparable. train_sphere_flow.py saves this
+#      exact set into meta.npz, so stage 2 below doesn't need to re-derive it --
+#      apply_sphere_flow.py reads it back automatically (capped at
+#      MAX_COSMOLOGIES, since ODE-sampling cost scales with cosmology count). ----
+VAL_FRAC=${VAL_FRAC:-0.15}
+VAL_SEED=${VAL_SEED:-0}
+MAX_COSMOLOGIES=${MAX_COSMOLOGIES:-3}
+INCLUDE_TEST=${INCLUDE_TEST:-}
+INCLUDE_TEST_FLAG=""
+[ -n "$INCLUDE_TEST" ] && INCLUDE_TEST_FLAG="--include-test"
+if [ -n "$TEST_COSMOS" ]; then
+    read -ra COSMOS_ARR <<< "$TEST_COSMOS"
+else
+    COSMOS_ARR=($(srun --nodes=1 --ntasks=1 uenv run pytorch/v2.9.1:v2 --view=default -- bash -c "
+      source ${VENV}/bin/activate
+      python -c \"import sys; sys.path.insert(0, 'sphereflow'); from train_sphere_flow import split_val_cosmos; print(' '.join(split_val_cosmos(sys.argv[1], float(sys.argv[2]), int(sys.argv[3]))))\" '${DATA_ROOT}' '${VAL_FRAC}' '${VAL_SEED}'
+    "))
+fi
+TEST_COSMOS_FLAGS="--test-cosmos ${COSMOS_ARR[@]}"
+echo "held out from training (${#COSMOS_ARR[@]}): ${COSMOS_ARR[@]} -- stage 2 eval "
+echo "will use up to MAX_COSMOLOGIES=$MAX_COSMOLOGIES of these (read back from meta.npz)"
 
 export MASTER_ADDR=$(scontrol show hostnames "$SLURM_JOB_NODELIST" | head -n1)
 export MASTER_PORT=29500
@@ -100,8 +125,7 @@ srun uenv run pytorch/v2.9.1:v2 --view=default -- bash -c "
            --rdzv_endpoint=${MASTER_ADDR}:${MASTER_PORT} \
     sphereflow/train_sphere_flow.py \
       --data-root   '${DATA_ROOT}' \
-      --test-cosmo  ${TEST_COSMO} \
-      --include-test \
+      ${TEST_COSMOS_FLAGS} ${INCLUDE_TEST_FLAG} \
       --formulation direct \
       --nside       2048 \
       --order       16 \
@@ -134,9 +158,10 @@ fi
 #        kappa_moments_scatter.png
 #      (previously this stage only emitted cl_shell{003,030,050}.png -- a 3-shell
 #      spot check that could not be compared against the other two pipelines.)
-#      TEST_COSMO must match apply_sphere_flow.py's --run-dirs: it is the cosmology
-#      this checkpoint was actually held out on, so only override TEST_COSMO above
-#      if you also change --test-cosmo in stage 1.
+#      No --run-dirs passed: apply_sphere_flow.py reads THIS checkpoint's own
+#      held-out set straight from the meta.npz stage 1 just saved (capped at
+#      --max-cosmologies), so it can never drift out of sync with what training
+#      actually excluded.
 #      --kappa is the expensive part (every usable shell in z<=1.05 gets ODE-sampled,
 #      dozens of shells); drop it for a faster post-training check.
 srun --nodes=1 --ntasks=1 uenv run pytorch/v2.9.1:v2 --view=default -- bash -c "
@@ -144,7 +169,7 @@ srun --nodes=1 --ntasks=1 uenv run pytorch/v2.9.1:v2 --view=default -- bash -c "
   python sphereflow/apply_sphere_flow.py \
       --model-dir '${OUT_DIR}' \
       --data-root '${DATA_ROOT}' \
-      --run-dirs '${DATA_ROOT}/${TEST_COSMO}/run_0' \
+      --max-cosmologies ${MAX_COSMOLOGIES} \
       --nside 2048 --lmax 3000 --steps 50 \
       --patch-shells 5 10 15 30 50 \
       --fullsky-shells 5 10 15 30 50 \

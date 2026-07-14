@@ -38,6 +38,43 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 import sphere_flow as sf
 
 
+def split_val_cosmos(data_dir, val_frac: float = 0.15, seed: int = 0,
+                     low_glob: str = "disco_sim/*/disco_shells_nside=2048.npz",
+                     high_name: str = "compressed_shells.npz") -> list[str]:
+    """Hold out a random FRACTION of whole cosmologies for validation.
+
+    DELIBERATE DUPLICATE of transfer/transfer_function.py's function of the same
+    name (not a cross-directory import) -- sphereflow and transfer are meant to
+    stay independently runnable/renamable; an import would make a rename or
+    signature change in transfer/ silently break sphereflow's dataloader instead
+    of raising an error where you're actually looking. Keep this in sync BY HAND
+    if transfer_function.split_val_cosmos ever changes. Same default val_frac
+    (mirrors unet/dataset.py's split_by_cosmo) -- the point of matching the
+    default is that the SAME (data_dir, val_frac, seed) picks the IDENTICAL
+    cosmology set as the transfer pipeline, so both validate on the same
+    held-out cosmologies and are directly comparable.
+
+    Only samples from cosmologies that actually HAVE both low (DISCO) and high
+    (CosmoGrid) source data -- some cosmology directories have only the
+    CosmoGrid side present (no disco_sim/ at all), which would otherwise pick a
+    held-out cosmology with no usable low-res input for evaluation."""
+    data_dir = Path(data_dir)
+    cosmos = sorted(d.name for d in data_dir.iterdir()
+                    if d.is_dir() and d.name.startswith("cosmo_"))
+
+    def _has_data(name: str) -> bool:
+        c = data_dir / name
+        rs = [r for r in sorted(c.iterdir()) if r.is_dir() and r.name.startswith("run_")] or [c]
+        return any((next(r.glob(low_glob), None) is not None) and (r / high_name).exists()
+                  for r in rs)
+
+    cosmos = [c for c in cosmos if _has_data(c)]
+    rng = np.random.default_rng(seed)
+    rng.shuffle(cosmos)
+    n_val = max(1, int(round(len(cosmos) * val_frac)))
+    return sorted(cosmos[:n_val])
+
+
 def is_main():
     return not dist.is_initialized() or dist.get_rank() == 0
 
@@ -61,17 +98,21 @@ def setup_ddp():
 # Data: mmap per-shell streaming of (tcorr, high) pairs
 # ---------------------------------------------------------------------------
 
-def build_runs(data_root, test_cosmo, nside, include_test, prefix="low"):
+def build_runs(data_root, test_cosmos, nside, include_test, prefix="low"):
     """(input_npy, high_npy, cosmo_vec) per run that has the prepared dataset.
 
     prefix='low'   -> raw DISCO input   (single-model 'direct' formulation)
     prefix='tcorr' -> T-corrected input ('residual' formulation)
+
+    test_cosmos: a SET of held-out cosmology names (not a single one) -- see
+    split_val_cosmos, same multi-cosmology convention as transfer_function.py's
+    fit/train and unet/dataset.py's split_by_cosmo.
     """
     data_root = Path(data_root)
     runs = []
     for c in sorted(d for d in data_root.iterdir()
                     if d.is_dir() and d.name.startswith("cosmo_")):
-        if (not include_test) and c.name == test_cosmo:
+        if (not include_test) and c.name in test_cosmos:
             continue
         for ld in sorted(r for r in c.iterdir()
                          if r.is_dir() and r.name.startswith("run_")) or [c]:
@@ -242,8 +283,17 @@ def train(args):
     local, rank, world = setup_ddp()
     dev = torch.device(f"cuda:{local}" if torch.cuda.is_available() else "cpu")
 
+    # MULTIPLE held-out cosmologies (not a single --test-cosmo), same convention
+    # as the transfer pipeline: explicit --test-cosmos, or auto-selected via
+    # --val-frac/--val-seed through the SAME split_val_cosmos function
+    # run_transfer_pipeline.sh uses -- same (data-root, val-frac, val-seed) picks
+    # the IDENTICAL set, so sphereflow and the transfer function validate on the
+    # same held-out cosmologies.
+    test_cosmos = set(args.test_cosmos) if args.test_cosmos \
+        else set(split_val_cosmos(args.data_root, args.val_frac, args.val_seed))
+
     prefix = "tcorr" if args.formulation == "residual" else "low"
-    runs = build_runs(args.data_root, args.test_cosmo, args.nside, args.include_test,
+    runs = build_runs(args.data_root, test_cosmos, args.nside, args.include_test,
                       prefix=prefix)
     if not runs:
         raise RuntimeError(f"no prepared runs found ({prefix}_shells_nside={args.nside}.npy"
@@ -260,7 +310,8 @@ def train(args):
         resid_scale = 1.0
     my_runs = runs[rank::world] or [runs[rank % len(runs)]]
     if is_main():
-        mode = "INCLUDE-TEST (sanity gate)" if args.include_test else f"LOO ({args.test_cosmo} out)"
+        mode = ("INCLUDE-TEST (sanity gate)" if args.include_test
+                else f"excluding {len(test_cosmos)} held-out cosmologies: {sorted(test_cosmos)}")
         print(f"[data] {len(runs)} runs [{mode}, {args.formulation}, input={prefix}] | "
               f"{world} ranks | cond_dim={cond_dim} | "
               f"sig_scale={sig_scale:.4g} resid_scale={resid_scale:.4g}", flush=True)
@@ -382,7 +433,8 @@ def train(args):
                  hidden=args.hidden, n_layers=args.n_layers, cond_dim=cond_dim,
                  sig_scale=sig_scale, resid_scale=resid_scale,
                  softening=args.softening, formulation=args.formulation,
-                 cosmo_mean=cmean, cosmo_std=cstd, loss_hist=np.array(loss_hist))
+                 cosmo_mean=cmean, cosmo_std=cstd, loss_hist=np.array(loss_hist),
+                 test_cosmos=np.array(sorted(test_cosmos)))
         print(f"[train] saved model + meta to {out}", flush=True)
     if world > 1:
         dist.destroy_process_group()
@@ -391,9 +443,20 @@ def train(args):
 if __name__ == "__main__":
     p = argparse.ArgumentParser()
     p.add_argument("--data-root", required=True)
-    p.add_argument("--test-cosmo", default="cosmo_000122")
+    p.add_argument("--test-cosmos", nargs="*", default=None,
+                   help="Explicit held-out cosmology name(s). If omitted, "
+                        "auto-selected via --val-frac/--val-seed (same "
+                        "split_val_cosmos convention as transfer_function.py's "
+                        "fit/train and unet/dataset.py's split_by_cosmo) so "
+                        "validation covers MULTIPLE cosmologies, not just one.")
+    p.add_argument("--val-frac", type=float, default=0.15,
+                   help="Fraction of cosmologies to hold out when --test-cosmos "
+                        "is omitted.")
+    p.add_argument("--val-seed", type=int, default=0)
     p.add_argument("--include-test", action="store_true",
-                   help="SANITY GATE: include the test cosmology in training.")
+                   help="SANITY GATE: include the held-out cosmologies in "
+                        "training too (expect near-perfect apparent validation "
+                        "by construction). Off by default -- proper LOO.")
     p.add_argument("--formulation", choices=["direct", "residual"], default="direct",
                    help="direct: SINGLE MODEL, condition on raw DISCO, generate the "
                         "high signal. residual: generate high-tcorr on top of the "

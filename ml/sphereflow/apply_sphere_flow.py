@@ -19,14 +19,20 @@ undercorrects the faintest shell (shell 3) at low ell (0.24 vs 1.0). This script
 exists to check that more rigorously, on more shells/statistics than a 3-shell
 spot check, using the same tooling apply_transfer.py already validated.
 
-Held-out cosmology: run 3826942 was trained LOO-style via
-`train_sphere_flow.py --test-cosmo cosmo_000122` (the default), i.e. it saw
-EVERY other cosmology in --data-root during training. cosmo_000122 is therefore
-the ONLY cosmology this checkpoint can be fairly evaluated on -- it is also the
-transfer function's own long-standing LOO validation cosmology (see
-[[transfer-fn-positivity-tradeoff]]), which makes the two directly comparable.
-Do not pass other cosmologies via --run-dirs unless you know they were also
-excluded from THIS checkpoint's training run.
+Held-out cosmologies: as of 2026-07-14, train_sphere_flow.py holds out MULTIPLE
+cosmologies (--test-cosmos, or auto-selected via --val-frac/--val-seed through
+the SAME split_val_cosmos the transfer pipeline uses) and saves that exact set
+into meta.npz -- if --run-dirs is omitted below, this script reads it back
+automatically (capped at --max-cosmologies) so it always evaluates on
+whatever this checkpoint actually held out, never guessing.
+
+Older checkpoints (e.g. run 3826942, trained before this change) predate
+test_cosmos and were LOO-style on a single `--test-cosmo cosmo_000122` (the
+old default) -- for those this script falls back to cosmo_000122/run_0, which
+is also the transfer function's own long-standing single-cosmology LOO
+validation cosmology (see [[transfer-fn-positivity-tradeoff]]), keeping old
+and new results comparable. Do not pass OTHER cosmologies via --run-dirs
+unless you know they were excluded from THIS checkpoint's training run.
 
 Cost note: unlike apply_transfer.py's apply() (closed-form, corrects all ~69
 shells of a cosmology in one cheap vectorized pass), sphere-flow's correction is
@@ -144,6 +150,15 @@ def correct_shell(net, meta, in_map, cosmo_vec, device, steps, patch_batch, amp:
         sig = sf.patches_to_maps(cond + rscale * out, order, 1)[0]
     delta = sf.signal_inverse(sig, scale, soft)
     return (mean * (1.0 + delta)).astype(np.float32)
+
+
+def _resolve_run_dir(data_root, cosmo_name):
+    """cosmo name -> its run dir, same convention as train_sphere_flow.build_runs
+    (first subdir starting with "run_", else the cosmology dir itself)."""
+    c = Path(data_root) / cosmo_name
+    run = next((r for r in sorted(c.iterdir()) if r.is_dir() and r.name.startswith("run_")),
+              None) if c.is_dir() else None
+    return run or c
 
 
 class LazyCorrected:
@@ -447,11 +462,11 @@ def main():
                         "/capstor/scratch/cscs/damrein/outputs/sphereflow/3826942")
     p.add_argument("--data-root", default="/capstor/scratch/cscs/damrein/cosmogridv1")
     p.add_argument("--run-dirs", nargs="*", default=None,
-                   help="Held-out cosmology run dirs. Default: <data-root>/cosmo_000122/"
-                        "run_0 -- the ONLY cosmology this checkpoint's LOO training "
-                        "actually held out (train_sphere_flow.py --test-cosmo). Do not "
-                        "pass other cosmologies unless you know they were excluded from "
-                        "THIS checkpoint's training too.")
+                   help="Held-out cosmology run dirs. Default: read this checkpoint's "
+                        "OWN held-out set from meta.npz's test_cosmos (capped at "
+                        "--max-cosmologies), or cosmo_000122/run_0 for older checkpoints "
+                        "that predate saving it. Do not pass other cosmologies unless you "
+                        "know they were excluded from THIS checkpoint's training too.")
     p.add_argument("--nside", type=int, default=2048)
     p.add_argument("--lmax", type=int, default=3000)
     p.add_argument("--steps", type=int, default=50, help="ODE integration steps/shell.")
@@ -491,9 +506,10 @@ def main():
     p.add_argument("--n-zbins", type=int, default=3)
     p.add_argument("--n-shells-per-zbin", type=int, default=5)
     p.add_argument("--max-cosmologies", type=int, default=3,
-                   help="Held-out cosmologies to include as grid rows. Only matters if "
-                        "--run-dirs has more than one entry -- by default there is only "
-                        "cosmo_000122.")
+                   help="Held-out cosmologies to include as grid rows -- ALSO caps how "
+                        "many of the checkpoint's own held-out cosmologies (meta.npz's "
+                        "test_cosmos) are used at all when --run-dirs is omitted, since "
+                        "ODE sampling cost scales with cosmology count.")
 
     p.add_argument("--kappa", action="store_true",
                    help="build weak-lensing kappa maps for every held-out cosmology. "
@@ -525,8 +541,25 @@ def main():
             f"survey is direct/3826942).")
     method_label = args.method_label or f"sphereflow ({formulation}, {Path(args.model_dir).name})"
 
-    run_dirs = ([Path(r) for r in args.run_dirs] if args.run_dirs else
-               [Path(args.data_root) / "cosmo_000122" / "run_0"])
+    if args.run_dirs:
+        run_dirs = [Path(r) for r in args.run_dirs]
+    elif "test_cosmos" in meta and np.asarray(meta["test_cosmos"]).size > 0:
+        # Checkpoints trained after 2026-07-14 save their OWN held-out set (see
+        # train_sphere_flow.py) -- use it directly instead of guessing, capped
+        # at --max-cosmologies (ODE sampling is expensive per cosmology).
+        held_out = np.asarray(meta["test_cosmos"]).tolist()[:args.max_cosmologies]
+        run_dirs = [_resolve_run_dir(args.data_root, c) for c in held_out]
+        print(f"[apply_sphere_flow] --run-dirs not given -- using this checkpoint's "
+              f"own held-out set from meta.npz (capped at --max-cosmologies="
+              f"{args.max_cosmologies} of {np.asarray(meta['test_cosmos']).size}): "
+              f"{held_out}", flush=True)
+    else:
+        # Pre-2026-07-14 checkpoints (e.g. 3826942) predate saving test_cosmos and
+        # were trained LOO-style via the old --test-cosmo cosmo_000122 default.
+        run_dirs = [Path(args.data_root) / "cosmo_000122" / "run_0"]
+        print("[apply_sphere_flow] --run-dirs not given and this checkpoint has no "
+              "saved test_cosmos -- falling back to cosmo_000122/run_0 (the old "
+              "single-cosmology --test-cosmo default).", flush=True)
     Path(args.out_dir).mkdir(parents=True, exist_ok=True)
 
     # One bad cosmology must not blank every plot -- see apply_transfer.py's own
