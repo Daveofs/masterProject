@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Plot train/validation loss for a jbucko flow run.
 
-Reads the train_log.jsonl that unet_flow_jbucko/train_flow.py writes (one JSON row
+Reads the train_log.jsonl that unet/train_flow.py writes (one JSON row
 per epoch: {epoch, time_s, lr, train_loss, val_loss}). Train and validation are the
 SAME flow-matching MSE loss < ||v_theta(x_t,t) - (x1-x0)||^2 >; validation is computed
 on HELD-OUT COSMOLOGIES (split_by_cosmo in dataset.py), so a gap between the two curves

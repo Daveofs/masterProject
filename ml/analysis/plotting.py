@@ -1,5 +1,5 @@
 """Shared figure builders for every pipeline's example/diagnostic plots
-(unet_flow_jbucko, transfer). These take ALREADY-COMPUTED arrays -- how a pipeline
+(unet, transfer). These take ALREADY-COMPUTED arrays -- how a pipeline
 gets its "corrected" data (running a generative model, applying a transfer function,
 ...) is entirely the caller's business; these functions only know how to draw the
 comparison, so the visual format stays identical across pipelines by construction
@@ -202,11 +202,12 @@ def plot_cl_ratio_pctile_grid(grid, out_path, pctile=(16, 84), suptitle=None,
 def plot_kappa_cl_grid(cosmo_labels, ells, cl_low_list, cl_corr_list, cl_high_list,
                        out_path, corrected_label="corrected", suptitle=None):
     """Per-cosmology kappa Cl -- ONE ROW PER HELD-OUT COSMOLOGY (left: raw Cl loglog,
-    right: ratio to truth), instead of plot_kappa_cl_multi_cosmo's single overlaid
-    axes. The overlay is good for spotting a bias shared across every cosmology, but
-    with more than a handful of cosmologies its lines pile up and per-cosmology
-    behavior becomes unreadable -- this is the same data, faceted, so each cosmology
-    can be judged on its own."""
+    right: ratio to truth). Used by ALL THREE pipelines (transfer, sphereflow, unet)
+    as kappa_cl_per_cosmology.png. It replaced a single-overlaid-axes version
+    (kappa_cl_all_cosmologies.png, removed 2026-07-14): piling every cosmology's
+    low/corrected/high lines onto one axes was unreadable past a couple of
+    cosmologies. Same data, faceted, so each cosmology can be judged on its own; the
+    aggregate/spread question is answered by kappa_cl_pctile_band.png instead."""
     n = len(cosmo_labels)
     fig, axes = plt.subplots(n, 2, figsize=(12, 3.2 * n), squeeze=False)
     x = ells[1:]
@@ -235,47 +236,6 @@ def plot_kappa_cl_grid(cosmo_labels, ells, cl_low_list, cl_corr_list, cl_high_li
     out_path = Path(out_path); out_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out_path, dpi=300); plt.close(fig)
     print(f"[plotting] kappa Cl grid ({n} cosmologies) -> {out_path}", flush=True)
-    return out_path
-
-
-def plot_kappa_cl_multi_cosmo(cosmo_labels, ells, cl_low_list, cl_corr_list, cl_high_list,
-                              out_path, corrected_label="corrected", suptitle=None):
-    """ONE weak-lensing kappa-map Cl comparison across ALL held-out cosmologies at
-    once (not faceted, not percentile-banded -- one map per cosmology here, so
-    there's no within-cosmology spread to band; the cosmology-to-cosmology spread
-    IS the thing to look at, one thin line per cosmology). cl_*_list: list of
-    (n_ell,) angular power spectra (weak_lensing.kappa_cl), one entry per
-    cosmo_labels, low/corrected/high aligned. Left panel: raw Cl (loglog). Right
-    panel: ratio to truth (semilogx) -- low/true dotted, corrected/true solid, one
-    color per cosmology (tab10), so a systematic bias is visible as a consistent
-    offset across ALL colors while cosmology-specific behavior shows as scatter
-    between them."""
-    n_cosmo = len(cosmo_labels)
-    colors = plt.cm.tab10(np.linspace(0, 1, min(n_cosmo, 10))) if n_cosmo <= 10 \
-        else plt.cm.viridis(np.linspace(0, 1, n_cosmo))
-    fig, ax = plt.subplots(1, 2, figsize=(13, 5))
-    x = ells[1:]
-    for i, label in enumerate(cosmo_labels):
-        c = colors[i % len(colors)]
-        cl_lo, cl_c, cl_hi = cl_low_list[i], cl_corr_list[i], cl_high_list[i]
-        ax[0].loglog(x, cl_lo[1:], ":", color=c, lw=1.0, alpha=0.8)
-        ax[0].loglog(x, cl_c[1:], "-", color=c, lw=1.2, alpha=0.8, label=label)
-        ax[0].loglog(x, cl_hi[1:], "--", color=c, lw=1.0, alpha=0.8)
-        with np.errstate(divide="ignore", invalid="ignore"):
-            ax[1].semilogx(x, (cl_lo / cl_hi)[1:], ":", color=c, lw=1.0, alpha=0.8)
-            ax[1].semilogx(x, (cl_c / cl_hi)[1:], "-", color=c, lw=1.2, alpha=0.8)
-    ax[0].set_xlabel(r"$\ell$"); ax[0].set_ylabel(r"$C_\ell^{\kappa\kappa}$")
-    ax[0].set_title("kappa-map Cl (dotted=low, solid=" + corrected_label + ", dashed=high)")
-    ax[0].legend(fontsize=7, loc="lower left", ncol=max(1, n_cosmo // 8 + 1))
-    ax[1].axhline(1.0, color="k", ls="--", lw=0.8)
-    ax[1].set_xlabel(r"$\ell$"); ax[1].set_ylabel(r"$C_\ell/C_\ell^{true}$")
-    ax[1].set_title(f"ratio to truth ({n_cosmo} held-out cosmologies)")
-    if suptitle:
-        fig.suptitle(suptitle, fontsize=11)
-    fig.tight_layout()
-    out_path = Path(out_path); out_path.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(out_path, dpi=300); plt.close(fig)
-    print(f"[plotting] kappa Cl, {n_cosmo} cosmologies -> {out_path}", flush=True)
     return out_path
 
 
@@ -377,7 +337,7 @@ def plot_train_val_loss(x, train_vals, val_vals, out_path, xlabel="epoch",
                         ylabel="loss", formula=None, train_label="train",
                         val_label="validation (held-out)"):
     """Shared train/validation loss curve -- ONE canonical figure, used identically
-    by unet_flow_jbucko (plot_flow_loss.py, per-epoch flow-matching MSE) and
+    by unet (plot_flow_loss.py, per-epoch flow-matching MSE) and
     transfer (transfer_function.py train(), per-iteration MLP squared-error) so the
     two pipelines' training diagnostics are visually and structurally identical, not
     just similarly styled.

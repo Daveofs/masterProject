@@ -13,7 +13,7 @@
 # Diagnostic-only run against an ALREADY-BUILT transfer.npz (from a prior fit/train
 # stage) -- runs apply_transfer.py's full correction + Poisson + ALL diagnostics
 # WITHOUT redoing alm preprocessing or emulator training. Mirrors
-# unet_flow_jbucko/run_diagnostics_only.sh's pattern (reuse an existing checkpoint,
+# unet/run_diagnostics_only.sh's pattern (reuse an existing checkpoint,
 # just re-run apply+eval -- e.g. after changing --ell-min-mpc or a Poisson knob).
 #
 # Validates on the SAME MULTIPLE held-out cosmologies run_transfer_pipeline.sh used

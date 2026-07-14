@@ -11,7 +11,7 @@ cosmology's own params.yml is read live -- "further values" beyond H0/Om/Ob/s8/n
 means z_low/z_high (each run's own shell_info) and the astropy Cosmology object built
 from those params, all needed before UFalcon's construct_map_cosmogrid can run.
 
-Shared by both unet_flow_jbucko/apply_flow.py and transfer/apply_transfer.py -- see
+Shared by both unet/apply_flow.py and transfer/apply_transfer.py -- see
 each script's --kappa-* section. Both now run in the SAME venv (sphereflow) so this
 module (and UFalcon) only needs to be installed once, not duplicated across a
 uenv/venv split and a separate conda env.

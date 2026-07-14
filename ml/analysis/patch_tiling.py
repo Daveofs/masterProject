@@ -1,6 +1,6 @@
 """Full-sky reconstruction FROM a patch-based model: tile the sphere with overlapping
 gnomonic patches, run a model on each, blend back. Needed ONLY by pipelines whose
-correction is computed per-patch (e.g. unet_flow_jbucko's flow model) -- NOT by
+correction is computed per-patch (e.g. unet's flow model) -- NOT by
 pipelines that already operate on the whole sky directly (e.g. transfer's
 transfer-function+Poisson correction, which needs none of this).
 

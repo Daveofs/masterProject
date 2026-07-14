@@ -280,7 +280,7 @@ def split_val_cosmos(data_dir: Path, val_frac: float = 0.15, seed: int = 0,
                      low_glob: str = "disco_sim/*/disco_shells_nside=2048.npz",
                      high_name: str = "compressed_shells.npz") -> list[str]:
     """Hold out a random FRACTION of whole cosmologies for validation, mirroring
-    unet_flow_jbucko/dataset.py's split_by_cosmo (same default val_frac=0.15) --
+    unet/dataset.py's split_by_cosmo (same default val_frac=0.15) --
     so both pipelines validate on a comparable multi-cosmology held-out set
     instead of a single fixed test cosmology.
 
@@ -321,7 +321,7 @@ def fit(args):
 
     # Hold out a SET of cosmologies (explicit --test-cosmos, or auto-selected via
     # --val-frac/--val-seed -- same whole-cosmology-split convention as
-    # unet_flow_jbucko/dataset.py's split_by_cosmo) so validation covers MULTIPLE
+    # unet/dataset.py's split_by_cosmo) so validation covers MULTIPLE
     # cosmologies, not just one -- a single held-out cosmo can't distinguish a
     # genuinely generalizing T from one that got lucky on that particular cosmology.
     test_cosmos = set(args.test_cosmos) if args.test_cosmos \
@@ -456,7 +456,7 @@ def train(args):
     ell = np.arange(lmax + 1)
     # See fit()'s docstring comment: MULTIPLE held-out cosmologies (explicit
     # --test-cosmos, or auto-selected via --val-frac/--val-seed, same convention
-    # as unet_flow_jbucko's split_by_cosmo), not just one.
+    # as unet's split_by_cosmo), not just one.
     test_cosmos = set(args.test_cosmos) if args.test_cosmos \
         else set(split_val_cosmos(data_dir, args.val_frac, args.val_seed))
     runs = _discover_runs(data_dir, lmax, test_cosmos, args.include_test, args.log_density)
@@ -723,7 +723,7 @@ if __name__ == "__main__":
     pf.add_argument("--test-cosmos", nargs="*", default=None,
                     help="Explicit held-out cosmology name(s). If omitted, "
                          "auto-selected via --val-frac/--val-seed (whole-cosmology "
-                         "split, same convention as unet_flow_jbucko's "
+                         "split, same convention as unet's "
                          "split_by_cosmo) so validation covers MULTIPLE "
                          "cosmologies, not just one.")
     pf.add_argument("--val-frac", type=float, default=0.15,

@@ -269,18 +269,7 @@ def train(args):
     net = sf.SphereFlowNet(L, cond_dim=cond_dim, hidden=args.hidden,
                            n_layers=args.n_layers, K=args.K).to(dev)
 
-    # ---- resume from checkpoint (transient fabric/NCCL failures at scale keep
-    # killing multi-hour jobs; with checkpoints a crash costs minutes, not the
-    # run). Model state is loaded BEFORE compile/DDP so the keys match the raw
-    # module; optimizer/scheduler state is loaded after they are created below.
     Path(args.out_dir).mkdir(parents=True, exist_ok=True)
-    ckpt_path = Path(args.out_dir) / "checkpoint.pt"
-    ckpt = None
-    if ckpt_path.exists() and not args.fresh:
-        ckpt = torch.load(ckpt_path, map_location=dev)
-        net.load_state_dict(ckpt["model"])
-        if is_main():
-            print(f"[resume] loaded {ckpt_path} at step {ckpt['step']:,}", flush=True)
 
     if args.compile:
         net = torch.compile(net)
@@ -302,43 +291,26 @@ def train(args):
     sched = torch.optim.lr_scheduler.LambdaLR(
         opt, lambda s: 0.5 * (1 + math.cos(math.pi * min(s / total_steps, 1.0))))
 
-    start_step, loss_hist, ema = 0, [], None
-    if ckpt is not None:
-        opt.load_state_dict(ckpt["opt"])
-        sched.load_state_dict(ckpt["sched"])
-        start_step = int(ckpt["step"])
-        ema = ckpt.get("ema", None)
-        loss_hist = list(ckpt.get("loss_hist", []))
+    loss_hist, ema = [], None
 
     if is_main():
         print(f"[train] {streamer.n_shells} shells/rank | ~{steps_per_epoch:,} steps/epoch "
               f"x {args.epochs} = {total_steps:,} | batch/gpu={args.batch_size} | "
-              f"patch_frac={args.patch_frac} | compile={args.compile} | "
-              f"start_step={start_step:,}", flush=True)
-
-    def save_ckpt(step):
-        # atomic: torch.save to tmp then rename (a killed job must never leave a
-        # truncated checkpoint at the final name — same lesson as prepare_maps).
-        tmp = ckpt_path.with_suffix(f".tmp{os.getpid()}")
-        torch.save({"step": step, "model": raw_mod.state_dict(),
-                    "opt": opt.state_dict(), "sched": sched.state_dict(),
-                    "ema": ema, "loss_hist": loss_hist}, tmp)
-        os.replace(tmp, ckpt_path)
+              f"patch_frac={args.patch_frac} | compile={args.compile}", flush=True)
 
     net.train()
     it = streamer.batches(args.batch_size, dev)
     t0 = time.time()
-    last_t, last_step = t0, start_step   # for WINDOWED (instantaneous) steps/s
-    # DIAGNOSTIC heartbeat: a whole node (highest ranks) deterministically stops
-    # participating in the collective at ~step 13,254 regardless of data/compile/
-    # checkpoint. Print per-RANK, per-PHASE around that window so the hang's exact
-    # location (data load / forward / finite all-reduce / backward) is visible.
+    last_t, last_step = t0, 0            # for WINDOWED (instantaneous) steps/s
+    # DIAGNOSTIC heartbeat: prints per-RANK, per-PHASE inside [HB_LO, HB_HI] so a
+    # collective hang's exact location (data load / forward / finite all-reduce /
+    # backward) is visible. Off unless HB_HI is set (see run_sphere_flow.sh).
     HB_LO = int(os.environ.get("HB_LO", "0"))
     HB_HI = int(os.environ.get("HB_HI", "0"))
     def hb(phase):
         if HB_LO <= step <= HB_HI:
             print(f"[hb] rank{rank} step{step} {phase}", flush=True)
-    for step in range(start_step + 1, total_steps + 1):
+    for step in range(1, total_steps + 1):
         hb("A:pre-data")
         x1, cond, cosmo = next(it)
         hb("B:got-data")
@@ -396,18 +368,15 @@ def train(args):
                 # reads ~0 even when steady-state throughput is fine.
                 inst = (step - last_step) / max(now - last_t, 1e-9)
                 eta_h = (total_steps - step) / max(inst, 1e-9) / 3600.0
-                avg = (step - start_step) / max(now - t0, 1e-9)
+                avg = step / max(now - t0, 1e-9)
                 print(f"  step {step:,}/{total_steps:,} | loss={lv:.4f} ema={ema:.4f} | "
                       f"{inst:.2f} steps/s (avg {avg:.2f}) | ETA {eta_h:.1f}h | "
                       f"lr={sched.get_last_lr()[0]:.2e}", flush=True)
                 last_t, last_step = now, step
                 loss_hist.append(ema)
-            if step % args.ckpt_every == 0:
-                save_ckpt(step)
 
     if is_main():
         out = Path(args.out_dir); out.mkdir(parents=True, exist_ok=True)
-        save_ckpt(total_steps)                    # final checkpoint too
         torch.save(raw_mod.state_dict(), out / "sphere_flow.pth")
         np.savez(out / "meta.npz", nside=args.nside, order=args.order, K=args.K,
                  hidden=args.hidden, n_layers=args.n_layers, cond_dim=cond_dim,
@@ -445,12 +414,6 @@ if __name__ == "__main__":
     p.add_argument("--compile", action="store_true", default=True)
     p.add_argument("--no-compile", dest="compile", action="store_false")
     p.add_argument("--log-every", type=int, default=20)
-    p.add_argument("--ckpt-every", type=int, default=500,
-                   help="Save an atomic checkpoint every N steps; on restart the run "
-                        "auto-resumes from out-dir/checkpoint.pt (fabric/NCCL crashes "
-                        "then cost minutes, not the whole run).")
-    p.add_argument("--fresh", action="store_true",
-                   help="Ignore an existing checkpoint and start from scratch.")
     p.add_argument("--out-dir", default="./sphere_flow_model")
     args = p.parse_args()
     try:

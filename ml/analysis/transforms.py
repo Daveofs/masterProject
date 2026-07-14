@@ -1,17 +1,17 @@
 """Shared log1p(overdensity) transform, used identically by every pipeline that
-compares a low/corrected/high map or patch (unet_flow_jbucko, transfer).
+compares a low/corrected/high map or patch (unet, transfer).
 
 One canonical formula, used two ways:
   * log1p_delta(m)              -- single map, eps floor from its OWN mean.
   * log1p_delta_pair(low, high) -- a (low, high) PAIR sharing one eps floor
-    (min of the two means), matching unet_flow_jbucko/dataset.py's
+    (min of the two means), matching unet/dataset.py's
     raw_to_log1p_delta_pair exactly -- needed when comparing two patches/maps that
     must use the SAME clip so a fair delta comparison is possible.
 
 eps = 0.5/mean is a small nudge above -1 so log1p(-1)=-inf is never hit by a
 zero-count pixel, EXCEPT for very sparse fields (mean << 1, e.g. shell 0-10 of the
 lightcone) where eps blows up and the floor clips away real structure -- this is a
-property of the data/transform, not a bug (see unet_flow_jbucko/apply_flow.py's
+property of the data/transform, not a bug (see unet/apply_flow.py's
 full-sky section docstring for the full diagnosis).
 """
 from __future__ import annotations

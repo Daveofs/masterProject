@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Convergence ("loss") curve for the Poisson-resampler's per-ell Cl calibration,
-in the same visual style as unet_flow_jbucko/plot_flow_loss.py (train vs val curve,
+in the same visual style as unet/plot_flow_loss.py (train vs val curve,
 log-y, best-iteration marker), so the two pipelines' convergence can be viewed side
 by side. Only a plotting/instrumentation wrapper -- reuses poisson_resample.py's
 own cl2xi/xi2cl/_taper/_one_draw, nothing reimplemented.

@@ -1,25 +1,33 @@
 #!/bin/bash
-#SBATCH --nodes=4
-#SBATCH --job-name=flow-jbucko
+#SBATCH --nodes=1
+#SBATCH --job-name=unet-flow
 #SBATCH --partition=normal
 #SBATCH --account=sk037
 #SBATCH --ntasks-per-node=1
 #SBATCH --gres=gpu:4
 #SBATCH --cpus-per-task=64
 #SBATCH --time=05:00:00
-#SBATCH --output=/capstor/scratch/cscs/damrein/outputs/logs/flowjbucko/slurm-%j.out
-#SBATCH --error=/capstor/scratch/cscs/damrein/outputs/logs/flowjbucko/slurm-%j.err
+#SBATCH --output=/capstor/scratch/cscs/damrein/outputs/logs/unet/slurm-%j.out
+#SBATCH --error=/capstor/scratch/cscs/damrein/outputs/logs/unet/slurm-%j.err
 #SBATCH --chdir=/users/damrein/masterProject/ml
 
 # ============================================================================
-# Pipeline that EMBEDS jbucko's conditional flow-matching files (leaving them
-# untouched in unet_flow_jbucko/):  flow_model.py, dataset.py, make_patch_dataset.py,
-# train_flow.py. Glue only lives in flow_pipeline/ (plot + apply).
+# The patch-based conditional flow-matching (UNet) pipeline. Everything lives in
+# unet/ (renamed from the old unet_flow_jbucko/ -- job 4208375 died because these
+# scripts still pointed at the old path):
+#   flow_model.py, dataset.py, make_patch_dataset.py, train_flow.py (model/data)
+#   plot_flow_loss.py, apply_flow.py                                (plot + eval)
 #
-#   stage 0  prepare nside-512 low/high shell stacks (our preprocess/prepare_maps.py)
-#   stage 1  build flat gnomonic (low,high) patch dataset  (his make_patch_dataset.py)
-#   stage 2  DDP train the low->high flow                  (his train_flow.py, 1 node/4 GPU)
-#   stage 3  plot train/val loss + apply on HELD-OUT patches (flow_pipeline glue)
+#   stage 0  prepare low/high shell stacks (our preprocess/prepare_maps.py)
+#   stage 1  build flat gnomonic (low,high) patch dataset  (make_patch_dataset.py)
+#   stage 2  DDP train the low->high flow                  (train_flow.py, 1 node/4 GPU)
+#   stage 3  plot train/val loss + apply on HELD-OUT patches
+#
+# NODES: 1, deliberately. train_flow.py's DDP is torchrun --standalone (single-node,
+# DistributedSampler over the patch dataset) -- it has no multi-node rendezvous, so
+# the old --nodes=4 header allocated 3 nodes that sat idle for the whole job. Only
+# sphereflow/run_sphere_flow.sh is genuinely multi-node (c10d rendezvous across
+# ${SLURM_NNODES} x 4 GPUs, its shells sharded per rank).
 #
 # Why the flow (not our deterministic diff model): a deterministic MSE regressor's
 # optimum is the conditional mean, which shrinks the correction to corr*target
@@ -30,8 +38,7 @@
 export UENV_REPO_PATH=/capstor/scratch/cscs/damrein/.uenv-images
 VENV=/capstor/scratch/cscs/damrein/venvs/sphereflow
 DATA_ROOT="/capstor/scratch/cscs/damrein/cosmogridv1"
-JBUCKO=/users/damrein/masterProject/ml/unet_flow_jbucko
-PIPE=/users/damrein/masterProject/ml/unet_flow_jbucko
+UNET=/users/damrein/masterProject/ml/unet
 
 NSIDE=${NSIDE:-512}
 PATCH_SIZE=${PATCH_SIZE:-256}
@@ -57,14 +64,14 @@ KAPPA_FLAG=""; [ "${KAPPA}" = "1" ] && KAPPA_FLAG="--kappa"
 
 PATCH_DIR="/capstor/scratch/cscs/damrein/outputs/flowpatches/nside${NSIDE}_${PATCH_SIZE}_${NPATCH}"
 OUT_DIR="/capstor/scratch/cscs/damrein/outputs/flowruns/${RUN_NAME}"
-mkdir -p "$PATCH_DIR" "$OUT_DIR" /capstor/scratch/cscs/damrein/outputs/logs/flowjbucko
+mkdir -p "$PATCH_DIR" "$OUT_DIR" /capstor/scratch/cscs/damrein/outputs/logs/unet
 
 export PYTHONUNBUFFERED=1
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 export OMP_NUM_THREADS=$((SLURM_CPUS_PER_TASK / 4))
 ulimit -c 0
 
-echo "==== flow-jbucko | job ${SLURM_JOB_ID} | nside=${NSIDE} patch=${PATCH_SIZE} n=${NPATCH} use_cosmo_cond=${USE_COSMO_COND} ===="
+echo "==== unet-flow | job ${SLURM_JOB_ID} | nside=${NSIDE} patch=${PATCH_SIZE} n=${NPATCH} use_cosmo_cond=${USE_COSMO_COND} ===="
 
 # ---- stage 0: nside-512 low/high shell stacks (skip runs already prepared) ----
 srun --nodes=1 --ntasks=1 uenv run pytorch/v2.9.1:v2 --view=default -- bash -c "
@@ -80,7 +87,7 @@ srun --nodes=1 --ntasks=1 uenv run pytorch/v2.9.1:v2 --view=default -- bash -c "
 if [ ! -f "${PATCH_DIR}/metadata.npy" ]; then
   srun --nodes=1 --ntasks=1 uenv run pytorch/v2.9.1:v2 --view=default -- bash -c "
     source ${VENV}/bin/activate
-    python ${JBUCKO}/make_patch_dataset.py \
+    python ${UNET}/make_patch_dataset.py \
       --data-dir     '${DATA_ROOT}' \
       --prepared-dir '${DATA_ROOT}' \
       --out-dir      '${PATCH_DIR}' \
@@ -95,7 +102,7 @@ fi
 # ---- stage 2: DDP train the low->high flow (his train_flow.py, 1 node / 4 GPU) ----
 srun --nodes=1 --ntasks=1 uenv run pytorch/v2.9.1:v2 --view=default -- bash -c "
   source ${VENV}/bin/activate
-  cd ${JBUCKO}
+  cd ${UNET}
   python -m torch.distributed.run --standalone --nproc_per_node=4 train_flow.py \
     --patch-dir '${PATCH_DIR}' \
     --out-dir   '${OUT_DIR}' \
@@ -113,20 +120,20 @@ srun --nodes=1 --ntasks=1 uenv run pytorch/v2.9.1:v2 --view=default -- bash -c "
 # --example-shells list shared by both diagnostics so they can never silently
 # diverge. Full-sky reconstruction tiles the WHOLE sphere via one flow ODE
 # integration per patch -- far more expensive per shell than the CPU-only transfer
-# pipeline's real Cl, so the shell selection here is deliberately small for a first
-# run (--shell-indices left empty to skip the redundant lone-Cl plots;
-# --example-shells covers one sparse and one dense shell for a first comparability
-# check -- widen once the per-shell cost on this setup is known).
+# pipeline's real Cl. --shell-indices is left empty (the lone-Cl plots are redundant
+# with cl_ratio_by_zbin_grid.png); --example-shells 5 10 15 30 50 is the SAME shell
+# set transfer/apply_transfer.py and sphereflow/apply_sphere_flow.py use, so the
+# three pipelines' figures compare directly.
 srun --nodes=1 --ntasks=1 --gres=gpu:1 uenv run pytorch/v2.9.1:v2 --view=default -- bash -c "
   source ${VENV}/bin/activate
-  python ${PIPE}/plot_flow_loss.py --run-dir '${OUT_DIR}'
-  python ${PIPE}/apply_flow.py \
+  python ${UNET}/plot_flow_loss.py --run-dir '${OUT_DIR}'
+  python ${UNET}/apply_flow.py \
     --patch-dir '${PATCH_DIR}' \
     --model     '${OUT_DIR}/best.pt' \
     --out-dir   '${OUT_DIR}/eval' \
     --steps ${STEPS} \
     --data-root '${DATA_ROOT}' \
-    --shell-indices --example-shells 3 30 \
+    --shell-indices --example-shells 5 10 15 30 50 \
     --fullsky-patch-size ${PATCH_SIZE} ${KAPPA_FLAG}
 "
-echo "flow-jbucko job ${SLURM_JOB_ID} finished at $(date)"
+echo "unet-flow job ${SLURM_JOB_ID} finished at $(date) -> ${OUT_DIR}/eval"

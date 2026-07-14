@@ -1,6 +1,6 @@
 """Per-map one-point statistics (mean, variance, skewness, excess kurtosis) -- the
 one-point-PDF analogue of radial_power.py's two-point statistic. Shared by every
-pipeline's moments-vs-shell-depth and histogram figures (unet_flow_jbucko, transfer).
+pipeline's moments-vs-shell-depth and histogram figures (unet, transfer).
 
 Motivated by the positivity/one-point-PDF investigation: a Cl ratio (two-point,
 phase-blind) can look perfect while the marginal pixel distribution is badly wrong --

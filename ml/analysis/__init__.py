@@ -1,5 +1,5 @@
 """Shared analysis/plotting tools used by every correction pipeline in this project
-(unet_flow_jbucko's flow model, transfer's transfer-function+Poisson pipeline, ...).
+(unet's flow model, transfer's transfer-function+Poisson pipeline, ...).
 
 Kept pipeline-agnostic on purpose: these modules know how to transform, tile, measure
 and PLOT a low/corrected/high comparison, but nothing about how "corrected" was

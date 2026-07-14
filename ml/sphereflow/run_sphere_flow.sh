@@ -35,9 +35,12 @@ export UENV_REPO_PATH=/capstor/scratch/cscs/damrein/.uenv-images
 VENV=/capstor/scratch/cscs/damrein/venvs/sphereflow
 
 DATA_ROOT="/capstor/scratch/cscs/damrein/cosmogridv1"
-# STABLE run name (NOT the job id): resubmitting after a crash then AUTO-RESUMES
-# from OUT_DIR/checkpoint.pt instead of restarting from scratch. Start a brand-new
-# training by choosing a new RUN_NAME (or deleting the checkpoint).
+# Run name = the output dir under outputs/sphereflow/. Each submission trains from
+# scratch: there is NO checkpoint/resume path any more (removed 2026-07-14) -- the
+# crashes it existed to survive came from the non-finite-loss DDP desync (fixed in
+# the train loop's collective finite guard) and the Slingshot CXI settings below,
+# not from something a mid-run restore was ever the right answer to. Reuse a
+# RUN_NAME and you OVERWRITE that run's sphere_flow.pth/meta.npz.
 RUN_NAME=${RUN_NAME:-v3_direct_44runs}
 OUT_DIR="/capstor/scratch/cscs/damrein/outputs/sphereflow/${RUN_NAME}"
 TEST_COSMO=cosmo_000122
@@ -71,10 +74,12 @@ export PYTHONUNBUFFERED=1
 # multi-GB `core_nid*` files into the (home) working dir and blew the 50 GB home
 # quota. We never gdb these; suppress them so crashes don't fill home.
 ulimit -c 0
-# DIAGNOSTIC per-rank heartbeat window (see train loop). Active in [HB_LO,HB_HI];
-# set HB_HI=0 to disable. Covers the deterministic ~13,254 hang.
-export HB_LO=${HB_LO:-13240}
-export HB_HI=${HB_HI:-13270}
+# DIAGNOSTIC per-rank heartbeat window (see train loop). OFF by default (HB_HI=0):
+# it existed to locate the deterministic ~step-13,254 collective hang, which the
+# train loop's collective non-finite-loss guard fixed. Set HB_LO/HB_HI to a step
+# window to re-enable if a rank ever stops participating again.
+export HB_LO=${HB_LO:-0}
+export HB_HI=${HB_HI:-0}
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
 echo "==== sphere-flow v3 (single model, direct) | job ${SLURM_JOB_ID} ===="
@@ -108,49 +113,43 @@ srun uenv run pytorch/v2.9.1:v2 --view=default -- bash -c "
       --patch-frac  0.5 \
       --lr          2e-4 \
       --log-every   50 \
-      --ckpt-every  200 \
       --no-compile \
       --out-dir     '${OUT_DIR}'
 "
 STAGE1_RC=$?
-
-# ---- auto-requeue on crash (recurring Slingshot PTLTE_NOT_FOUND fabric errors at
-#      this node count -- not fully eliminated by the CXI env vars above). Training
-#      exits nonzero on a crashed rank; checkpoint.pt already has the last <=500
-#      steps of progress, so just resubmit ourselves (same RUN_NAME -> auto-resume)
-#      instead of making the user notice and resubmit by hand every time.
-#      CHAIN_DEPTH guards against infinite resubmission if something is genuinely
-#      broken (not just a transient fabric error).
-CHAIN_DEPTH=${CHAIN_DEPTH:-0}
-MAX_CHAIN=${MAX_CHAIN:-15}
 if [ "$STAGE1_RC" -ne 0 ]; then
-    if [ "$CHAIN_DEPTH" -lt "$MAX_CHAIN" ]; then
-        echo "stage 1 crashed (rc=$STAGE1_RC), chain depth $CHAIN_DEPTH/$MAX_CHAIN -> resubmitting (will auto-resume from checkpoint)"
-        sbatch --export=ALL,RUN_NAME="${RUN_NAME}",CHAIN_DEPTH=$((CHAIN_DEPTH + 1)),MAX_CHAIN="${MAX_CHAIN}" \
-            "${BASH_SOURCE[0]}"
-    else
-        echo "stage 1 crashed (rc=$STAGE1_RC) and hit MAX_CHAIN=$MAX_CHAIN -- NOT resubmitting further. Check ${OUT_DIR}/checkpoint.pt and the logs; something beyond transient fabric errors may be wrong."
-    fi
-    echo "sphere-flow v3 job ${SLURM_JOB_ID} exiting early (stage 1 incomplete) at $(date)"
-    exit 0
+    echo "stage 1 FAILED (rc=$STAGE1_RC) -- no checkpoint/auto-resubmit any more, so"
+    echo "there is nothing to resume: fix the cause and resubmit. Logs are in"
+    echo "/capstor/scratch/cscs/damrein/outputs/logs/sphereflow/slurm-${SLURM_JOB_ID}.err"
+    exit 1
 fi
 
-# ---- stage 2: quick 3-shell smoke test (flow vs DISCO baseline vs CosmoGrid).
-#      apply_sphere_flow.py now also does the fuller patch/full-sky/zbin-grid
-#      comparison suite (see run_sphere_flow_compare.sh) -- narrowed back down
-#      here to just cl_shell{003,030,050}.png so this post-training check stays
-#      fast. TEST_COSMO must match apply_sphere_flow.py's --run-dirs (defaults
-#      to cosmo_000122/run_0, the cosmology this checkpoint was actually held
-#      out on -- only override TEST_COSMO above if you also change --test-cosmo
-#      in stage 1). ----
+# ---- stage 2: the FULL eval suite -- the SAME figures, statistics, shells and
+#      kappa resolution as transfer/apply_transfer.py (the reference) and
+#      unet/apply_flow.py, via the shared analysis/ plotting code:
+#        example_patches.png, patch_power_ratio_pctile_band.png,
+#        moments_vs_shell.png, example_histograms.png,
+#        cl_ratio_by_zbin_grid.png,
+#        kappa_cl_per_cosmology.png, kappa_cl_pctile_band.png,
+#        kappa_moments_scatter.png
+#      (previously this stage only emitted cl_shell{003,030,050}.png -- a 3-shell
+#      spot check that could not be compared against the other two pipelines.)
+#      TEST_COSMO must match apply_sphere_flow.py's --run-dirs: it is the cosmology
+#      this checkpoint was actually held out on, so only override TEST_COSMO above
+#      if you also change --test-cosmo in stage 1.
+#      --kappa is the expensive part (every usable shell in z<=1.05 gets ODE-sampled,
+#      dozens of shells); drop it for a faster post-training check.
 srun --nodes=1 --ntasks=1 uenv run pytorch/v2.9.1:v2 --view=default -- bash -c "
   source ${VENV}/bin/activate
   python sphereflow/apply_sphere_flow.py \
       --model-dir '${OUT_DIR}' \
       --data-root '${DATA_ROOT}' \
       --run-dirs '${DATA_ROOT}/${TEST_COSMO}/run_0' \
-      --patch-shells --fullsky-shells --n-zbins 0 \
-      --fullsky-shell-indices 3 30 50 --steps 50 --lmax 3000 \
+      --nside 2048 --lmax 3000 --steps 50 \
+      --patch-shells 5 10 15 30 50 \
+      --fullsky-shells 5 10 15 30 50 \
+      --n-zbins 3 --n-shells-per-zbin 5 \
+      --kappa --kappa-nside 1024 --kappa-lmax 2048 \
       --out-dir '${OUT_DIR}/eval'
 "
 

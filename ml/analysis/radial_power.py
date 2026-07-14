@@ -3,8 +3,8 @@ angular power spectrum C_ell, used by every pipeline's example_patches.png (the 
 column: "power ratio to truth" computed on one small gnomonic patch, as opposed to
 full_sky.od_cl's REAL C_ell over the whole reconstructed sphere).
 
-Single canonical numpy implementation, shared by unet_flow_jbucko and transfer. A
-batched torch version lives in unet_flow_jbucko/apply_flow.py ONLY for GPU throughput
+Single canonical numpy implementation, shared by unet and transfer. A
+batched torch version lives in unet/apply_flow.py ONLY for GPU throughput
 when scoring hundreds of patches at once (averaged power_spectrum_ratio.png) -- for a
 handful of example rows, this plain numpy version is simpler and fast enough.
 """

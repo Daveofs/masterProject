@@ -3,7 +3,7 @@
 and run every shared analysis/ diagnostic -- all in ONE script/process. Moved out of
 transfer_function.py (which keeps fit/train/emulate: building T) and out of the
 formerly-separate plot_example_patches.py / infer_full_sky_transfer.py (now embedded
-below as plot_patches/plot_full_sky). Analogous to unet_flow_jbucko/apply_flow.py,
+below as plot_patches/plot_full_sky). Analogous to unet/apply_flow.py,
 which embeds prediction + evaluation + plotting in one file the same way.
 
 "Connects cleanly": apply() returns the corrected array directly in memory, so
@@ -11,7 +11,7 @@ plot_patches/plot_full_sky use it straight away -- no writing the (13.9GB at
 nside=2048) result to disk and reading it back just to plot it.
 
 Validates on MULTIPLE held-out cosmologies at once (--run-dirs takes one or more),
-mirroring unet_flow_jbucko/apply_flow.py's split_by_cosmo-based held-out set rather
+mirroring unet/apply_flow.py's split_by_cosmo-based held-out set rather
 than a single fixed test cosmology -- pctile-band power ratios and full-sky moments/
 histograms pool patches/pixels across ALL of them; the visual example grid
 (example_patches.png) draws each row from a random held-out cosmology, labeled with
@@ -20,7 +20,7 @@ the full set.
 The Cl diagnostic is cl_ratio_by_zbin_grid.png: one row per held-out cosmology (up to
 --max-cosmologies) x one column per redshift bin, with a percentile band -- the same
 statistic + shared plotting code (analysis.plot_cl_ratio_pctile_grid +
-zbin_shell_samples) as apply_flow.py's example_full_sky.png. Our OWN
+zbin_shell_samples) as apply_flow.py's cl_ratio_by_zbin_grid.png. Our OWN
 example_full_sky.png (gnomonic-zoom triptych + per-shell Cl) was removed by request:
 it only ever showed one cosmology at one fixed sky position, and its Cl-ratio panel is
 strictly subsumed by cl_ratio_by_zbin_grid.png.
@@ -310,13 +310,13 @@ def plot_patches(args, run_dirs: list[Path], corrected_by_run: dict):
                  f"cosmologies: {all_cosmos} "
                  "(held out of fit/train) -- example patches (log1p overdensity) "
                  "+ per-patch power ratio\n(same layout/transform as "
-                 "unet_flow_jbucko/apply_flow.py's example_patches.png)")
+                 "unet/apply_flow.py's example_patches.png)")
 
     # --- pctile-band power-ratio plot: many random patches, POOLED ACROSS ALL
     # held-out cosmologies (not just --n-per-shell visual examples above, and not
     # just run_dirs[0]) so a systematic bias is distinguishable from both per-patch
     # noise AND one-cosmology luck -- same statistic and shared plotting code as
-    # unet_flow_jbucko/apply_flow.py's power_ratio_pctile_band.png, which pools
+    # unet/apply_flow.py's patch_power_ratio_pctile_band.png, which pools
     # its own multi-cosmology held-out patch set the same way. ---
     if args.n_pctile_patches > 0:
         print(f"[plot_patches] sampling {args.n_pctile_patches} random patches "
@@ -429,8 +429,8 @@ def plot_full_sky(args, run_dirs: list[Path], corrected_by_run: dict):
 def plot_cl_zbin_grid(args, run_dirs: list[Path], corrected_by_run: dict):
     """Cl-ratio-by-redshift-bin pctile grid: one row per held-out cosmology (up to
     --max-cosmologies), one column per redshift/shell bin (zbin_shell_samples) --
-    the SAME multi-cosmology two-point check unet_flow_jbucko/apply_flow.py's
-    example_full_sky.png uses (plot_cl_ratio_pctile_grid). THIS is the pipeline's
+    the SAME multi-cosmology two-point check unet/apply_flow.py's
+    cl_ratio_by_zbin_grid.png uses (plot_cl_ratio_pctile_grid). THIS is the pipeline's
     Cl diagnostic: it is the genuine "more than one held-out cosmology" validation,
     which is why our own single-cosmology example_full_sky.png was dropped -- a
     systematic bias that happened to look fine on one hand-picked cosmology's
@@ -482,7 +482,7 @@ def plot_kappa(args, run_dirs: list[Path], corrected_by_run: dict):
     """Weak-lensing kappa map diagnostic (analysis.weak_lensing): reduces the WHOLE
     usable lightcone [--kappa-zi, --kappa-zf] of low/corrected/high into ONE kappa
     map each via UFalcon, for EVERY held-out run-dir (not capped by
-    --max-cosmologies -- unlike unet_flow_jbucko/apply_flow.py, "corrected" here is
+    --max-cosmologies -- unlike unet/apply_flow.py, "corrected" here is
     already the full in-memory array from apply(), no extra reconstruction cost per
     shell, so this is comparatively cheap: just filtering + a handful of
     construct_kappa_map calls per cosmology instead of tiling+ODE per shell). Each
@@ -533,12 +533,9 @@ def plot_kappa(args, run_dirs: list[Path], corrected_by_run: dict):
                       f"n(z)={Path(args.kappa_nz).name} | z in [{args.kappa_zi:g},{args.kappa_zf:g}]"
                       f" | kappa nside={args.kappa_nside}, lmax={args.kappa_lmax}")
 
-    # Two views of the SAME kappa Cl, because each answers a different question:
+    # Two views of the SAME kappa Cl, because each answers a different question
+    # (unet/apply_flow.py and sphereflow/apply_sphere_flow.py emit both too):
     #  - _per_cosmology (faceted):   how does each cosmology behave on its own?
-    #    (plot_kappa_cl_multi_cosmo's single-overlay alternative, used by
-    #    unet_flow_jbucko/apply_flow.py, piles every cosmology's lines onto one
-    #    axes -- readable there since it stays to a handful of cosmologies, but
-    #    not the clearer view once you actually want to judge each one)
     #  - _pctile_band (median+band): the aggregate, with the cosmology-to-cosmology
     #    SPREAD made explicit -- one kappa map per cosmology means there is no
     #    within-cosmology spread to band, so the band here is ACROSS cosmologies,
@@ -580,7 +577,7 @@ def main():
                    help="One or more held-out-cosmology run dirs, each with "
                         "low_alms_lmax{lmax}.npy (+ high_alms) -- validating on "
                         "MULTIPLE held-out cosmologies (not just one) mirrors "
-                        "unet_flow_jbucko's split_by_cosmo/apply_flow.py.")
+                        "unet's split_by_cosmo/apply_flow.py.")
     p.add_argument("--info-npz", default="compressed_shells.npz",
                    help="npz to copy non-shell metadata (shell_info) from; also the "
                         "true CosmoGrid shells used by the plotting stages below.")
@@ -642,7 +639,7 @@ def main():
     p.add_argument("--lmax", type=int, default=3000)
 
     # --- plot_cl_zbin_grid args (multi-cosmology Cl-ratio-by-redshift-bin pctile
-    # grid, mirrors unet_flow_jbucko/apply_flow.py's example_full_sky.png) ---
+    # grid, mirrors unet/apply_flow.py's cl_ratio_by_zbin_grid.png) ---
     p.add_argument("--zbin-start", type=int, default=0,
                    help="Skip the sparsest low shells (see zbin_shell_samples).")
     p.add_argument("--n-zbins", type=int, default=3,

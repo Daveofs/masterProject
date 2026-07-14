@@ -21,7 +21,7 @@
 # directly). Four stages:
 #   0. held-out cosmologies: a random FRACTION of cosmologies (VAL_FRAC, default
 #      0.15) is held out for validation -- same whole-cosmology-split convention
-#      as unet_flow_jbucko/dataset.py's split_by_cosmo (default val_frac=0.15) --
+#      as unet/dataset.py's split_by_cosmo (default val_frac=0.15) --
 #      instead of a single fixed test cosmology, so validation isn't just one
 #      cosmology getting lucky/unlucky. Override with TEST_COSMOS="cosmo_A cosmo_B"
 #      for an explicit list. transfer_function.split_val_cosmos() (same function
@@ -57,7 +57,7 @@
 #                  held-out cosmology set) is produced in stage 3 below, POOLED
 #                  across all held-out cosmologies' corrected output.
 #   3. apply_transfer.py --poisson --ell-min-mpc 3 : ONE script (mirroring
-#                  unet_flow_jbucko/apply_flow.py) that embeds apply() (the
+#                  unet/apply_flow.py) that embeds apply() (the
 #                  transfer-function correction + lognormal+Poisson
 #                  re-discretization into valid non-negative INTEGER counts, one
 #                  step per shell, no 13.9GB continuous intermediate ever written
@@ -86,7 +86,7 @@
 #                  request). cl_ratio_by_zbin_grid.png is THE Cl diagnostic: the
 #                  GENUINE multi-cosmology check (one row per held-out cosmology,
 #                  one column per redshift bin, pctile band) -- the same statistic
-#                  + shared plotting code as unet_flow_jbucko/apply_flow.py's
+#                  + shared plotting code as unet/apply_flow.py's
 #                  example_full_sky.png uses (analysis.plot_cl_ratio_pctile_grid +
 #                  zbin_shell_samples). Our old example_full_sky.png only ever
 #                  showed ONE cosmology at one fixed sky position, so its Cl panel
@@ -105,7 +105,7 @@
 #                  without re-validating on this hardware.
 #                  Diagnostics use the SAME shared ../analysis/ tools
 #                  (transforms/plotting/radial_power/full_sky) that
-#                  unet_flow_jbucko's pipeline uses. End state, per held-out set:
+#                  unet's pipeline uses. End state, per held-out set:
 #                    example_patches.png            flat-patch triptych + 2D-FFT
 #                                                   power ratio (matches jbucko's)
 #                    patch_power_ratio_pctile_band.png  pooled over all cosmologies
@@ -128,10 +128,10 @@ export OMP_NUM_THREADS=8         # light default; heavy stages override inline b
 
 # apply_transfer.py (stage 3) now ALSO builds weak-lensing kappa maps via UFalcon
 # (analysis.weak_lensing, --kappa) -- UFalcon is installed in sphereflow (the SAME
-# venv unet_flow_jbucko's pipeline uses), not deepSphere (which lacks it, and whose
+# venv unet's pipeline uses), not deepSphere (which lacks it, and whose
 # sklearn-based MLP emulator stage 2 needs is in turn not in sphereflow) -- so ONLY
 # stage 3's invocation below switches env, via the same uenv+venv activation
-# unet_flow_jbucko/run_flow.sh uses, rather than installing UFalcon separately into
+# unet/run_flow.sh uses, rather than installing UFalcon separately into
 # two environments that could drift out of sync.
 export UENV_REPO_PATH=/capstor/scratch/cscs/damrein/.uenv-images
 SPHEREFLOW_VENV=/capstor/scratch/cscs/damrein/venvs/sphereflow
@@ -240,13 +240,13 @@ fi
 # ---- 3. apply_transfer.py: correction + Poisson + ALL diagnostics, one script ----
 # Embeds apply() + the former plot_example_patches.py/infer_full_sky_transfer.py,
 # connected in-memory (see apply_transfer.py's docstring) -- mirrors
-# unet_flow_jbucko/apply_flow.py's one-script pattern. Runs once per held-out
+# unet/apply_flow.py's one-script pattern. Runs once per held-out
 # cosmology (--run-dirs), pooling diagnostics across all of them. --kappa's held-out
 # coverage is therefore bounded by MAX_COSMOLOGIES too (it reuses the in-memory
 # `corrected` this stage already computed -- giving it every held-out cosmology
 # would mean re-running the expensive apply()+Poisson step, ~52min each, on more of
 # them, contradicting MAX_COSMOLOGIES' whole reason for existing).
-# Runs under sphereflow (uenv+venv, same env unet_flow_jbucko/run_flow.sh uses),
+# Runs under sphereflow (uenv+venv, same env unet/run_flow.sh uses),
 # NOT deepSphere (stages 0-2 above) -- UFalcon (--kappa) is only installed there;
 # apply_transfer.py's own deps (numpy/healpy/scipy/yaml/matplotlib) all work under
 # sphereflow too (checked), so this is a clean env switch, not a partial one.

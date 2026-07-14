@@ -16,6 +16,19 @@ Because a flow SAMPLE (not a conditional mean) carries the full high-field varia
 corrected power should track the truth at small scales where a deterministic regressor
 would sag -- that is the whole reason for this approach.
 
+SHARED EVAL SET: the figures below are the SAME statistics, shared analysis/ plotting
+code, same shells and same kappa resolution as transfer/apply_transfer.py (the
+reference) and sphereflow/apply_sphere_flow.py, so the three pipelines' outputs are
+comparable file-by-file:
+    example_patches.png, patch_power_ratio_pctile_band.png,
+    moments_vs_shell.png / example_histograms.png (full-sky one-point PDF, needs
+    --data-root -- the patch-pooled versions are written as patch_*.png and have no
+    counterpart in the other two pipelines),
+    cl_ratio_by_zbin_grid.png (--data-root),
+    kappa_cl_per_cosmology.png, kappa_cl_pctile_band.png, kappa_moments_scatter.png
+    (--kappa).
+power_spectrum_ratio.png (mean 2D-FFT power, loglog) is extra, unique to this script.
+
   python apply_flow.py --patch-dir <dir> --model <run>/best.pt --out-dir <run>/eval
 """
 from __future__ import annotations
@@ -43,7 +56,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 from analysis.plotting import (plot_example_patch_grid, plot_pctile_band_ratio,  # noqa: E402
                                plot_histogram_grid, plot_moments_vs_shell,
                                plot_cl_shell, plot_cl_ratio_pctile_grid,
-                               plot_kappa_cl_multi_cosmo, plot_kappa_moments_scatter)
+                               plot_kappa_cl_grid, plot_kappa_moments_scatter)
 from analysis.moments import moments                      # noqa: E402
 from analysis.patch_tiling import auto_nside_centers, reconstruct_shell  # noqa: E402
 from analysis.full_sky import od_cl, zbin_shell_samples    # noqa: E402
@@ -91,13 +104,16 @@ def main():
     p.add_argument("--n-eval", type=int, default=512, help="held-out patches to evaluate")
     p.add_argument("--eval-batch", type=int, default=64,
                    help="mini-batch size for the ODE sampling pass (memory control)")
-    p.add_argument("--example-shells", type=int, nargs="+", default=[5, 20, 40, 60],
+    p.add_argument("--example-shells", type=int, nargs="+", default=[5, 10, 15, 30, 50],
                    help="shell indices to show as rows in example_patches.png (one "
-                        "held-out patch per shell, picked via patch metadata)")
+                        "held-out patch per shell, picked via patch metadata) and to "
+                        "pool for the moments/histogram plots. Default matches "
+                        "transfer/apply_transfer.py's --patch-shells/--fullsky-shells "
+                        "and sphereflow's, so the three pipelines' figures line up.")
     p.add_argument("--steps", type=int, default=8, help="Euler ODE steps")
     p.add_argument("--n-stat-patches", type=int, default=64,
                    help="held-out patches PER --example-shells shell to pool for "
-                        "moments_vs_shell.png / example_histograms.png -- the "
+                        "patch_moments_vs_shell.png / patch_example_histograms.png -- the "
                         "one-point PDF (esp. skew/kurtosis of a sparse count field) "
                         "is far noisier per-patch than the power ratio, so this "
                         "needs many patches, unlike the single visual example patch")
@@ -110,8 +126,10 @@ def main():
     p.add_argument("--data-root", default=None,
                    help="prepare_maps.py output (full-sky low/high shell stacks). "
                         "If given, ALSO reconstructs the whole sphere and computes "
-                        "the real full-sky Cl -> cl_shell*.png, example_full_sky.png, "
-                        "fullsky_moments_vs_shell.png, fullsky_example_histograms.png")
+                        "the real full-sky Cl -> cl_shell*.png, cl_ratio_by_zbin_grid.png, "
+                        "moments_vs_shell.png, example_histograms.png (the full-sky, "
+                        "cross-pipeline-comparable one-point PDF -- WITHOUT --data-root only "
+                        "the patch_-prefixed patch-pooled versions are written)")
     p.add_argument("--cosmo", default=None,
                    help="cosmology for the full-sky reconstruction; default: first "
                         "held-out (val) cosmology")
@@ -132,10 +150,11 @@ def main():
     # --n-shells-per-zbin full-sky reconstructions, so rows*cols*shells-per-zbin is
     # the real cost knob -- these defaults are deliberately small; widen once the
     # per-shell cost on this setup is known (same philosophy as --shell-indices above). ---
-    p.add_argument("--zbin-start", type=int, default=9,
-                   help="first shell in the Cl-ratio-by-redshift-bin grid -- lower "
-                        "shells are typically too sparse for a meaningful Cl ratio "
-                        "(see analysis.transforms's eps-clipping note)")
+    p.add_argument("--zbin-start", type=int, default=0,
+                   help="first shell in the Cl-ratio-by-redshift-bin grid. 0 (same as "
+                        "transfer/sphereflow) so all three grids bin the SAME shells; "
+                        "the faintest shells are noisy but that IS the regime the "
+                        "generative models are supposed to win in.")
     p.add_argument("--n-zbins", type=int, default=3,
                    help="number of redshift/shell-index bins (columns) spanning "
                         "[--zbin-start, last shell]")
@@ -161,13 +180,22 @@ def main():
                    help="n(z) redshift distribution passed to UFalcon's "
                         "construct_kappa_map -- named explicitly in the kappa "
                         "plots' suptitle so the choice is never ambiguous")
-    p.add_argument("--kappa-nside", type=int, default=128,
-                   help="output kappa map nside (independent of --fullsky-patch-size)")
+    p.add_argument("--kappa-nside", type=int, default=1024,
+                   help="output kappa map nside (independent of --fullsky-patch-size). "
+                        "1024 (not the old 128) because the kappa map's own resolution "
+                        "CUTS OFF the diagnostic: nside=128 only represents ell<~383 "
+                        "(3*nside-1), but the correction does essentially ALL of its "
+                        "work above that, so the comparison would show corrected ~ low "
+                        "~ high and say nothing. Same value as transfer/apply_transfer.py "
+                        "and sphereflow/apply_sphere_flow.py, so the kappa plots of the "
+                        "three pipelines are directly comparable.")
     p.add_argument("--kappa-zi", type=float, default=0.0)
     p.add_argument("--kappa-zf", type=float, default=1.05)
-    p.add_argument("--kappa-lmax", type=int, default=350,
-                   help="angular power spectrum lmax for the kappa maps "
-                        "(--kappa-nside supports up to ~3*nside-1)")
+    p.add_argument("--kappa-lmax", type=int, default=2048,
+                   help="angular power spectrum lmax for the kappa maps (--kappa-nside "
+                        "supports up to ~3*nside-1, so keep this below that). Must reach "
+                        "well past ell~350 or the correction is invisible -- see "
+                        "--kappa-nside.")
     p.add_argument("--kappa-max-cosmologies", type=int, default=3,
                    help="held-out cosmologies to build kappa maps for. This is THE "
                         "cost knob of the whole script: each one needs every usable "
@@ -274,7 +302,7 @@ def main():
     # spread (not just the mean) so a systematic bias is distinguishable from noise ---
     plot_pctile_band_ratio(
         k, {"low / high (baseline, no model)": lo_r_stack, "flow pred / high": co_r_stack},
-        out_dir / "power_ratio_pctile_band.png", xlabel="radial wavenumber bin",
+        out_dir / "patch_power_ratio_pctile_band.png", xlabel="radial wavenumber bin",
         ylim=(0.4, 1.6),
         title=f"power ratio: flow vs baseline ({len(pick)} val patches, 16-84th pctile band)")
 
@@ -327,10 +355,10 @@ def main():
 
     plot_moments_vs_shell(
         moment_shells, {"low": mom_low, "high (true)": mom_high, "flow pred": mom_corr},
-        out_dir / "moments_vs_shell.png",
+        out_dir / "patch_moments_vs_shell.png",
         suptitle=f"moments vs. shell depth ({n_stat} held-out patches/shell, raw counts)")
     plot_histogram_grid(
-        hist_rows, out_dir / "example_histograms.png", corrected_label="flow-corrected",
+        hist_rows, out_dir / "patch_example_histograms.png", corrected_label="flow-corrected",
         suptitle=f"held-out patches, raw pixel-count histogram per shell ({n_stat} patches/shell)")
 
     # ============= optional: full-sky reconstruction + REAL angular Cl =============
@@ -421,11 +449,11 @@ def main():
                 fs_hist_rows.append((f"shell {s}", low_shell.ravel(), pred_filled.ravel(), high_shell.ravel()))
             plot_moments_vs_shell(
                 example_shells, {"low": fs_mom_low, "high (true)": fs_mom_high, "flow pred": fs_mom_pred},
-                out_dir / "fullsky_moments_vs_shell.png",
+                out_dir / "moments_vs_shell.png",
                 suptitle=f"moments vs. shell depth -- full-sky reconstruction (raw counts)\n"
                         f"{fs_cosmo}/{args.run}")
             plot_histogram_grid(
-                fs_hist_rows, out_dir / "fullsky_example_histograms.png", corrected_label="flow-corrected",
+                fs_hist_rows, out_dir / "example_histograms.png", corrected_label="flow-corrected",
                 suptitle=f"full-sky raw pixel-count histogram per shell\n{fs_cosmo}/{args.run}")
 
         # --- example_full_sky.png: Cl-ratio-by-redshift-bin pctile grid. One row per
@@ -462,7 +490,8 @@ def main():
             grid.append((f"{c}/{args.run}", panels))
 
         plot_cl_ratio_pctile_grid(
-            grid, out_dir / "example_full_sky.png",
+            grid, out_dir / "cl_ratio_by_zbin_grid.png",
+            corrected_label="corrected (flow) / true (after)",
             suptitle="Full-sky Cl ratio by redshift bin (flow)")
 
         # --- weak-lensing kappa map diagnostic (analysis.weak_lensing): reduces
@@ -520,11 +549,29 @@ def main():
             kappa_ells = np.arange(args.kappa_lmax + 1)
             kappa_suptitle_common = (f"{len(kappa_cosmo_labels)} held-out cosmologies (flow) | "
                                      f"n(z)={Path(args.kappa_nz).name} | "
-                                     f"z in [{args.kappa_zi:g},{args.kappa_zf:g}]")
-            plot_kappa_cl_multi_cosmo(
+                                     f"z in [{args.kappa_zi:g},{args.kappa_zf:g}]"
+                                     f" | kappa nside={args.kappa_nside}, lmax={args.kappa_lmax}")
+            # Same two views of the kappa Cl as transfer/apply_transfer.py and
+            # sphereflow/apply_sphere_flow.py -- faceted per cosmology, and the
+            # median + 16-84 band ACROSS cosmologies. (The old single-overlay
+            # kappa_cl_all_cosmologies.png was dropped: with more than a couple of
+            # cosmologies its lines pile onto one axes and neither question --
+            # "how does each one behave" nor "what is the spread" -- is readable.)
+            plot_kappa_cl_grid(
                 kappa_cosmo_labels, kappa_ells, kappa_cl_low, kappa_cl_corr, kappa_cl_high,
-                out_dir / "kappa_cl_all_cosmologies.png", corrected_label="flow-corrected",
-                suptitle=f"weak-lensing kappa Cl, {kappa_suptitle_common}")
+                out_dir / "kappa_cl_per_cosmology.png", corrected_label="flow-corrected",
+                suptitle=f"weak-lensing kappa Cl per cosmology, {kappa_suptitle_common}")
+
+            with np.errstate(divide="ignore", invalid="ignore"):
+                k_lo_stack = np.array([lo / hi for lo, hi in zip(kappa_cl_low, kappa_cl_high)])
+                k_co_stack = np.array([co / hi for co, hi in zip(kappa_cl_corr, kappa_cl_high)])
+            plot_pctile_band_ratio(
+                kappa_ells[1:], {"low / high (baseline, no model)": k_lo_stack[:, 1:],
+                                 "flow-corrected / high": k_co_stack[:, 1:]},
+                out_dir / "kappa_cl_pctile_band.png", xlabel=r"$\ell$", ylim=(0.4, 1.6),
+                title=f"weak-lensing kappa Cl ratio to truth -- median + 16-84th pctile band "
+                      f"ACROSS {len(kappa_cosmo_labels)} held-out cosmologies")
+
             plot_kappa_moments_scatter(
                 kappa_cosmo_labels, kappa_mom_low, kappa_mom_corr, kappa_mom_high,
                 out_dir / "kappa_moments_scatter.png", corrected_label="flow-corrected",
