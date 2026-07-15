@@ -133,8 +133,13 @@ def correct_shell(net, meta, in_map, cosmo_vec, device, steps, patch_batch, amp:
     rscale = float(meta["resid_scale"])
     formulation = str(meta.get("formulation", "residual"))
 
-    mean = max(float(in_map.mean()), 1e-12)
-    d_in = in_map[None] / mean - 1.0
+    # in_map is RING (the .npy stacks are RING). Reorder RING->NESTED so
+    # map_to_patches' contiguous slices are compact superpixels matching the
+    # nest=True graph Laplacian -- same reorder make_patch_dataset.py applies at
+    # train time. mean is order-invariant. (See [[healpix-ring-nested-ordering]].)
+    in_nest = hp.reorder(np.asarray(in_map, dtype=np.float64), r2n=True)
+    mean = max(float(in_nest.mean()), 1e-12)
+    d_in = in_nest[None] / mean - 1.0
     cond = sf.map_to_patches(sf.signal_forward(d_in, scale, soft), order)  # (P, m)
 
     cosmo = torch.from_numpy(cosmo_vec[None]).to(device)
@@ -149,7 +154,12 @@ def correct_shell(net, meta, in_map, cosmo_vec, device, steps, patch_batch, amp:
     else:
         sig = sf.patches_to_maps(cond + rscale * out, order, 1)[0]
     delta = sf.signal_inverse(sig, scale, soft)
-    return (mean * (1.0 + delta)).astype(np.float32)
+    # patches_to_maps reassembles the NESTED superpixels, so this map is NESTED.
+    # Reorder NESTED->RING so the returned map is RING, matching the raw low/high
+    # shells and what every analysis/ diagnostic assumes (od_cl/anafast,
+    # extract_patch's nest=False gnomonic, weak_lensing kappa).
+    corrected_nest = (mean * (1.0 + delta)).astype(np.float32)
+    return hp.reorder(corrected_nest, n2r=True)
 
 
 def _resolve_run_dir(data_root, cosmo_name):

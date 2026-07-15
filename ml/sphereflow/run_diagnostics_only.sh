@@ -46,27 +46,39 @@
 export UENV_REPO_PATH=/capstor/scratch/cscs/damrein/.uenv-images
 VENV=/capstor/scratch/cscs/damrein/venvs/sphereflow
 
-DATA_ROOT="/capstor/scratch/cscs/damrein/cosmogridv1"
-MODEL_DIR="/capstor/scratch/cscs/damrein/outputs/sphereflow/3826942"
-OUT_DIR="${MODEL_DIR}/compare"
+# All env-overridable so run_sphere_flow.sh can submit this as a dependent eval job
+# for whatever model/dataset it just trained (default target: the rebuilt-trainer
+# cosmogridv1 run). --run-dirs is NOT passed -> apply_sphere_flow.py reads the
+# held-out set straight from MODEL_DIR/meta.npz's test_cosmos, so this always
+# evaluates on exactly what that model held out.
+DATA_ROOT="${DATA_ROOT:-/capstor/scratch/cscs/damrein/cosmogridv1}"
+MODEL_DIR="${MODEL_DIR:-/capstor/scratch/cscs/damrein/outputs/sphereflow/direct_nside2048_o16_n200000_h64_b32_e40}"
+OUT_DIR="${EVAL_OUT_DIR:-${MODEL_DIR}/eval}"
+NSIDE="${NSIDE:-2048}"
+LMAX="${LMAX:-3000}"
+STEPS="${STEPS:-50}"
+MAX_COSMOLOGIES="${MAX_COSMOLOGIES:-3}"
+KAPPA="${KAPPA:-1}"
+KAPPA_FLAG=""; [ "${KAPPA}" = "1" ] && KAPPA_FLAG="--kappa --kappa-nside 1024 --kappa-lmax 2048"
 mkdir -p "$OUT_DIR" /capstor/scratch/cscs/damrein/outputs/logs/sphereflow
 
-echo "==== sphereflow compare | job ${SLURM_JOB_ID} | model ${MODEL_DIR} ===="
+echo "==== sphereflow diagnostics | job ${SLURM_JOB_ID} | model ${MODEL_DIR} | data ${DATA_ROOT} ===="
 
 srun --nodes=1 --ntasks=1 uenv run pytorch/v2.9.1:v2 --view=default -- bash -c "
   source ${VENV}/bin/activate
   python sphereflow/apply_sphere_flow.py \
       --model-dir  '${MODEL_DIR}' \
       --data-root  '${DATA_ROOT}' \
-      --nside      2048 \
-      --lmax       3000 \
-      --steps      50 \
+      --max-cosmologies ${MAX_COSMOLOGIES} \
+      --nside      ${NSIDE} \
+      --lmax       ${LMAX} \
+      --steps      ${STEPS} \
       --patch-shells 5 10 15 30 50 \
       --fullsky-shells 5 10 15 30 50 \
       --n-zbins 3 --n-shells-per-zbin 5 \
-      --kappa --kappa-nside 1024 --kappa-lmax 2048 \
+      ${KAPPA_FLAG} \
       --out-dir    '${OUT_DIR}' \
       $EXTRA_ARGS
 "
 
-echo "sphereflow compare job ${SLURM_JOB_ID} finished at $(date) -> ${OUT_DIR}"
+echo "sphereflow diagnostics job ${SLURM_JOB_ID} finished at $(date) -> ${OUT_DIR}"

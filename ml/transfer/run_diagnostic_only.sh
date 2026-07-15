@@ -19,9 +19,17 @@
 # Validates on the SAME MULTIPLE held-out cosmologies run_transfer_pipeline.sh used
 # (auto-discovered from the prior job's output -- see stage 0 below), not just one.
 #
-# Point TRANSFER_JOB at the SLURM job id of a prior run_transfer_pipeline.sh run
-# whose transfer.npz (fit) / transfer_<cosmo>.npz (emulate) you want to reuse:
+# Point TRANSFER_JOB at the SLURM job id of a prior run_transfer_pipeline.sh /
+# run_transfer.sh run whose transfer.npz (fit) / transfer_<cosmo>.npz (emulate) you
+# want to reuse:
 #   sbatch --export=TRANSFER_JOB=4199680 transfer/run_diagnostic_only.sh
+# DATA/ELL_MIN_MPC/N_ITER currently default to the grid run_transfer.sh job
+# 4215699's config (grid dataset, ell_min_mpc=5.0, n_iter=3) -- see the block below
+# for why. For a DIFFERENT prior job (e.g. a cosmogridv1 run_transfer_pipeline.sh
+# run), override all of these together at submission time, since REUSE_COUNTS is
+# only an EXACT match if they agree with whatever originally produced the counts:
+#   sbatch --export=TRANSFER_JOB=4201972,DATA=/capstor/scratch/cscs/damrein/cosmogridv1,ELL_MIN_MPC=3.0,N_ITER=5 \
+#       transfer/run_diagnostic_only.sh
 # Override the held-out cosmology set explicitly (space-separated) if you want a
 # different/smaller set than what that job evaluated:
 #   sbatch --export=TRANSFER_JOB=4199680,TEST_COSMOS='cosmo_000001 cosmo_000003' \
@@ -37,14 +45,16 @@ export OMP_NUM_THREADS=8
 export UENV_REPO_PATH=/capstor/scratch/cscs/damrein/.uenv-images
 SPHEREFLOW_VENV=/capstor/scratch/cscs/damrein/venvs/sphereflow
 
-DATA=/capstor/scratch/cscs/damrein/cosmogridv1
+DATA=${DATA:-/capstor/scratch/cscs/damrein/grid}
 LMAX=3000
 
-if [ -z "$TRANSFER_JOB" ]; then
-    echo "ERROR: set TRANSFER_JOB to the prior job id holding transfer.npz, e.g.:"
-    echo "  sbatch --export=TRANSFER_JOB=4199680 transfer/run_diagnostic_only.sh"
-    exit 1
-fi
+# Defaults currently point at the grid run_transfer.sh job 4215699 (10 held-out
+# grid cosmologies, MAX_COSMOLOGIES=10, ell_min_mpc=5.0 n_iter=3) -- so plain
+# `sbatch transfer/run_diagnostic_only.sh` re-runs/recovers ITS diagnostics with no
+# --export needed. To target a DIFFERENT prior job (e.g. a cosmogridv1 run),
+# override at submission time -- see the header comment above for the full
+# --export= form (TRANSFER_JOB/DATA/ELL_MIN_MPC/N_ITER must all match together).
+TRANSFER_JOB=${TRANSFER_JOB:-4215699}
 TRANSFER_DIR="/capstor/scratch/cscs/damrein/outputs/transfer/${TRANSFER_JOB}"
 
 # ---- 0. Resolve held-out cosmologies + matching transfer file(s) from the prior job ----
@@ -88,11 +98,14 @@ if [ ${#COSMOS_ARR[@]} -eq 0 ]; then
     exit 1
 fi
 
-# Same apply-stage knobs as run_transfer_pipeline.sh -- override via --export= to
-# re-run diagnostics with different settings against the SAME trained transfer(s).
-ELL_MIN_MPC=${ELL_MIN_MPC:-3.0}
+# Same apply-stage knobs as run_transfer_pipeline.sh/run_transfer.sh -- override via
+# --export= to re-run diagnostics with different settings against the SAME trained
+# transfer(s). Defaults here match job 4215699's actual grid-run config
+# (ELL_MIN_MPC=5.0, N_ITER=3) -- REUSE_COUNTS below is only an EXACT match if these
+# agree with what originally produced the counts being reused.
+ELL_MIN_MPC=${ELL_MIN_MPC:-5.0}
 N_AVG=${N_AVG:-4}
-N_ITER=${N_ITER:-5}
+N_ITER=${N_ITER:-3}
 DAMP=${DAMP:-0.4}
 KAPPA_NSIDE=${KAPPA_NSIDE:-1024}
 KAPPA_LMAX=${KAPPA_LMAX:-2048}

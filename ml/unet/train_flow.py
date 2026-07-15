@@ -197,6 +197,16 @@ def main():
             print(f"[train_flow] resumed from {args.resume} at epoch {start_epoch}")
 
     log_path = out_dir / "train_log.jsonl"
+    # A fresh (non-resumed) run must not APPEND onto a stale log left behind by an
+    # earlier training run that reused this same --out-dir (e.g. same RUN_NAME
+    # resubmitted) -- the per-epoch write below always opens in append mode (correct
+    # for --resume, which continues an existing log), so without this a rerun
+    # silently duplicates every epoch 0..N-1 on top of the old ones, corrupting
+    # plot_flow_loss.py's loss curve with repeated/overlapping segments. Confirmed:
+    # flow_nside512_patch256_n100000_ch32_b32_e40/train_log.jsonl had epochs 0-39
+    # three times over (120 rows, 40 unique) from three non-resumed reruns.
+    if not args.resume and is_main and log_path.exists():
+        log_path.unlink()
     n_params = sum(p.numel() for p in (model.module if distributed else model).parameters())
     if is_main:
         print(f"[train_flow] model has {n_params:,} parameters, device={device}, lr={lr:.2e}, "

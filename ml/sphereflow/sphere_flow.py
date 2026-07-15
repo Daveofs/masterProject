@@ -84,7 +84,13 @@ def healpix_laplacian(nside: int, order: int = 1, nest: bool = True) -> sp.csr_m
     Laplacian of one patch of (nside/order)^2 pixels (shared by all patches)."""
     W = _healpix_weightmatrix(nside, patch_npix(nside, order), nest=nest)
     d = np.ravel(W.sum(1))
-    d12 = np.power(d, -0.5, where=d > 0)
+    # `where=` without `out=` leaves the masked-out entries UNINITIALIZED (numpy
+    # warns about exactly this): an isolated node (d==0) would get whatever was in
+    # memory, and any non-zero garbage there propagates into the Laplacian. Seed
+    # the output with zeros so d==0 rows stay 0 (no self-normalization), which is
+    # the intended meaning.
+    d12 = np.zeros_like(d)
+    np.power(d, -0.5, where=d > 0, out=d12)
     D12 = sp.diags(d12, 0, dtype=W.dtype).tocsc()
     return (sp.identity(W.shape[0], dtype=W.dtype) - D12 * W * D12).tocsr()
 

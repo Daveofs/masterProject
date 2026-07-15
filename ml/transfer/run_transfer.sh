@@ -5,7 +5,7 @@
 #SBATCH --account=sk037
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=128
-#SBATCH --time=08:00:00
+#SBATCH --time=12:00:00
 #SBATCH --output=/capstor/scratch/cscs/damrein/outputs/logs/transfer/slurm-%j.out
 #SBATCH --error=/capstor/scratch/cscs/damrein/outputs/logs/transfer/slurm-%j.err
 #SBATCH --chdir=/users/damrein/masterProject/ml
@@ -136,7 +136,7 @@ export OMP_NUM_THREADS=8         # light default; heavy stages override inline b
 export UENV_REPO_PATH=/capstor/scratch/cscs/damrein/.uenv-images
 SPHEREFLOW_VENV=/capstor/scratch/cscs/damrein/venvs/sphereflow
 
-DATA=/capstor/scratch/cscs/damrein/cosmogridv1
+DATA=/capstor/scratch/cscs/damrein/grid
 LMAX=3000
 # How to build T(ell, shell): "fit" (train-averaged) or "emulate" (MLP emulator).
 METHOD=${METHOD:-emulate}

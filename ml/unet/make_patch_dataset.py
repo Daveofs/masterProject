@@ -72,10 +72,13 @@ META_DTYPE = np.dtype([
 _COSMO_RE = re.compile(r"(cosmo_\d+)/?$")
 
 
-def load_cosmo_params(data_dir: Path):
+def load_cosmo_params(metainfo_dir: Path):
     """cosmo name -> (Om, Ob, ns, s8, w0, h) from CosmoGridV1_metainfo.h5.
-    Covers grid + fiducial + benchmark cosmologies (the 'all' dataset)."""
-    with h5py.File(data_dir / "CosmoGridV1_metainfo.h5", "r") as f:
+    Covers grid + fiducial + benchmark cosmologies (the 'all' dataset) --
+    metainfo_dir is the ONE fixed location of this catalog (it is not replicated
+    under every --data-dir that merely holds a subset of cosmology directories,
+    e.g. /capstor/scratch/cscs/damrein/grid has none -- see --metainfo-dir)."""
+    with h5py.File(metainfo_dir / "CosmoGridV1_metainfo.h5", "r") as f:
         rows = f["parameters/all"][:]
     out = {}
     for row in rows:
@@ -156,6 +159,13 @@ def main():
     p.add_argument("--data-dir", required=True,
                    help="original source data (read-only) - used only to read shell_info "
                         "z-bounds from compressed_shells.npz")
+    p.add_argument("--metainfo-dir", default=None,
+                   help="dir holding CosmoGridV1_metainfo.h5 (the cosmological-"
+                        "parameter catalog for the WHOLE CosmoGridV1 grid, incl. "
+                        "cosmologies outside --data-dir's own subset). Defaults to "
+                        "--data-dir (the original cosmogridv1 layout has it there); "
+                        "must be set explicitly when --data-dir is a subset dir that "
+                        "doesn't carry its own copy (e.g. .../grid).")
     p.add_argument("--prepared-dir", required=True,
                    help="mirrored output of prepare_maps.py --out-dir (the low/high .npy stacks)")
     p.add_argument("--out-dir", required=True)
@@ -180,7 +190,8 @@ def main():
         raise SystemExit(f"no runs with nside={args.nside} .npy pairs found under {prepared_dir}")
     print(f"[make_patch_dataset] {len(runs)} runs available at nside={args.nside}")
 
-    cosmo_params = load_cosmo_params(data_dir)
+    metainfo_dir = Path(args.metainfo_dir) if args.metainfo_dir else data_dir
+    cosmo_params = load_cosmo_params(metainfo_dir)
     missing = sorted({cosmo for cosmo, _, _ in runs if cosmo not in cosmo_params})
     if missing:
         raise SystemExit(f"cosmo params missing from metainfo.h5 for: {missing}")

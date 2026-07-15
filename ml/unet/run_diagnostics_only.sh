@@ -23,8 +23,13 @@ export UENV_REPO_PATH=/capstor/scratch/cscs/damrein/.uenv-images
 VENV=/capstor/scratch/cscs/damrein/venvs/sphereflow
 DATA_ROOT="/capstor/scratch/cscs/damrein/cosmogridv1"
 UNET=/users/damrein/masterProject/ml/unet
-PATCH_DIR=/capstor/scratch/cscs/damrein/outputs/flowpatches/nside2048_256_100000
-OUT_DIR=/capstor/scratch/cscs/damrein/outputs/flowruns/flow_nside2048_patch256_n100000_ch32_b32_e40_cond
+# Overridable so this can target ANY finished run without editing the file, e.g.
+#   sbatch --export=ALL,PATCH_DIR=...,OUT_DIR=... unet/run_diagnostics_only.sh
+# (they must be the pair that were actually trained together -- apply_flow.py reads
+# the source nside from PATCH_DIR's metadata, so a mismatched pair is a silent
+# resolution error, not a crash).
+PATCH_DIR=${PATCH_DIR:-/capstor/scratch/cscs/damrein/outputs/flowpatches/nside2048_256_100000}
+OUT_DIR=${OUT_DIR:-/capstor/scratch/cscs/damrein/outputs/flowruns/flow_nside2048_patch256_n100000_ch32_b32_e40_cond}
 
 export PYTHONUNBUFFERED=1
 # weak-lensing kappa map diagnostic -- off by default, see run_flow.sh's KAPPA note.
