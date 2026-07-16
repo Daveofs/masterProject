@@ -47,17 +47,27 @@ export UENV_REPO_PATH=/capstor/scratch/cscs/damrein/.uenv-images
 VENV=/capstor/scratch/cscs/damrein/venvs/sphereflow
 
 # All env-overridable so run_sphere_flow.sh can submit this as a dependent eval job
-# for whatever model/dataset it just trained (default target: the rebuilt-trainer
-# cosmogridv1 run). --run-dirs is NOT passed -> apply_sphere_flow.py reads the
-# held-out set straight from MODEL_DIR/meta.npz's test_cosmos, so this always
-# evaluates on exactly what that model held out.
+# for whatever model/dataset it just trained. --run-dirs is NOT passed ->
+# apply_sphere_flow.py reads the held-out set straight from MODEL_DIR/meta.npz's
+# test_cosmos, so this always evaluates on exactly what that model held out.
+#
+# DATA_ROOT must be the root the model TRAINED from (its held-out cosmos' data
+# lives there). Job 4221138 failed with 7x FileNotFoundError from exactly this:
+# the *_cos200 model -- DESPITE the name -- was trained on cosmogridv1's 44
+# cosmos, not 200 grid ones (checked: its patch set nside512_order16_n200000
+# holds exactly the 44 cosmogridv1 cosmos; DATA_ROOT/DATA_TAG defaults won at
+# its submission), so its 7 held-out cosmos only have data under cosmogridv1.
 DATA_ROOT="${DATA_ROOT:-/capstor/scratch/cscs/damrein/cosmogridv1}"
-MODEL_DIR="${MODEL_DIR:-/capstor/scratch/cscs/damrein/outputs/sphereflow/direct_nside2048_o16_n200000_h64_b32_e40}"
+MODEL_DIR="${MODEL_DIR:-/capstor/scratch/cscs/damrein/outputs/sphereflow/direct_nside512_o16_n200000_h64_b32_e40_cos200}"
 OUT_DIR="${EVAL_OUT_DIR:-${MODEL_DIR}/eval}"
-NSIDE="${NSIDE:-2048}"
+# NSIDE deliberately UNSET by default: apply_sphere_flow.py now takes the data
+# nside from the model's own meta.npz (a 512 model + this script's old hardcoded
+# NSIDE=2048 default was the other half of job 4221138's failure). Set NSIDE only
+# to force a mismatch check.
+NSIDE_FLAG=""; [ -n "${NSIDE}" ] && NSIDE_FLAG="--nside ${NSIDE}"
 LMAX="${LMAX:-3000}"
 STEPS="${STEPS:-50}"
-MAX_COSMOLOGIES="${MAX_COSMOLOGIES:-3}"
+MAX_COSMOLOGIES="${MAX_COSMOLOGIES:-10}"
 KAPPA="${KAPPA:-1}"
 KAPPA_FLAG=""; [ "${KAPPA}" = "1" ] && KAPPA_FLAG="--kappa --kappa-nside 1024 --kappa-lmax 2048"
 mkdir -p "$OUT_DIR" /capstor/scratch/cscs/damrein/outputs/logs/sphereflow
@@ -70,7 +80,7 @@ srun --nodes=1 --ntasks=1 uenv run pytorch/v2.9.1:v2 --view=default -- bash -c "
       --model-dir  '${MODEL_DIR}' \
       --data-root  '${DATA_ROOT}' \
       --max-cosmologies ${MAX_COSMOLOGIES} \
-      --nside      ${NSIDE} \
+      ${NSIDE_FLAG} \
       --lmax       ${LMAX} \
       --steps      ${STEPS} \
       --patch-shells 5 10 15 30 50 \

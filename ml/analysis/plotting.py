@@ -52,7 +52,7 @@ def plot_example_patch_grid(rows, out_path, corrected_label="corrected", suptitl
             ai.set_xlabel("radial wavenumber bin", fontsize=8)
 
     if suptitle:
-        fig.suptitle(suptitle, fontsize=11)
+        fig.suptitle(suptitle, fontsize=11, wrap=True)
     fig.tight_layout()
     out_path = Path(out_path); out_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out_path, dpi=300); plt.close(fig)
@@ -95,7 +95,7 @@ def plot_example_full_sky_grid(rows, out_path, corrected_label="corrected", supt
             ai.set_xlabel(r"$\ell$", fontsize=8)
 
     if suptitle:
-        fig.suptitle(suptitle, fontsize=11)
+        fig.suptitle(suptitle, fontsize=11, wrap=True)
     fig.tight_layout()
     out_path = Path(out_path); out_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out_path, dpi=300); plt.close(fig)
@@ -137,10 +137,10 @@ def plot_pctile_band_ratio(x, ratio_stacks: dict, out_path, xlabel=r"$\ell$",
     if ylim:
         ax.set_ylim(*ylim)
     ax.set_title(title or f"ratio to truth ({n_samples} samples, "
-                          f"{lo_pct}-{hi_pct}th pctile band)")
+                          f"{lo_pct}-{hi_pct}th pctile band)", fontsize=10, wrap=True)
     ax.legend(fontsize=9)
     if suptitle:
-        fig.suptitle(suptitle, fontsize=11)
+        fig.suptitle(suptitle, fontsize=11, wrap=True)
     fig.tight_layout()
     out_path = Path(out_path); out_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out_path, dpi=300); plt.close(fig)
@@ -182,7 +182,8 @@ def plot_cl_ratio_pctile_grid(grid, out_path, pctile=(16, 84), suptitle=None,
                 ax.semilogx(x, med, "-", lw=1.2, color=color, label=label)
                 ax.fill_between(x, p_lo, p_hi, color=color, alpha=0.25)
             ax.axhline(1.0, color="k", ls="--", lw=0.8)
-            ax.set_title(f"{bin_label} (n={len(shells)}): {[int(s) for s in shells]}", fontsize=8)
+            ax.set_title(f"{bin_label} (n={len(shells)}): {[int(s) for s in shells]}",
+                        fontsize=8, wrap=True)
             ax.tick_params(labelsize=7)
             if i == 0 and j == 0:
                 ax.legend(fontsize=7, loc="lower left")
@@ -191,7 +192,7 @@ def plot_cl_ratio_pctile_grid(grid, out_path, pctile=(16, 84), suptitle=None,
             if i == n_rows - 1:
                 ax.set_xlabel(r"$\ell$", fontsize=8)
     if suptitle:
-        fig.suptitle(suptitle, fontsize=12)
+        fig.suptitle(suptitle, fontsize=12, wrap=True)
     fig.tight_layout()
     out_path = Path(out_path); out_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out_path, dpi=300); plt.close(fig)
@@ -231,7 +232,7 @@ def plot_kappa_cl_grid(cosmo_labels, ells, cl_low_list, cl_corr_list, cl_high_li
         if i == n - 1:
             a0.set_xlabel(r"$\ell$", fontsize=8); a1.set_xlabel(r"$\ell$", fontsize=8)
     if suptitle:
-        fig.suptitle(suptitle, fontsize=11)
+        fig.suptitle(suptitle, fontsize=11, wrap=True)
     fig.tight_layout()
     out_path = Path(out_path); out_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out_path, dpi=300); plt.close(fig)
@@ -261,7 +262,7 @@ def plot_kappa_moments_scatter(cosmo_labels, moms_low, moms_corr, moms_high, out
         if ax is axes[0]:
             ax.legend(fontsize=8)
     if suptitle:
-        fig.suptitle(suptitle, fontsize=12)
+        fig.suptitle(suptitle, fontsize=12, wrap=True)
     fig.tight_layout()
     out_path = Path(out_path); out_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out_path, dpi=300); plt.close(fig)
@@ -297,7 +298,7 @@ def plot_histogram_grid(rows, out_path, corrected_label="corrected", n_bins=60,
             ax.set_xlabel(xlabel)
 
     if suptitle:
-        fig.suptitle(suptitle, fontsize=11)
+        fig.suptitle(suptitle, fontsize=11, wrap=True)
     fig.tight_layout()
     out_path = Path(out_path); out_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out_path, dpi=300); plt.close(fig)
@@ -325,7 +326,7 @@ def plot_moments_vs_shell(shell_idx, series: dict, out_path, suptitle=None):
         if ax is axes[0]:
             ax.legend(fontsize=8)
     if suptitle:
-        fig.suptitle(suptitle, fontsize=12)
+        fig.suptitle(suptitle, fontsize=12, wrap=True)
     fig.tight_layout()
     out_path = Path(out_path); out_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out_path, dpi=300); plt.close(fig)
@@ -335,7 +336,7 @@ def plot_moments_vs_shell(shell_idx, series: dict, out_path, suptitle=None):
 
 def plot_train_val_loss(x, train_vals, val_vals, out_path, xlabel="epoch",
                         ylabel="loss", formula=None, train_label="train",
-                        val_label="validation (held-out)"):
+                        val_label="validation (held-out)", skip_first=0):
     """Shared train/validation loss curve -- ONE canonical figure, used identically
     by unet (plot_flow_loss.py, per-epoch flow-matching MSE) and
     transfer (transfer_function.py train(), per-iteration MLP squared-error) so the
@@ -345,20 +346,35 @@ def plot_train_val_loss(x, train_vals, val_vals, out_path, xlabel="epoch",
     Both curves must be an actual LOSS (lower = better) on the SAME formula/units for
     train and val -- e.g. NOT one loss + one R^2 score (R^2 increases as it improves,
     so a "both curves decreasing" comparison across pipelines requires both sides to
-    report a genuine held-out LOSS, not a score of a different sign convention)."""
+    report a genuine held-out LOSS, not a score of a different sign convention).
+
+    skip_first: omit the first N points from the AXES (they still exist in the log).
+    The first epoch starts from random weights, so its loss can sit orders of
+    magnitude above the plateau and compress every later point into a flat band even
+    on the log scale. The omitted values are ANNOTATED on the figure (not silently
+    dropped) so the plot stays honest about what it isn't showing. Default 0 = old
+    behavior; callers opt in."""
     x = np.asarray(x); train_vals = np.asarray(train_vals); val_vals = np.asarray(val_vals)
+    note = None
+    if skip_first > 0 and len(x) > skip_first + 1:
+        note = (f"first {skip_first} {xlabel}(s) omitted from axes: "
+                f"train {', '.join(f'{v:.3g}' for v in train_vals[:skip_first])} / "
+                f"val {', '.join(f'{v:.3g}' for v in val_vals[:skip_first])}")
+        x, train_vals, val_vals = x[skip_first:], train_vals[skip_first:], val_vals[skip_first:]
     best_i = int(np.argmin(val_vals))
 
     fig, ax = plt.subplots(figsize=(9, 5))
     ax.plot(x, train_vals, "-o", ms=3, color="steelblue", label=train_label)
     ax.plot(x, val_vals, "-o", ms=3, color="tomato", label=val_label)
+    if note:
+        ax.text(0.02, 0.02, note, transform=ax.transAxes, fontsize=8, color="0.4")
     ax.axvline(x[best_i], color="0.6", ls=":", lw=1.0)
     ax.scatter([x[best_i]], [val_vals[best_i]], color="tomato", zorder=5,
                label=f"best val {val_vals[best_i]:.4g} @ {xlabel} {x[best_i]}")
     ax.set_xlabel(xlabel); ax.set_ylabel(ylabel)
     ax.set_yscale("log"); ax.legend(fontsize=9); ax.grid(True, alpha=0.3)
     if formula:
-        ax.set_title(formula, fontsize=10)
+        ax.set_title(formula, fontsize=10, wrap=True)
     fig.tight_layout()
     out_path = Path(out_path); out_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out_path, dpi=150); plt.close(fig)

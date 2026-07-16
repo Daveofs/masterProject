@@ -34,6 +34,12 @@ def main():
     p.add_argument("--run-dir", required=True,
                    help="train_sphere_flow.py --out-dir (has train_log.jsonl)")
     p.add_argument("--out", default=None, help="default: <run-dir>/loss_curve.png")
+    p.add_argument("--skip-first", type=int, default=1,
+                   help="Omit the first N epochs from the axes (default 1): epoch 0 "
+                        "starts from random weights, so its loss sits far above the "
+                        "plateau and flattens every later point into an unreadable "
+                        "band even on the log scale. The omitted values are still "
+                        "annotated on the figure. 0 plots everything.")
     args = p.parse_args()
 
     log_path = Path(args.run_dir) / "train_log.jsonl"
@@ -53,7 +59,7 @@ def main():
     out = Path(args.out or (Path(args.run_dir) / "loss_curve.png"))
     plot_train_val_loss(
         ep, tr, va, out, xlabel="epoch", ylabel="flow-matching MSE loss",
-        val_label="validation (held-out cosmologies)",
+        val_label="validation (held-out cosmologies)", skip_first=args.skip_first,
         formula="DeepSphere conditional flow matching (direct): train vs validation\n"
                 r"loss $=\langle\,\|v_\theta(x_t,t,\mathrm{cond})-(x_1-x_0)\|^2\,\rangle$, "
                 r"$x_0\sim\mathcal{N}(0,I)$, $x_1=\mathrm{signal}(high)$, "

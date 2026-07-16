@@ -6,7 +6,7 @@
 #SBATCH --ntasks-per-node=1
 #SBATCH --gres=gpu:4
 #SBATCH --cpus-per-task=64
-#SBATCH --time=08:00:00
+#SBATCH --time=12:00:00
 #SBATCH --output=/capstor/scratch/cscs/damrein/outputs/logs/sphereflow/slurm-%j.out
 #SBATCH --error=/capstor/scratch/cscs/damrein/outputs/logs/sphereflow/slurm-%j.err
 #SBATCH --chdir=/users/damrein/masterProject/ml
@@ -44,20 +44,35 @@ VENV=/capstor/scratch/cscs/damrein/venvs/sphereflow
 # DATA_ROOT overridable: cosmogridv1 (44 cosmos, default) or the grid (198 cosmos
 # with DISCO input -- 4.5x more cosmological diversity). find_ready_runs / prepare_maps
 # both auto-skip the ~2300 grid cosmos that lack a DISCO low map, so pointing at the
-# grid dir just picks the 198 runnable ones. PATCH_DIR/RUN_NAME below fold NPATCH etc
-# but NOT the data root, so give a distinct RUN_NAME when switching datasets.
-DATA_ROOT="${DATA_ROOT:-/capstor/scratch/cscs/damrein/cosmogridv1}"
+# grid dir just picks the 198 runnable ones. PATCH_DIR/RUN_NAME fold the data root
+# automatically (DATA_TAG below), so a grid run needs ONLY:
+#   DATA_ROOT=/capstor/scratch/cscs/damrein/grid sbatch sphereflow/run_sphere_flow.sh
+DATA_ROOT="${DATA_ROOT:-/capstor/scratch/cscs/damrein/grid}"
 SPHEREFLOW=/users/damrein/masterProject/ml/sphereflow
 
 NSIDE=${NSIDE:-512}
 ORDER=${ORDER:-16}            # 12*ORDER^2 patches/shell; must match the model's graph
 NPATCH=${NPATCH:-200000}      # ~26 GB at nside=2048/order=16 (16,384 px/patch, low+high)
 EPOCHS=${EPOCHS:-40}
-BATCH=${BATCH:-32}            # per GPU; patches are 16,384 px, so far smaller than unet's
-HIDDEN=${HIDDEN:-64}
-N_LAYERS=${N_LAYERS:-6}
+# Graph-conv defaults retuned 2026-07-16 for the nside=512/order=16 geometry
+# (1,024-px patches). The old values were sized for nside=2048's 16,384-px patches:
+#   BATCH 32  -> 128 : 32 x 1,024 px left the GH200 mostly idle (the old 32 was the
+#                      memory sweet spot at 16x larger patches, not at these).
+#   HIDDEN 64 -> 128 : the 6x64 net was ~0.18M params -- absurdly small next to
+#                      unet's ~29M for the same generative job; 8x128 is ~0.93M,
+#                      still cheap per step at this patch size.
+#   N_LAYERS 6 -> 8  : receptive field = (layers+2 convs)*(K-1) hops = 32 at 6
+#                      layers, which does NOT span a 1,024-px patch's ~45-px
+#                      diagonal; 8 layers -> 40 hops covers it. Depth is the cheap
+#                      way to widen reach (K=5 stays: raising K instead costs the
+#                      same compute but adds nothing once the patch is covered).
+#   LR 2e-4 -> 3e-4  : mild (~sqrt) compensation for the 4x batch; the x world_size
+#                      scaling in the trainer still applies on top.
+BATCH=${BATCH:-128}
+HIDDEN=${HIDDEN:-128}
+N_LAYERS=${N_LAYERS:-8}
 K=${K:-5}
-LR=${LR:-2e-4}
+LR=${LR:-3e-4}
 VAL_FRAC=${VAL_FRAC:-0.15}
 SEED=${SEED:-0}
 STEPS=${STEPS:-50}            # ODE steps at eval
@@ -72,12 +87,26 @@ TEST_COSMOS_FLAG=""
 # shell of every eval cosmology is a full ODE sample). KAPPA=0 skips it.
 KAPPA=${KAPPA:-1}
 KAPPA_FLAG=""; [ "${KAPPA}" = "1" ] && KAPPA_FLAG="--kappa --kappa-nside 1024 --kappa-lmax 2048"
-MAX_COSMOLOGIES=${MAX_COSMOLOGIES:-3}
+MAX_COSMOLOGIES=${MAX_COSMOLOGIES:-10}
 
-# DATA_TAG distinguishes patch caches / run dirs built from DIFFERENT datasets at
-# the same NPATCH (e.g. "grid" vs the default cosmogridv1) so they never collide.
+# DATA_TAG folds the DATA ROOT into PATCH_DIR/RUN_NAME so switching datasets can
+# never silently reuse the other dataset's patch cache. Derived AUTOMATICALLY from
+# DATA_ROOT's basename (mirrors unet/run_flow.sh) -- the old opt-in env var is
+# exactly how the "_cos200" run went wrong: DATA_ROOT=grid was set but DATA_TAG
+# wasn't, so PATCH_DIR resolved to the existing cosmogridv1 cache, stage 1 said
+# "already exists, skipping", and training silently ran on cosmogridv1 patches
+# (its args.json/meta.npz prove it: 44 cosmologies, 7 cosmogridv1 test_cosmos).
+# cosmogridv1 keeps its historical UNTAGGED names so existing caches/runs stay valid.
+DATA_TAG=${DATA_TAG:-$(basename "${DATA_ROOT}")}
+[ "$DATA_TAG" = "cosmogridv1" ] && DATA_TAG=""
 DATA_TAG=${DATA_TAG:+${DATA_TAG}_}
-PATCH_DIR="/capstor/scratch/cscs/damrein/outputs/sphereflow/patches/${DATA_TAG}nside${NSIDE}_order${ORDER}_n${NPATCH}"
+# Patch caches live in outputs/flowpatches/ -- the SAME parent dir unet uses -- so
+# all patch datasets sit in one place. The "sphere_" marker distinguishes the FORMAT:
+# these are HEALPix-superpixel pixel blocks for the graph conv, NOT unet's flat
+# gnomonic images (the two are not interchangeable -- unet names have a patch SIZE
+# as their 2nd field, e.g. grid_nside512_256_100000; sphereflow names have sphere_
+# + order). Override PATCH_DIR explicitly to reuse a cache from elsewhere.
+PATCH_DIR="${PATCH_DIR:-/capstor/scratch/cscs/damrein/outputs/flowpatches/${DATA_TAG}sphere_nside${NSIDE}_order${ORDER}_n${NPATCH}}"
 RUN_NAME=${RUN_NAME:-direct_${DATA_TAG}nside${NSIDE}_o${ORDER}_n${NPATCH}_h${HIDDEN}_b${BATCH}_e${EPOCHS}}
 OUT_DIR="/capstor/scratch/cscs/damrein/outputs/sphereflow/${RUN_NAME}"
 mkdir -p "$PATCH_DIR" "$OUT_DIR" /capstor/scratch/cscs/damrein/outputs/logs/sphereflow

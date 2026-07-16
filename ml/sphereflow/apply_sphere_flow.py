@@ -477,8 +477,14 @@ def main():
                         "--max-cosmologies), or cosmo_000122/run_0 for older checkpoints "
                         "that predate saving it. Do not pass other cosmologies unless you "
                         "know they were excluded from THIS checkpoint's training too.")
-    p.add_argument("--nside", type=int, default=2048)
-    p.add_argument("--lmax", type=int, default=3000)
+    p.add_argument("--nside", type=int, default=None,
+                   help="Resolution of the low/high_shells_nside=*.npy data files to "
+                        "load. Default: the MODEL's own nside from meta.npz -- the net "
+                        "can only correct maps at the resolution it was trained at, so "
+                        "any other value is an error (a 512 model + the old hardcoded "
+                        "2048 default silently looked for the wrong files, job 4221138).")
+    p.add_argument("--lmax", type=int, default=3000,
+                   help="Capped internally at 3*nside-1 (e.g. 1535 for a 512 model).")
     p.add_argument("--steps", type=int, default=50, help="ODE integration steps/shell.")
     p.add_argument("--patch-batch", type=int, default=512,
                    help="Patches sampled per forward-batch. 3072 (order=16's "
@@ -539,6 +545,16 @@ def main():
 
     dev = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     net, meta = load_model(args.model_dir, dev, compile=args.compile)
+    model_nside = int(meta["nside"])
+    if args.nside is None:
+        args.nside = model_nside
+        print(f"[apply_sphere_flow] using the model's own nside={model_nside} "
+              f"(from meta.npz) for the data files", flush=True)
+    elif args.nside != model_nside:
+        raise SystemExit(
+            f"--nside {args.nside} does not match the model's trained nside "
+            f"{model_nside} (meta.npz) -- the net can only correct maps at its "
+            f"trained resolution. Drop --nside to use the model's value.")
     formulation = str(meta.get("formulation", "residual"))
     if formulation != "direct":
         raise SystemExit(

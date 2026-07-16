@@ -55,7 +55,7 @@ LMAX=3000
 # override at submission time -- see the header comment above for the full
 # --export= form (TRANSFER_JOB/DATA/ELL_MIN_MPC/N_ITER must all match together).
 TRANSFER_JOB=${TRANSFER_JOB:-4215699}
-TRANSFER_DIR="/capstor/scratch/cscs/damrein/outputs/transfer/${TRANSFER_JOB}"
+TRANSFER_DIR="/capstor/scratch/cscs/damrein/outputs/transfer/${TRANSFER_JOB}_cos200"
 
 # ---- 0. Resolve held-out cosmologies + matching transfer file(s) from the prior job ----
 if ls "$TRANSFER_DIR"/transfer_cosmo_*.npz >/dev/null 2>&1; then
@@ -109,6 +109,12 @@ N_ITER=${N_ITER:-3}
 DAMP=${DAMP:-0.4}
 KAPPA_NSIDE=${KAPPA_NSIDE:-1024}
 KAPPA_LMAX=${KAPPA_LMAX:-2048}
+# apply_transfer.py's --max-cosmologies caps cl_ratio_by_zbin_grid.png's rows
+# (default 3, sized for the EXPENSIVE apply()+Poisson case). This script exists
+# specifically to re-run diagnostics against ALREADY-COMPUTED counts, so default
+# to showing EVERY held-out cosmology resolved above -- there's no compute reason
+# to cap it here. Override explicitly to go back to a smaller grid.
+MAX_COSMOLOGIES=${MAX_COSMOLOGIES:-${#COSMOS_ARR[@]}}
 OUT=/capstor/scratch/cscs/damrein/outputs/transfer/${SLURM_JOB_ID}
 mkdir -p "$OUT"
 
@@ -145,7 +151,7 @@ uenv run pytorch/v2.9.1:v2 --view=default -- bash -c "
         $REUSE_FLAG \
         --out-counts-dir '$OUT/counts' \
         --patch-shells 5 10 15 30 50 --n-per-shell 1 --patch-size 256 --seed 0 \
-        --fullsky-shells 5 10 15 30 50 \
+        --fullsky-shells 5 10 15 30 50 --max-cosmologies $MAX_COSMOLOGIES \
         --kappa --kappa-nside $KAPPA_NSIDE --kappa-lmax $KAPPA_LMAX \
         --out-dir '$OUT/eval'
 "
