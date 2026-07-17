@@ -57,8 +57,8 @@ VENV=/capstor/scratch/cscs/damrein/venvs/sphereflow
 # cosmos, not 200 grid ones (checked: its patch set nside512_order16_n200000
 # holds exactly the 44 cosmogridv1 cosmos; DATA_ROOT/DATA_TAG defaults won at
 # its submission), so its 7 held-out cosmos only have data under cosmogridv1.
-DATA_ROOT="${DATA_ROOT:-/capstor/scratch/cscs/damrein/cosmogridv1}"
-MODEL_DIR="${MODEL_DIR:-/capstor/scratch/cscs/damrein/outputs/sphereflow/direct_nside512_o16_n200000_h64_b32_e40_cos200}"
+DATA_ROOT="${DATA_ROOT:-/capstor/scratch/cscs/damrein/grid}"
+MODEL_DIR="${MODEL_DIR:-/capstor/scratch/cscs/damrein/outputs/sphereflow/direct_grid_nside512_o16_n200000_h128_b128_e40}"
 OUT_DIR="${EVAL_OUT_DIR:-${MODEL_DIR}/eval}"
 # NSIDE deliberately UNSET by default: apply_sphere_flow.py now takes the data
 # nside from the model's own meta.npz (a 512 model + this script's old hardcoded

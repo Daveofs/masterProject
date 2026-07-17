@@ -94,6 +94,13 @@ def radial_power_batch(imgs: torch.Tensor, n_bins: int = None):
     return (binned / counts).cpu().numpy()
 
 
+def _nz_tag(nz_path) -> str:
+    """'bin4' from .../desy3_nz_metacal_bin4.txt (falls back to the file stem)."""
+    import re
+    m = re.search(r"bin\d+", Path(nz_path).stem)
+    return m.group(0) if m else Path(nz_path).stem
+
+
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--patch-dir", required=True)
@@ -175,11 +182,12 @@ def main():
                    help="build weak-lensing kappa maps (low/corrected/high) for "
                         "EVERY held-out cosmology and compute their Cl + moments. "
                         "Requires --data-root. Expensive: see module docstring.")
-    p.add_argument("--kappa-nz",
-                   default="/capstor/scratch/cscs/damrein/redshift_distribution/desy3_nz_metacal_bin1.txt",
-                   help="n(z) redshift distribution passed to UFalcon's "
-                        "construct_kappa_map -- named explicitly in the kappa "
-                        "plots' suptitle so the choice is never ambiguous")
+    p.add_argument("--kappa-nz", nargs="+",
+                   default=["/capstor/scratch/cscs/damrein/redshift_distribution/desy3_nz_metacal_bin1.txt",
+                            "/capstor/scratch/cscs/damrein/redshift_distribution/desy3_nz_metacal_bin4.txt"],
+                   help="one or more n(z) distributions; a FULL kappa diagnostic set "
+                        "per bin, files tagged _bin1/_bin4/... (bin1: low-z, hardest "
+                        "correction; bin4: high-z, most cosmological weight).")
     p.add_argument("--kappa-nside", type=int, default=1024,
                    help="output kappa map nside (independent of --fullsky-patch-size). "
                         "1024 (not the old 128) because the kappa map's own resolution "
@@ -190,7 +198,10 @@ def main():
                         "and sphereflow/apply_sphere_flow.py, so the kappa plots of the "
                         "three pipelines are directly comparable.")
     p.add_argument("--kappa-zi", type=float, default=0.0)
-    p.add_argument("--kappa-zf", type=float, default=1.05)
+    p.add_argument("--kappa-zf", type=float, nargs="+", default=[1.05, 1.85],
+                   help="integration upper redshift PER --kappa-nz entry (single "
+                        "value broadcasts): 1.05 holds >=95%% of bin1's n(z), "
+                        "1.85 ~99%% of bin4's.")
     p.add_argument("--kappa-lmax", type=int, default=2048,
                    help="angular power spectrum lmax for the kappa maps (--kappa-nside "
                         "supports up to ~3*nside-1, so keep this below that). Must reach "
@@ -447,11 +458,16 @@ def main():
                 fs_mom_low.append(moments(low_shell)); fs_mom_high.append(moments(high_shell))
                 fs_mom_pred.append(moments(pred_filled))
                 fs_hist_rows.append((f"shell {s}", low_shell.ravel(), pred_filled.ravel(), high_shell.ravel()))
+            import yaml as _yaml
+            _cp = _yaml.safe_load((run_dir / "params.yml").read_text()) if (run_dir / "params.yml").exists() else {}
+            _note = (f"{fs_cosmo}:  s8={_cp.get('s8', float('nan')):<8.4g} Om={_cp.get('Om', float('nan')):<8.4g} "
+                     f"Ob={_cp.get('Ob', float('nan')):<8.4g} H0={_cp.get('H0', float('nan')):<7.4g} "
+                     f"ns={_cp.get('ns', float('nan')):<8.4g} w0={_cp.get('w0', float('nan')):<8.4g}") if _cp else None
             plot_moments_vs_shell(
                 example_shells, {"low": fs_mom_low, "high (true)": fs_mom_high, "flow pred": fs_mom_pred},
-                out_dir / "moments_vs_shell.png",
-                suptitle=f"moments vs. shell depth -- full-sky reconstruction (raw counts)\n"
-                        f"{fs_cosmo}/{args.run}")
+                out_dir / "moments_vs_shell.png", note=_note,
+                suptitle=f"moments vs. shell depth -- full-sky reconstruction (raw counts), "
+                        f"ONE cosmology: {fs_cosmo}/{args.run} (parameters below)")
             plot_histogram_grid(
                 fs_hist_rows, out_dir / "example_histograms.png", corrected_label="flow-corrected",
                 suptitle=f"full-sky raw pixel-count histogram per shell\n{fs_cosmo}/{args.run}")
@@ -505,13 +521,25 @@ def main():
         if args.kappa:
             kappa_cosmos = (list(val_cosmos) if args.kappa_max_cosmologies <= 0
                            else list(val_cosmos[:args.kappa_max_cosmologies]))
+            # One full diagnostic set PER n(z) BIN (2026-07-16; default DES-Y3
+            # metacal bin1 + bin4): bin1 peaks at z~0.23 (low-z, hardest
+            # correction), bin4 at z~0.98 (less correction, most cosmological
+            # weight). Shells are RECONSTRUCTED once per cosmology up to
+            # max(--kappa-zf) -- the expensive part -- then each bin's kappa_map
+            # integrates only its own [zi, zf] window (UFalcon skips shells
+            # outside internally), so extra bins cost kappa_map calls only.
+            nz_list = list(args.kappa_nz)
+            zf_list = (list(args.kappa_zf) if len(args.kappa_zf) == len(nz_list)
+                       else [args.kappa_zf[0]] * len(nz_list))
+            kappa_tags = [_nz_tag(nz) for nz in nz_list]
+            zf_max = max(zf_list)
             print(f"[eval] kappa: building kappa maps for {len(kappa_cosmos)} of "
-                  f"{len(val_cosmos)} held-out cosmologies {kappa_cosmos} "
-                  f"(zi={args.kappa_zi}, zf={args.kappa_zf}, "
-                  f"nside={args.kappa_nside}), n(z)={args.kappa_nz}", flush=True)
+                  f"{len(val_cosmos)} held-out cosmologies {kappa_cosmos} | n(z) bins: "
+                  + ", ".join(f"{t} (zf={zf:g})" for t, zf in zip(kappa_tags, zf_list))
+                  + f" | zi={args.kappa_zi}, nside={args.kappa_nside}", flush=True)
             kappa_cosmo_labels = []
-            kappa_cl_low, kappa_cl_corr, kappa_cl_high = [], [], []
-            kappa_mom_low, kappa_mom_corr, kappa_mom_high = [], [], []
+            kacc = {t: {k: [] for k in ("cl_low", "cl_corr", "cl_high",
+                                        "mom_low", "mom_corr", "mom_high")} for t in kappa_tags}
             for c in kappa_cosmos:
                 c_run_dir = Path(args.data_root) / c / args.run
                 cosmo_params = weak_lensing.load_cosmo_yaml(c_run_dir)
@@ -519,7 +547,7 @@ def main():
                                      allow_pickle=True, mmap_mode="r")["shell_info"]
                 lower_z_all = shell_info["lower_z"]; upper_z_all = shell_info["upper_z"]
                 usable = np.where(weak_lensing.usable_shell_mask(
-                    lower_z_all, upper_z_all, args.kappa_zi, args.kappa_zf))[0]
+                    lower_z_all, upper_z_all, args.kappa_zi, zf_max))[0]
                 lower_z, upper_z = lower_z_all[usable], upper_z_all[usable]
 
                 c_low_all = np.load(c_run_dir / f"low_shells_nside={nside}.npy", mmap_mode="r")
@@ -532,50 +560,48 @@ def main():
                     reconstruct(np.asarray(c_low_all[int(s)], np.float32), c, int(s)).astype(np.float64)
                     for s in usable])
 
-                kw = dict(nside=args.kappa_nside, zi=args.kappa_zi, zf=args.kappa_zf)
-                kappa_low = weak_lensing.kappa_map(low_shells, lower_z, upper_z, cosmo_params, args.kappa_nz, **kw)
-                kappa_corr = weak_lensing.kappa_map(corr_shells, lower_z, upper_z, cosmo_params, args.kappa_nz, **kw)
-                kappa_high = weak_lensing.kappa_map(high_shells, lower_z, upper_z, cosmo_params, args.kappa_nz, **kw)
-
                 kappa_cosmo_labels.append(f"{c}/{args.run}")
-                kappa_cl_low.append(weak_lensing.kappa_cl(kappa_low, args.kappa_lmax))
-                kappa_cl_corr.append(weak_lensing.kappa_cl(kappa_corr, args.kappa_lmax))
-                kappa_cl_high.append(weak_lensing.kappa_cl(kappa_high, args.kappa_lmax))
-                kappa_mom_low.append(moments(kappa_low))
-                kappa_mom_corr.append(moments(kappa_corr))
-                kappa_mom_high.append(moments(kappa_high))
+                for nz, zf, tag in zip(nz_list, zf_list, kappa_tags):
+                    kw = dict(nside=args.kappa_nside, zi=args.kappa_zi, zf=zf)
+                    kappa_low = weak_lensing.kappa_map(low_shells, lower_z, upper_z, cosmo_params, nz, **kw)
+                    kappa_corr = weak_lensing.kappa_map(corr_shells, lower_z, upper_z, cosmo_params, nz, **kw)
+                    kappa_high = weak_lensing.kappa_map(high_shells, lower_z, upper_z, cosmo_params, nz, **kw)
+                    a = kacc[tag]
+                    a["cl_low"].append(weak_lensing.kappa_cl(kappa_low, args.kappa_lmax))
+                    a["cl_corr"].append(weak_lensing.kappa_cl(kappa_corr, args.kappa_lmax))
+                    a["cl_high"].append(weak_lensing.kappa_cl(kappa_high, args.kappa_lmax))
+                    a["mom_low"].append(moments(kappa_low)); a["mom_corr"].append(moments(kappa_corr))
+                    a["mom_high"].append(moments(kappa_high))
                 print(f"[eval] kappa {c}: done", flush=True)
 
             kappa_ells = np.arange(args.kappa_lmax + 1)
-            kappa_suptitle_common = (f"{len(kappa_cosmo_labels)} held-out cosmologies (flow) | "
-                                     f"n(z)={Path(args.kappa_nz).name} | "
-                                     f"z in [{args.kappa_zi:g},{args.kappa_zf:g}]"
-                                     f" | kappa nside={args.kappa_nside}, lmax={args.kappa_lmax}")
             # Same two views of the kappa Cl as transfer/apply_transfer.py and
-            # sphereflow/apply_sphere_flow.py -- faceted per cosmology, and the
-            # median + 16-84 band ACROSS cosmologies. (The old single-overlay
-            # kappa_cl_all_cosmologies.png was dropped: with more than a couple of
-            # cosmologies its lines pile onto one axes and neither question --
-            # "how does each one behave" nor "what is the spread" -- is readable.)
-            plot_kappa_cl_grid(
-                kappa_cosmo_labels, kappa_ells, kappa_cl_low, kappa_cl_corr, kappa_cl_high,
-                out_dir / "kappa_cl_per_cosmology.png", corrected_label="flow-corrected",
-                suptitle=f"weak-lensing kappa Cl per cosmology, {kappa_suptitle_common}")
+            # sphereflow/apply_sphere_flow.py, per n(z) bin (_bin1/_bin4/...).
+            for nz, zf, tag in zip(nz_list, zf_list, kappa_tags):
+                a = kacc[tag]
+                kappa_suptitle_common = (f"{len(kappa_cosmo_labels)} held-out cosmologies (flow) | "
+                                         f"n(z)={Path(nz).name} | "
+                                         f"z in [{args.kappa_zi:g},{zf:g}]"
+                                         f" | kappa nside={args.kappa_nside}, lmax={args.kappa_lmax}")
+                plot_kappa_cl_grid(
+                    kappa_cosmo_labels, kappa_ells, a["cl_low"], a["cl_corr"], a["cl_high"],
+                    out_dir / f"kappa_cl_per_cosmology_{tag}.png", corrected_label="flow-corrected",
+                    suptitle=f"weak-lensing kappa Cl per cosmology, {kappa_suptitle_common}")
 
-            with np.errstate(divide="ignore", invalid="ignore"):
-                k_lo_stack = np.array([lo / hi for lo, hi in zip(kappa_cl_low, kappa_cl_high)])
-                k_co_stack = np.array([co / hi for co, hi in zip(kappa_cl_corr, kappa_cl_high)])
-            plot_pctile_band_ratio(
-                kappa_ells[1:], {"low / high (baseline, no model)": k_lo_stack[:, 1:],
-                                 "flow-corrected / high": k_co_stack[:, 1:]},
-                out_dir / "kappa_cl_pctile_band.png", xlabel=r"$\ell$", ylim=(0.4, 1.6),
-                title=f"weak-lensing kappa Cl ratio to truth -- median + 16-84th pctile band "
-                      f"ACROSS {len(kappa_cosmo_labels)} held-out cosmologies")
+                with np.errstate(divide="ignore", invalid="ignore"):
+                    k_lo_stack = np.array([lo / hi for lo, hi in zip(a["cl_low"], a["cl_high"])])
+                    k_co_stack = np.array([co / hi for co, hi in zip(a["cl_corr"], a["cl_high"])])
+                plot_pctile_band_ratio(
+                    kappa_ells[1:], {"low / high (baseline, no model)": k_lo_stack[:, 1:],
+                                     "flow-corrected / high": k_co_stack[:, 1:]},
+                    out_dir / f"kappa_cl_pctile_band_{tag}.png", xlabel=r"$\ell$", ylim=(0.4, 1.6),
+                    title=f"weak-lensing kappa Cl ratio to truth ({tag}) -- median + 16-84th "
+                          f"pctile band ACROSS {len(kappa_cosmo_labels)} held-out cosmologies")
 
-            plot_kappa_moments_scatter(
-                kappa_cosmo_labels, kappa_mom_low, kappa_mom_corr, kappa_mom_high,
-                out_dir / "kappa_moments_scatter.png", corrected_label="flow-corrected",
-                suptitle=f"weak-lensing kappa map moments, {kappa_suptitle_common}")
+                plot_kappa_moments_scatter(
+                    kappa_cosmo_labels, a["mom_low"], a["mom_corr"], a["mom_high"],
+                    out_dir / f"kappa_moments_scatter_{tag}.png", corrected_label="flow-corrected",
+                    suptitle=f"weak-lensing kappa map moments, {kappa_suptitle_common}")
     # ============= end optional full-sky section =============
 
     print(f"[eval] figures -> {out_dir}", flush=True)

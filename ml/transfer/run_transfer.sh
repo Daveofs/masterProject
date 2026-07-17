@@ -136,7 +136,7 @@ export OMP_NUM_THREADS=8         # light default; heavy stages override inline b
 export UENV_REPO_PATH=/capstor/scratch/cscs/damrein/.uenv-images
 SPHEREFLOW_VENV=/capstor/scratch/cscs/damrein/venvs/sphereflow
 
-DATA=/capstor/scratch/cscs/damrein/grid
+DATA=/capstor/scratch/cscs/damrein/cosmogridv1
 LMAX=3000
 # How to build T(ell, shell): "fit" (train-averaged) or "emulate" (MLP emulator).
 METHOD=${METHOD:-emulate}
@@ -252,14 +252,26 @@ fi
 # sphereflow too (checked), so this is a clean env switch, not a partial one.
 RUN_DIRS=""
 for c in "${EVAL_COSMOS_ARR[@]}"; do RUN_DIRS="$RUN_DIRS $DATA/$c/run_0"; done
-echo "[stage 3] apply_transfer.py: correction + Poisson (ell_min_mpc=$ELL_MIN_MPC n_avg=$N_AVG n_iter=$N_ITER damp=$DAMP) + diagnostics (incl. kappa), ${#EVAL_COSMOS_ARR[@]} held-out cosmologies"
+# --no-poisson --no-clip: skip the ~50min/cosmology Poisson resample entirely and
+# emit the continuous, Cl-optimal field instead. Empirically verified (2026-07-16,
+# cosmo_081972 + cosmo_074758) that for kappa specifically this is not just faster
+# but MORE accurate than the Poisson path -- kappa Cl ratio to truth across 5 log-ell
+# bands: no-clip=[0.98-1.01] vs poisson=[0.81-1.08], on BOTH cosmologies tested,
+# including cosmo_074758 where the Poisson path had a real tail-blowup bug (shell 30:
+# max count 27847 vs truth's 3529, ~8x too many exact-zero pixels). Kappa is a
+# lightcone-integrated, smoothed (nside=1024) quantity -- the Poisson step's per-
+# pixel shot noise and occasional outliers are pure added noise at that scale, not
+# signal. This flag ONLY makes sense while --patch-shells/--fullsky-shells (which DO
+# need real per-pixel count realism) are also off/not being trusted for that purpose
+# -- see apply_transfer.py's --no-clip help text.
+echo "[stage 3] apply_transfer.py: correction (--no-clip, no Poisson, ell_min_mpc=$ELL_MIN_MPC) + diagnostics (incl. kappa), ${#EVAL_COSMOS_ARR[@]} held-out cosmologies"
 uenv run pytorch/v2.9.1:v2 --view=default -- bash -c "
     source ${SPHEREFLOW_VENV}/bin/activate
     OMP_NUM_THREADS=128 python transfer/apply_transfer.py \
         --transfer $TRANSFER_FILES \
         --run-dirs $RUN_DIRS \
         --nside 2048 --lmax $LMAX --ell-min-mpc $ELL_MIN_MPC \
-        --poisson --poisson-n-avg $N_AVG --poisson-n-iter $N_ITER --poisson-damp $DAMP \
+        --no-poisson --no-clip \
         --out-counts-dir '$OUT/counts' \
         --patch-shells 5 10 15 30 50 --n-per-shell 1 --patch-size 256 --seed 0 \
         --fullsky-shells 5 10 15 30 50 \

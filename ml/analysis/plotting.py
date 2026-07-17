@@ -149,17 +149,23 @@ def plot_pctile_band_ratio(x, ratio_stacks: dict, out_path, xlabel=r"$\ell$",
 
 
 def plot_cl_ratio_pctile_grid(grid, out_path, pctile=(16, 84), suptitle=None,
-                              corrected_label="flow / true (after)"):
+                              corrected_label="flow / true (after)",
+                              n_ell_bins=12, ell_min=10):
     """grid: list of (row_label, panels) -- one row per held-out cosmology. panels:
     list of (bin_label, shells, ells, lo_stack, co_stack) -- one column per
     redshift/shell bin (see full_sky.zbin_shell_samples); lo_stack/co_stack:
     (n_shells_in_bin, n_ell) per-shell Cl-ratio-to-truth arrays (low/true and
     corrected/true respectively).
 
-    No images here (see plot_example_patch_grid for those) -- this is purely the
-    aggregate two-point check: a median + [pctile] shaded band per curve, so a
-    systematic bias is distinguishable from both per-shell noise (within a column)
-    and cosmology-to-cosmology spread (across rows), all in one figure."""
+    THESIS-STYLE presentation (2026-07-16, replaces the per-ell median line +
+    shaded band): the ratio is evaluated on a SPARSE log-spaced ell grid of
+    `n_ell_bins` points between ell_min and lmax -- per grid point, the marker is
+    the median of ALL ratio values pooled over (shells in the redshift bin) x
+    (ells inside the grid cell), and the errorbar is the [pctile] spread of that
+    same pool. A per-ell curve at every single ell was unreadably dense and the
+    band hid the baseline; ~12 points with errorbars carry the same comparison
+    legibly. Baseline and corrected are nudged apart horizontally (x*0.93 / x*1.07)
+    so overlapping errorbars stay distinguishable."""
     n_rows = len(grid)
     n_cols = max(len(panels) for _, panels in grid)
     fig, axes = plt.subplots(n_rows, n_cols, figsize=(4.3 * n_cols, 3.6 * n_rows), squeeze=False)
@@ -173,14 +179,26 @@ def plot_cl_ratio_pctile_grid(grid, out_path, pctile=(16, 84), suptitle=None,
             bin_label, shells, ells, lo_stack, co_stack = panels[j]
             lo_stack = np.asarray(lo_stack, dtype=np.float64)
             co_stack = np.asarray(co_stack, dtype=np.float64)
-            x = ells[1:]
-            for stack, color, label in [(lo_stack, "gray", "low / true (before)"),
-                                        (co_stack, "steelblue", corrected_label)]:
-                med = np.nanmedian(stack, axis=0)[1:]
-                p_lo = np.nanpercentile(stack, lo_pct, axis=0)[1:]
-                p_hi = np.nanpercentile(stack, hi_pct, axis=0)[1:]
-                ax.semilogx(x, med, "-", lw=1.2, color=color, label=label)
-                ax.fill_between(x, p_lo, p_hi, color=color, alpha=0.25)
+            ells = np.asarray(ells)
+            edges = np.geomspace(max(ell_min, 2), ells.max(), n_ell_bins + 1)
+            centers = np.sqrt(edges[:-1] * edges[1:])
+            for stack, color, marker, off, label in [
+                    (lo_stack, "gray", "o", 0.93, "low / true (before)"),
+                    (co_stack, "steelblue", "s", 1.07, corrected_label)]:
+                xs, med, elo, ehi = [], [], [], []
+                for k in range(n_ell_bins):
+                    sel = (ells >= edges[k]) & (ells < edges[k + 1])
+                    vals = stack[:, sel].ravel()
+                    vals = vals[np.isfinite(vals)]
+                    if vals.size == 0:
+                        continue
+                    m = np.median(vals)
+                    xs.append(centers[k] * off); med.append(m)
+                    elo.append(m - np.percentile(vals, lo_pct))
+                    ehi.append(np.percentile(vals, hi_pct) - m)
+                ax.errorbar(xs, med, yerr=[elo, ehi], fmt=marker, ms=4, lw=1.1,
+                            capsize=2.5, color=color, label=label)
+            ax.set_xscale("log")
             ax.axhline(1.0, color="k", ls="--", lw=0.8)
             ax.set_title(f"{bin_label} (n={len(shells)}): {[int(s) for s in shells]}",
                         fontsize=8, wrap=True)
@@ -278,24 +296,36 @@ def plot_histogram_grid(rows, out_path, corrected_label="corrected", n_bins=60,
     spanning all three arrays so zero-spikes/tails are directly comparable -- the
     one-point-PDF analogue of plot_cl_shell's two-point check (see moments.py)."""
     ns = len(rows)
-    fig, axes = plt.subplots(ns, 1, figsize=(8, 3 * ns), squeeze=False)
+    # 2-column layout once the shell list gets long (the denser thesis default is
+    # ~13 shells; a single column would be a ~40-inch-tall figure).
+    n_cols = 2 if ns > 6 else 1
+    n_rows_fig = (ns + n_cols - 1) // n_cols
+    fig, axes = plt.subplots(n_rows_fig, n_cols, figsize=(8 * n_cols, 3 * n_rows_fig),
+                             squeeze=False)
+    flat = axes.ravel()
     for i, (label, low_v, corr_v, high_v) in enumerate(rows):
-        ax = axes[i, 0]
+        ax = flat[i]
         lo = float(min(np.min(low_v), np.min(corr_v), np.min(high_v)))
         hi = float(max(np.max(low_v), np.max(corr_v), np.max(high_v)))
         bins = np.linspace(lo, hi, n_bins + 1) if hi > lo else n_bins
-        ax.hist(low_v, bins=bins, histtype="step", color="seagreen", lw=1.3,
-               density=True, label="low (DISCO)")
-        ax.hist(corr_v, bins=bins, histtype="step", color="steelblue", lw=1.3,
-               density=True, label=corrected_label)
-        ax.hist(high_v, bins=bins, histtype="step", color="tomato", lw=1.3,
-               density=True, label="high (CosmoGrid)")
+        # DISTINCT line styles + draw order, so a curve that overlaps another
+        # exactly (low often sits under corrected/high on shells the correction
+        # barely touches) stays visible: high solid at the back, corrected
+        # dash-dot, low DASHED and drawn LAST (topmost).
+        ax.hist(high_v, bins=bins, histtype="step", color="tomato", lw=2.4,
+               ls="solid", density=True, label="high (CosmoGrid)", zorder=1)
+        ax.hist(corr_v, bins=bins, histtype="step", color="steelblue", lw=1.6,
+               ls="dashdot", density=True, label=corrected_label, zorder=2)
+        ax.hist(low_v, bins=bins, histtype="step", color="seagreen", lw=1.4,
+               ls="dashed", density=True, label="low (DISCO)", zorder=3)
         ax.set_yscale("log"); ax.set_ylabel(label, fontsize=9)
         ax.tick_params(labelsize=8)
         if i == 0:
             ax.legend(fontsize=8)
-        if i == ns - 1:
+        if i >= ns - n_cols:
             ax.set_xlabel(xlabel)
+    for k in range(ns, len(flat)):
+        flat[k].axis("off")
 
     if suptitle:
         fig.suptitle(suptitle, fontsize=11, wrap=True)
@@ -306,12 +336,19 @@ def plot_histogram_grid(rows, out_path, corrected_label="corrected", n_bins=60,
     return out_path
 
 
-def plot_moments_vs_shell(shell_idx, series: dict, out_path, suptitle=None):
+def plot_moments_vs_shell(shell_idx, series: dict, out_path, suptitle=None, note=None):
     """3-panel (variance / skewness / excess kurtosis vs shell index) figure. series:
     dict of label -> list of moments.moments() dicts, one per entry of shell_idx, in
     insertion order (convention: "low", "high (true)", then the model's prediction) --
     catches one-point-PDF drift that a Cl-ratio plot (phase-blind, two-point only)
-    cannot see (see moments.py)."""
+    cannot see (see moments.py).
+
+    NB there is ONE curve per series, not one per cosmology: the callers pool the
+    raw pixels of all their held-out cosmologies BEFORE computing each moment, so
+    a 3-cosmology run still shows exactly 3 curves (low / corrected / high). Pass
+    the per-cosmology parameters via `note` (rendered under the panels) so an
+    outlier cosmology -- e.g. cosmo_000003's sigma8=1.15 -- is visible on the
+    figure itself instead of needing a params.yml lookup."""
     fig, axes = plt.subplots(1, 3, figsize=(15, 4.5))
     panels = [("variance", "variance"), ("skewness", "skewness"),
              ("excess_kurtosis", "excess kurtosis")]
@@ -327,10 +364,75 @@ def plot_moments_vs_shell(shell_idx, series: dict, out_path, suptitle=None):
             ax.legend(fontsize=8)
     if suptitle:
         fig.suptitle(suptitle, fontsize=12, wrap=True)
-    fig.tight_layout()
+    if note:
+        n_lines = note.count("\n") + 1
+        pad = min(0.32, 0.028 * n_lines + 0.03)
+        fig.text(0.01, 0.01, note, fontsize=7.5, family="monospace", va="bottom")
+        fig.tight_layout(rect=(0, pad, 1, 1))
+    else:
+        fig.tight_layout()
     out_path = Path(out_path); out_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out_path, dpi=300); plt.close(fig)
     print(f"[plotting] moments vs shell depth -> {out_path}", flush=True)
+    return out_path
+
+
+# params.yml key -> axis label, in the CosmoGridV1 paper's corner-plot ordering
+# (Omega_m, sigma_8, w_0, H_0, n_s, Omega_b).
+_PARAM_LABELS = {"Om": r"$\Omega_m$", "s8": r"$\sigma_8$", "w0": r"$w_0$",
+                 "H0": r"$H_0$", "ns": r"$n_s$", "Ob": r"$\Omega_b$"}
+
+
+def plot_cosmo_param_matrix(pool: dict, held: dict, out_path,
+                            params=("Om", "s8", "w0", "H0", "ns", "Ob"),
+                            pool_label="training pool",
+                            held_label="held-out (validation)", suptitle=None):
+    """Where do the VALIDATION cosmologies sit in parameter space, and what are
+    their values? pool/held: dict cosmo_name -> dict of parameter values (from each
+    run's params.yml). Left: corner scatter of every pairwise parameter plane --
+    the full pool in gray, the held-out set highlighted (labelled with the cosmo
+    number in the first panel, e.g. the classic s8-Om plane). Right: a monospace
+    table of every held-out cosmology's parameters, so an outlier like
+    cosmo_000003 (sigma8=1.15) is identifiable at a glance."""
+    k = len(params) - 1
+    fig = plt.figure(figsize=(2.9 * k + 5.2, max(2.7 * k, 0.22 * (len(held) + 4))))
+    gs = fig.add_gridspec(k, k + 2)
+    pool_v = {q: np.array([c[q] for c in pool.values()], dtype=float) for q in params}
+    held_names = list(held.keys())
+    held_v = {q: np.array([held[n][q] for n in held_names], dtype=float) for q in params}
+    for i in range(k):
+        for j in range(i + 1):
+            ax = fig.add_subplot(gs[i, j])
+            xq, yq = params[j], params[i + 1]
+            ax.scatter(pool_v[xq], pool_v[yq], s=11, color="0.78", label=pool_label)
+            ax.scatter(held_v[xq], held_v[yq], s=26, color="steelblue",
+                       edgecolor="k", linewidth=0.4, zorder=3, label=held_label)
+            if i == 0 and j == 0:
+                for nme, xv, yv in zip(held_names, held_v[xq], held_v[yq]):
+                    ax.annotate(nme.replace("cosmo_", "").lstrip("0") or "0",
+                                (xv, yv), fontsize=5.5, color="steelblue",
+                                xytext=(2, 2), textcoords="offset points")
+                ax.legend(fontsize=7, loc="best")
+            (ax.set_ylabel(_PARAM_LABELS.get(yq, yq), fontsize=11)
+             if j == 0 else ax.set_yticklabels([]))
+            (ax.set_xlabel(_PARAM_LABELS.get(xq, xq), fontsize=11)
+             if i == k - 1 else ax.set_xticklabels([]))
+            ax.tick_params(labelsize=7)
+    axt = fig.add_subplot(gs[:, k:])
+    axt.axis("off")
+    hdr = f"{'held-out cosmology':<19}" + "".join(f"{q:>8}" for q in params)
+    lines = [hdr, "-" * len(hdr)]
+    for nme in held_names:
+        lines.append(f"{nme:<19}" + "".join(f"{held[nme][q]:>8.4g}" for q in params))
+    axt.text(0.02, 1.0, "\n".join(lines), family="monospace", fontsize=7.5,
+             va="top", ha="left", transform=axt.transAxes)
+    if suptitle:
+        fig.suptitle(suptitle, fontsize=12, wrap=True)
+    fig.tight_layout()
+    out_path = Path(out_path); out_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(out_path, dpi=300); plt.close(fig)
+    print(f"[plotting] cosmo parameter matrix ({len(held)} held-out of {len(pool)}) "
+          f"-> {out_path}", flush=True)
     return out_path
 
 

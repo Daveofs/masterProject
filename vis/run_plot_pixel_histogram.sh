@@ -18,8 +18,8 @@ SCRATCH_DIR=/capstor/scratch/cscs/damrein
 CONDA_ROOT=/users/damrein/miniforge3
 CONDA_ENV=disco-dj
 
-DISCO_FILE="/capstor/scratch/cscs/damrein/outputs/transfer/3855493/cosmo_000122_corrected_fullT.npz"
-COSMOGRID_FILE="/capstor/scratch/cscs/damrein/cosmogridv1/cosmo_000122/run_0/compressed_shells.npz"
+DISCO_FILE="/capstor/scratch/cscs/damrein/outputs/transfer/4222967/counts/cosmo_000028_counts.npz"
+COSMOGRID_FILE="/capstor/scratch/cscs/damrein/cosmogridv1/cosmo_000028/run_0/compressed_shells.npz"
 OUT_DIR="${SCRATCH_DIR}/outputs/pixel_histogram"
 
 PY_SCRIPT=/users/damrein/masterProject/vis/plot_pixel_histogram.py

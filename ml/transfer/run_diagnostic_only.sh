@@ -147,7 +147,7 @@ uenv run pytorch/v2.9.1:v2 --view=default -- bash -c "
         --transfer $TRANSFER_FILES \
         --run-dirs $RUN_DIRS \
         --nside 2048 --lmax $LMAX --ell-min-mpc $ELL_MIN_MPC \
-        --poisson --poisson-n-avg $N_AVG --poisson-n-iter $N_ITER --poisson-damp $DAMP \
+        --no-poisson --no-clip \
         $REUSE_FLAG \
         --out-counts-dir '$OUT/counts' \
         --patch-shells 5 10 15 30 50 --n-per-shell 1 --patch-size 256 --seed 0 \
