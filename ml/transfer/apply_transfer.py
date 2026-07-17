@@ -394,31 +394,34 @@ def plot_full_sky(args, run_dirs: list[Path], corrected_by_run: dict):
         plot_cl_shell(s, ells, cl_lo, cl_c, cl_hi, out_dir / f"cl_shell{s:03d}.png")
 
     if args.fullsky_shells:
-        print(f"[plot_full_sky] full-sky moments + histograms for shells "
-              f"{args.fullsky_shells}, pooled over {len(run_dirs)} cosmologies", flush=True)
+        print(f"[plot_full_sky] full-sky moments (median + 16-84th pctile band across "
+              f"{len(run_dirs)} held-out cosmologies) + pooled histograms for shells "
+              f"{args.fullsky_shells}", flush=True)
 
         mom_low, mom_corr, mom_high, hist_rows = [], [], [], []
         for s in args.fullsky_shells:
-            # full-sky one-point PDF, POOLED across ALL held-out cosmologies (raw
-            # counts, all pixels of shell s from every run).
-            low_pool = np.concatenate([np.asarray(arrays[r][0][s], np.float32).ravel()
-                                       for r in run_dirs])
-            high_pool = np.concatenate([np.asarray(arrays[r][1][s], np.float32).ravel()
-                                        for r in run_dirs])
-            corr_pool = np.concatenate([np.asarray(corrected_by_run[r][s], np.float32).ravel()
-                                        for r in run_dirs])
-            mom_low.append(moments(low_pool)); mom_high.append(moments(high_pool))
-            mom_corr.append(moments(corr_pool))
-            hist_rows.append((f"shell {s}", low_pool, corr_pool, high_pool))
+            # ONE sample per held-out cosmology (not pooled before moments()), so
+            # plot_moments_vs_shell can draw the cosmology-to-cosmology spread as a
+            # pctile band instead of hiding it in a single pooled number.
+            low_per_cosmo = [np.asarray(arrays[r][0][s], np.float32) for r in run_dirs]
+            high_per_cosmo = [np.asarray(arrays[r][1][s], np.float32) for r in run_dirs]
+            corr_per_cosmo = [np.asarray(corrected_by_run[r][s], np.float32) for r in run_dirs]
+            mom_low.append([moments(m) for m in low_per_cosmo])
+            mom_high.append([moments(m) for m in high_per_cosmo])
+            mom_corr.append([moments(m) for m in corr_per_cosmo])
+            hist_rows.append((f"shell {s}",
+                              np.concatenate([m.ravel() for m in low_per_cosmo]),
+                              np.concatenate([m.ravel() for m in corr_per_cosmo]),
+                              np.concatenate([m.ravel() for m in high_per_cosmo])))
 
         plot_moments_vs_shell(
             args.fullsky_shells, {"low": mom_low, "high (true)": mom_high,
                                   f"corrected ({method_label})": mom_corr},
             out_dir / "moments_vs_shell.png",
             note=_cosmo_note(run_dirs),
-            suptitle=f"moments vs. shell depth -- full-sky (raw counts). Pixels POOLED "
-                     f"over {len(run_dirs)} held-out cosmologies -> ONE curve per series "
-                     f"(not one per cosmology); their parameters are printed below.")
+            suptitle=f"moments vs. shell depth -- full-sky (raw counts). Median + "
+                     f"16-84th pctile band ACROSS {len(run_dirs)} held-out cosmologies "
+                     f"(one sample per cosmology); their parameters are printed below.")
         plot_histogram_grid(
             hist_rows, out_dir / "example_histograms.png",
             corrected_label=f"corrected ({method_label})",

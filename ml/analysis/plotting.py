@@ -150,72 +150,84 @@ def plot_pctile_band_ratio(x, ratio_stacks: dict, out_path, xlabel=r"$\ell$",
 
 def plot_cl_ratio_pctile_grid(grid, out_path, pctile=(16, 84), suptitle=None,
                               corrected_label="flow / true (after)",
-                              n_ell_bins=12, ell_min=10):
+                              n_ell_bins=40, ell_min=10):
     """grid: list of (row_label, panels) -- one row per held-out cosmology. panels:
     list of (bin_label, shells, ells, lo_stack, co_stack) -- one column per
-    redshift/shell bin (see full_sky.zbin_shell_samples); lo_stack/co_stack:
-    (n_shells_in_bin, n_ell) per-shell Cl-ratio-to-truth arrays (low/true and
-    corrected/true respectively).
+    redshift/shell bin; lo_stack/co_stack: (n_shells_in_bin, n_ell) per-shell
+    Cl-ratio-to-truth arrays.
 
-    THESIS-STYLE presentation (2026-07-16, replaces the per-ell median line +
-    shaded band): the ratio is evaluated on a SPARSE log-spaced ell grid of
-    `n_ell_bins` points between ell_min and lmax -- per grid point, the marker is
-    the median of ALL ratio values pooled over (shells in the redshift bin) x
-    (ells inside the grid cell), and the errorbar is the [pctile] spread of that
-    same pool. A per-ell curve at every single ell was unreadably dense and the
-    band hid the baseline; ~12 points with errorbars carry the same comparison
-    legibly. Baseline and corrected are nudged apart horizontally (x*0.93 / x*1.07)
-    so overlapping errorbars stay distinguishable."""
-    n_rows = len(grid)
+    THESIS-STYLE presentation: ONE figure, ONE ROW of redshift-bin panels, each
+    POOLING ALL held-out cosmologies. Within a panel, draws a median line + shaded
+    [pctile] band on a log-spaced ell grid (analogous to plot_pctile_band_ratio).
+    The band carries the full cosmology-to-cosmology + shell-to-shell scatter."""
     n_cols = max(len(panels) for _, panels in grid)
-    fig, axes = plt.subplots(n_rows, n_cols, figsize=(4.3 * n_cols, 3.6 * n_rows), squeeze=False)
+    fig, axes = plt.subplots(1, n_cols, figsize=(5.0 * n_cols, 4.2), squeeze=False)
     lo_pct, hi_pct = pctile
-    for i, (row_label, panels) in enumerate(grid):
-        for j in range(n_cols):
-            ax = axes[i, j]
+    n_cosmo = len(grid)
+
+    for j in range(n_cols):
+        ax = axes[0, j]
+        # Pool this redshift bin's per-shell ratio stacks across ALL cosmology rows.
+        bin_label = None; shells_ref = None; ells = None
+        lo_parts, co_parts = [], []
+        for _row_label, panels in grid:
             if j >= len(panels):
-                ax.axis("off")
                 continue
-            bin_label, shells, ells, lo_stack, co_stack = panels[j]
-            lo_stack = np.asarray(lo_stack, dtype=np.float64)
-            co_stack = np.asarray(co_stack, dtype=np.float64)
-            ells = np.asarray(ells)
-            edges = np.geomspace(max(ell_min, 2), ells.max(), n_ell_bins + 1)
-            centers = np.sqrt(edges[:-1] * edges[1:])
-            for stack, color, marker, off, label in [
-                    (lo_stack, "gray", "o", 0.93, "low / true (before)"),
-                    (co_stack, "steelblue", "s", 1.07, corrected_label)]:
-                xs, med, elo, ehi = [], [], [], []
-                for k in range(n_ell_bins):
-                    sel = (ells >= edges[k]) & (ells < edges[k + 1])
-                    vals = stack[:, sel].ravel()
-                    vals = vals[np.isfinite(vals)]
-                    if vals.size == 0:
-                        continue
-                    m = np.median(vals)
-                    xs.append(centers[k] * off); med.append(m)
-                    elo.append(m - np.percentile(vals, lo_pct))
-                    ehi.append(np.percentile(vals, hi_pct) - m)
-                ax.errorbar(xs, med, yerr=[elo, ehi], fmt=marker, ms=4, lw=1.1,
-                            capsize=2.5, color=color, label=label)
-            ax.set_xscale("log")
-            ax.axhline(1.0, color="k", ls="--", lw=0.8)
-            ax.set_title(f"{bin_label} (n={len(shells)}): {[int(s) for s in shells]}",
-                        fontsize=8, wrap=True)
-            ax.tick_params(labelsize=7)
-            if i == 0 and j == 0:
-                ax.legend(fontsize=7, loc="lower left")
-            if j == 0:
-                ax.set_ylabel(f"{row_label}\n" + r"$C_\ell/C_\ell^{true}$", fontsize=8)
-            if i == n_rows - 1:
-                ax.set_xlabel(r"$\ell$", fontsize=8)
+            bin_label, shells_ref, ells, lo_stack, co_stack = panels[j]
+            lo_parts.append(np.asarray(lo_stack, dtype=np.float64))
+            co_parts.append(np.asarray(co_stack, dtype=np.float64))
+        if not lo_parts:
+            ax.axis("off"); continue
+
+        lo_pool = np.concatenate(lo_parts, axis=0)  # (n_cosmo*n_shells_in_bin, n_ell)
+        co_pool = np.concatenate(co_parts, axis=0)
+        ells = np.asarray(ells)
+
+        # Build log-spaced bin edges and centers
+        edges = np.geomspace(max(ell_min, 2), ells.max(), n_ell_bins + 1)
+        centers = np.sqrt(edges[:-1] * edges[1:])
+
+        for stack, color, label in [
+                (lo_pool, "gray", "low / true (before)"),
+                (co_pool, "steelblue", corrected_label)]:
+            xs, med, p_lo_arr, p_hi_arr = [], [], [], []
+            for k in range(n_ell_bins):
+                sel = (ells >= edges[k]) & (ells < edges[k + 1])
+                vals = stack[:, sel].ravel()
+                vals = vals[np.isfinite(vals)]
+                if vals.size == 0:
+                    continue
+                xs.append(centers[k])
+                med.append(np.median(vals))
+                p_lo_arr.append(np.percentile(vals, lo_pct))
+                p_hi_arr.append(np.percentile(vals, hi_pct))
+
+            xs = np.asarray(xs)
+            med = np.asarray(med)
+            p_lo_arr = np.asarray(p_lo_arr)
+            p_hi_arr = np.asarray(p_hi_arr)
+
+            ax.semilogx(xs, med, "-o", ms=3, color=color, label=label, lw=1.3)
+            ax.fill_between(xs, p_lo_arr, p_hi_arr, color=color, alpha=0.2)
+
+        ax.axhline(1.0, color="k", ls="--", lw=0.8)
+        ax.set_title(f"{bin_label}\n(pooled: {n_cosmo} cosmologies x "
+                     f"{len(shells_ref)} shells)", fontsize=9, wrap=True)
+        ax.set_xlabel(r"$\ell$", fontsize=9)
+        ax.tick_params(labelsize=8)
+        if j == 0:
+            ax.set_ylabel(r"$C_\ell/C_\ell^{\rm true}$", fontsize=10)
+            ax.legend(fontsize=8, loc="lower left")
+
     if suptitle:
         fig.suptitle(suptitle, fontsize=12, wrap=True)
     fig.tight_layout()
     out_path = Path(out_path); out_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out_path, dpi=300); plt.close(fig)
-    print(f"[plotting] Cl-ratio pctile grid ({n_rows}x{n_cols}) -> {out_path}", flush=True)
+    print(f"[plotting] Cl-ratio pctile band panels ({n_cols} zbins, pooled over "
+          f"{n_cosmo} cosmologies) -> {out_path}", flush=True)
     return out_path
+
 
 
 def plot_kappa_cl_grid(cosmo_labels, ells, cl_low_list, cl_corr_list, cl_high_list,
@@ -336,16 +348,21 @@ def plot_histogram_grid(rows, out_path, corrected_label="corrected", n_bins=60,
     return out_path
 
 
-def plot_moments_vs_shell(shell_idx, series: dict, out_path, suptitle=None, note=None):
+def plot_moments_vs_shell(shell_idx, series: dict, out_path, suptitle=None, note=None,
+                          pctile=(16, 84)):
     """3-panel (variance / skewness / excess kurtosis vs shell index) figure. series:
-    dict of label -> list of moments.moments() dicts, one per entry of shell_idx, in
-    insertion order (convention: "low", "high (true)", then the model's prediction) --
+    dict of label -> list of length len(shell_idx), each entry itself a list of
+    per-SAMPLE moments.moments() dicts (one sample per held-out cosmology for a
+    full-sky diagnostic, or one sample per held-out patch for a patch-pooled one) --
     catches one-point-PDF drift that a Cl-ratio plot (phase-blind, two-point only)
     cannot see (see moments.py).
 
-    NB there is ONE curve per series, not one per cosmology: the callers pool the
-    raw pixels of all their held-out cosmologies BEFORE computing each moment, so
-    a 3-cosmology run still shows exactly 3 curves (low / corrected / high). Pass
+    PCTILE-BAND presentation (2026-07-16, matches plot_cl_ratio_pctile_grid): per
+    shell, the marker is the MEDIAN moment value across samples and the errorbar is
+    the [pctile] spread -- so the cosmology-to-cosmology (or patch-to-patch) spread
+    is visible directly, instead of being hidden by pooling every sample into one
+    number per shell before computing the moment (the old behaviour). Series are
+    nudged apart horizontally so overlapping errorbars stay distinguishable. Pass
     the per-cosmology parameters via `note` (rendered under the panels) so an
     outlier cosmology -- e.g. cosmo_000003's sigma8=1.15 -- is visible on the
     figure itself instead of needing a params.yml lookup."""
@@ -354,10 +371,30 @@ def plot_moments_vs_shell(shell_idx, series: dict, out_path, suptitle=None, note
              ("excess_kurtosis", "excess kurtosis")]
     colors = ["darkorange", "seagreen", "steelblue", "tomato"]
     markers = ["o", "s", "^", "d"]
+    lo_pct, hi_pct = pctile
+    x = np.asarray(shell_idx, dtype=np.float64)
+    n_series = len(series)
+    # spread series within +-0.3 shell-index units around each x -- comfortably
+    # inside the minimum spacing of every --*-shells default list used (>=2).
+    offsets = np.linspace(-0.3, 0.3, n_series) if n_series > 1 else np.zeros(1)
+    n_samples = 0
     for ax, (key, title) in zip(axes, panels):
-        for (label, moms), color, marker in zip(series.items(), colors, markers):
-            ax.plot(shell_idx, [m[key] for m in moms], "-", marker=marker,
-                   color=color, label=label)
+        for (label, moms_per_shell), color, marker, off in zip(
+                series.items(), colors, markers, offsets):
+            med, elo, ehi = [], [], []
+            for shell_moms in moms_per_shell:
+                vals = np.asarray([m[key] for m in shell_moms], dtype=np.float64)
+                vals = vals[np.isfinite(vals)]
+                n_samples = max(n_samples, vals.size)
+                if vals.size == 0:
+                    med.append(np.nan); elo.append(0.0); ehi.append(0.0)
+                    continue
+                m = float(np.median(vals))
+                med.append(m)
+                elo.append(m - float(np.percentile(vals, lo_pct)))
+                ehi.append(float(np.percentile(vals, hi_pct)) - m)
+            ax.errorbar(x + off, med, yerr=[elo, ehi], fmt=marker, ms=4.5, lw=1.1,
+                       capsize=2.5, color=color, label=label)
         ax.set_xlabel("shell index (depth)"); ax.set_title(title)
         ax.tick_params(labelsize=8)
         if ax is axes[0]:
@@ -373,7 +410,8 @@ def plot_moments_vs_shell(shell_idx, series: dict, out_path, suptitle=None, note
         fig.tight_layout()
     out_path = Path(out_path); out_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out_path, dpi=300); plt.close(fig)
-    print(f"[plotting] moments vs shell depth -> {out_path}", flush=True)
+    print(f"[plotting] moments vs shell depth (up to {n_samples} samples/shell, "
+          f"{lo_pct}-{hi_pct}th pctile band) -> {out_path}", flush=True)
     return out_path
 
 

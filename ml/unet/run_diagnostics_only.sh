@@ -5,7 +5,7 @@
 #SBATCH --account=sk037
 #SBATCH --ntasks-per-node=1
 #SBATCH --gres=gpu:1
-#SBATCH --cpus-per-task=64
+#SBATCH --cpus-per-task=128
 #SBATCH --time=10:00:00
 #SBATCH --output=/capstor/scratch/cscs/damrein/outputs/logs/unet/diag-%j.out
 #SBATCH --error=/capstor/scratch/cscs/damrein/outputs/logs/unet/diag-%j.err

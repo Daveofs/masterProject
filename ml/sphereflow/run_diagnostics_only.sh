@@ -5,7 +5,7 @@
 #SBATCH --account=sk037
 #SBATCH --ntasks-per-node=1
 #SBATCH --gres=gpu:1
-#SBATCH --cpus-per-task=64
+#SBATCH --cpus-per-task=128
 #SBATCH --time=12:00:00
 #SBATCH --output=/capstor/scratch/cscs/damrein/outputs/logs/sphereflow/compare-%j.out
 #SBATCH --error=/capstor/scratch/cscs/damrein/outputs/logs/sphereflow/compare-%j.err
@@ -66,7 +66,7 @@ OUT_DIR="${EVAL_OUT_DIR:-${MODEL_DIR}/eval}"
 # to force a mismatch check.
 NSIDE_FLAG=""; [ -n "${NSIDE}" ] && NSIDE_FLAG="--nside ${NSIDE}"
 LMAX="${LMAX:-3000}"
-STEPS="${STEPS:-50}"
+STEPS="${STEPS:-10}"
 MAX_COSMOLOGIES="${MAX_COSMOLOGIES:-10}"
 KAPPA="${KAPPA:-1}"
 KAPPA_FLAG=""; [ "${KAPPA}" = "1" ] && KAPPA_FLAG="--kappa --kappa-nside 1024 --kappa-lmax 2048"
