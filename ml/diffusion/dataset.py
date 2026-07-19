@@ -45,6 +45,65 @@ def cosmo_z_vector(cosmo, z):
     return np.stack([h, omega_cdm, ob, om, ns, s8, w0, z], axis=-1)
 
 
+def raw_to_delta_pair(low_raw: torch.Tensor, high_raw: torch.Tensor):
+    """LINEAR overdensity delta = n/<n> - 1 for both maps. This is the space the
+    SCIENCE metric lives in: analysis.full_sky.od_cl computes the angular power
+    spectrum of exactly this field.
+
+    Why this exists (2026-07-18): the pipeline originally trained on log1p(delta)
+    (raw_to_log1p_delta_pair below), and that turned out to be a formulation bug, not
+    a detail. log1p compresses the density peaks, so MEASURED in log space DISCO
+    already matches CosmoGrid closely (low/high power ratio 0.93-1.05 across shell
+    bins) -- while in linear delta the SAME patches show the real deficit the whole
+    project exists to fix (down to 0.62 at high k on shells 23-45). A model trained on
+    the log-space residual therefore optimizes a statistic that is nearly already
+    correct and barely moves the one that is evaluated: it scored ~1.02 on the patch
+    (log-space) power ratio while the full-sky Cl stayed at 0.57.
+
+    Second benefit: the correction becomes ADDITIVE in delta (corrected = delta_low +
+    residual) rather than multiplicative (counts = low*exp(residual)). Overlapping
+    gnomonic tiles are AVERAGED by analysis.patch_tiling, and averaging is linear --
+    so an additive correction survives the blend unbiased, whereas averaging
+    exponentials is dominated by the largest tile outlier on sparse faint shells."""
+    low_mean = low_raw.mean(dim=(2, 3), keepdim=True)
+    high_mean = high_raw.mean(dim=(2, 3), keepdim=True)
+    return low_raw / low_mean - 1.0, high_raw / high_mean - 1.0
+
+
+def transform_pair(low_raw: torch.Tensor, high_raw: torch.Tensor, space: str):
+    """(low, high) raw counts -> the pair of fields the model works in. THE single
+    dispatch point for `space`, so train and apply cannot drift."""
+    if space == "delta":
+        return raw_to_delta_pair(low_raw, high_raw)
+    if space == "log1p":
+        return raw_to_log1p_delta_pair(low_raw, high_raw)
+    raise ValueError(f"unknown space {space!r} (expected 'delta' or 'log1p')")
+
+
+def low_to_field(low_raw: torch.Tensor, space: str):
+    """Full-sky/inference counterpart of transform_pair when only the LOW map exists.
+    Returns (field, low_mean) so the caller can invert with field_to_counts.
+
+    NOTE the log1p branch's eps uses only low_mean, whereas training's
+    raw_to_log1p_delta_pair uses min(low_mean, high_mean) -- an unavoidable
+    train/inference mismatch inherited from unet/apply_flow.py, and one more reason
+    the 'delta' space (no eps, no clipping, exact round trip) is preferred."""
+    low_mean = low_raw.mean(dim=(2, 3), keepdim=True)
+    if space == "delta":
+        return low_raw / low_mean - 1.0, low_mean
+    if space == "log1p":
+        eps = 0.5 / low_mean
+        return torch.log1p(torch.maximum(low_raw / low_mean - 1.0, -1.0 + eps)), low_mean
+    raise ValueError(f"unknown space {space!r} (expected 'delta' or 'log1p')")
+
+
+def field_to_counts(field: torch.Tensor, low_mean: torch.Tensor, space: str):
+    """Inverse of low_to_field: model-space field -> raw counts, using the LOW map's
+    mean (the only mean available at inference)."""
+    delta = field if space == "delta" else torch.expm1(field)
+    return (1.0 + delta) * low_mean
+
+
 def raw_to_log1p_delta_pair(low_raw: torch.Tensor, high_raw: torch.Tensor):
     """Batched GPU version of the per-sample transform previously done in
     __getitem__. low_raw/high_raw: (B, 1, H, W) raw counts. Returns

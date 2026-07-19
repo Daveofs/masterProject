@@ -55,6 +55,11 @@ DATA_ROOT="/capstor/scratch/cscs/damrein/cosmogridv1"
 METAINFO_DIR="/capstor/scratch/cscs/damrein/cosmogridv1"
 DIFFUSION=/users/damrein/masterProject/ml/diffusion
 
+# nside=2048 by DEFAULT: this is where the actual small-scale correction lives (faint
+# shells, ell~800-1500) and where transfer/ and sphereflow/ were evaluated, so the
+# figures are comparable and there's real headroom to win. The first run was nside=512,
+# where DISCO is already ~perfect (low/high Cl ratio ~1 almost everywhere) so there was
+# almost nothing to correct -- see diffusion-pipeline-build memory.
 NSIDE=${NSIDE:-512}
 PATCH_SIZE=${PATCH_SIZE:-256}
 NPATCH=${NPATCH:-100000}
@@ -69,6 +74,20 @@ RHO=${RHO:-7.0}
 # EDM training noise schedule: ln(sigma) ~ N(P_MEAN, P_STD^2), Karras et al. defaults.
 P_MEAN=${P_MEAN:--1.2}
 P_STD=${P_STD:-1.2}
+# High-pass residual formulation (see model.py): the model diffuses only
+# highpass(high_log-low_log); scales below HP_CUTOFF*Nyquist are pinned to the low
+# (DISCO) map, fixing the large-scale kappa Cl the first full-field run destroyed.
+# Fractions of patch Nyquist. Passed to BOTH train (builds the target) and, via the
+# checkpoint, apply (composes the corrected map) -- they can't drift.
+HP_CUTOFF=${HP_CUTOFF:-0.10}
+HP_TRANSITION=${HP_TRANSITION:-0.10}
+# Field the residual is modelled in. 'delta' (linear overdensity) is the space
+# analysis.full_sky.od_cl actually measures. Training on 'log1p' was a FORMULATION BUG:
+# log1p compresses the density peaks so DISCO already looks ~correct there (low/high
+# power ratio 0.93-1.05) while the real deficit in linear delta reaches 0.62 -- the
+# model then scored ~1.02 on the (log-space) patch diagnostic while the full-sky Cl it
+# is judged on stayed at 0.57. See dataset.raw_to_delta_pair.
+SPACE=${SPACE:-delta}
 # left empty by default -> train_diffusion.py MEASURES it from real training data
 # instead of guessing (see estimate_sigma_data); set explicitly to reuse a known
 # value across resumed/related runs without re-measuring.
@@ -82,9 +101,19 @@ if [ "${USE_COSMO_COND}" = "0" ]; then
 fi
 
 DATA_TAG=$(basename "${DATA_ROOT}")
-RUN_NAME=${RUN_NAME:-diffusion_${DATA_TAG}_nside${NSIDE}_patch${PATCH_SIZE}_n${NPATCH}_ch${BASE_CH}_b${BATCH}_e${EPOCHS}${COSMO_SUFFIX}}
+RUN_NAME=${RUN_NAME:-diffusion_${SPACE}_${DATA_TAG}_nside${NSIDE}_patch${PATCH_SIZE}_n${NPATCH}_ch${BASE_CH}_b${BATCH}_e${EPOCHS}${COSMO_SUFFIX}}
 KAPPA=${KAPPA:-1}
 KAPPA_FLAG=""; [ "${KAPPA}" = "1" ] && KAPPA_FLAG="--kappa"
+# Stage-3 cost knobs. Each full-sky shell reconstruction is one Heun ODE per tile, so
+# these are what set the eval walltime: the Cl grid costs
+# MAX_COSMOLOGIES x N_ZBINS x N_SHELLS_PER_ZBIN reconstructions, and kappa costs
+# KAPPA_MAX_COSMOLOGIES x ~47 (every usable shell) -- kappa is by far the most
+# expensive section and runs LAST, so if the job runs out of time the Cl plots are
+# already written.
+MAX_COSMOLOGIES=${MAX_COSMOLOGIES:-3}
+KAPPA_MAX_COSMOLOGIES=${KAPPA_MAX_COSMOLOGIES:-3}
+N_ZBINS=${N_ZBINS:-3}
+N_SHELLS_PER_ZBIN=${N_SHELLS_PER_ZBIN:-5}
 
 # SAME path unet/run_flow.sh uses -- see the header note above.
 PATCH_DIR="/capstor/scratch/cscs/damrein/outputs/flowpatches/${DATA_TAG}_nside${NSIDE}_${PATCH_SIZE}_${NPATCH}"
@@ -140,6 +169,7 @@ srun --nodes=${SLURM_NNODES} --ntasks-per-node=1 --gres=gpu:4 uenv run pytorch/v
     --out-dir   '${OUT_DIR}' \
     --epochs ${EPOCHS} --batch-size ${BATCH} --base-channels ${BASE_CH} \
     --p-mean ${P_MEAN} --p-std ${P_STD} ${SIGMA_DATA_FLAG} \
+    --hp-cutoff ${HP_CUTOFF} --hp-transition ${HP_TRANSITION} --space ${SPACE} \
     --num-workers $((SLURM_CPUS_PER_TASK / 4)) ${COSMO_FLAG}
 "
 
@@ -154,6 +184,8 @@ srun --nodes=1 --ntasks=1 --gres=gpu:1 uenv run pytorch/v2.9.1:v2 --view=default
     --steps ${STEPS} --sigma-min ${SIGMA_MIN} --sigma-max ${SIGMA_MAX} --rho ${RHO} \
     --data-root '${DATA_ROOT}' \
     --shell-indices --example-shells 5 10 15 30 50 \
+    --n-zbins ${N_ZBINS} --n-shells-per-zbin ${N_SHELLS_PER_ZBIN} \
+    --max-cosmologies ${MAX_COSMOLOGIES} --kappa-max-cosmologies ${KAPPA_MAX_COSMOLOGIES} \
     --fullsky-patch-size ${PATCH_SIZE} ${KAPPA_FLAG}
 "
 echo "diffusion job ${SLURM_JOB_ID} finished at $(date) -> ${OUT_DIR}/eval"

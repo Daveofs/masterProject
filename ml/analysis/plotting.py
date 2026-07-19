@@ -105,7 +105,7 @@ def plot_example_full_sky_grid(rows, out_path, corrected_label="corrected", supt
 
 def plot_pctile_band_ratio(x, ratio_stacks: dict, out_path, xlabel=r"$\ell$",
                            ylabel=None, pctile=(16, 84), ylim=None, title=None,
-                           suptitle=None):
+                           suptitle=None, smooth_window=21):
     """Aggregate, uncertainty-aware ratio-to-truth plot: a single ratio curve (e.g.
     plot_cl_shell's ratio panel) can't distinguish "systematically off" from "noisy
     but unbiased" -- pooling many samples (val patches, Poisson draws, ...) and
@@ -117,7 +117,26 @@ def plot_pctile_band_ratio(x, ratio_stacks: dict, out_path, xlabel=r"$\ell$",
     Draws median line + shaded [pctile[0], pctile[1]] band per label, in insertion
     order (first entry gets the baseline/no-model styling, rest get the model
     colors) -- matches every pipeline's "low/high (baseline)" vs "prediction/high"
-    convention."""
+    convention.
+
+    smooth_window (2026-07-16): the median/percentile curves are boxcar-smoothed in
+    log-value space over `smooth_window` consecutive x-index points BEFORE
+    plotting -- the SAME recipe transfer_function.smooth_cl uses for T(ell), applied
+    here to the display curves rather than to the raw per-sample stack. With few
+    samples (e.g. a handful of held-out cosmologies for a kappa Cl ratio) the
+    per-index median/percentile is itself noisy point-to-point, which made this plot
+    look far more jagged than cl_ratio_by_zbin_grid.png's binned/pooled curves even
+    though both answer the same "how far from 1.0" question. 1 disables (raw
+    per-index curve)."""
+    from scipy.ndimage import uniform_filter1d
+
+    def _smooth(y):
+        if smooth_window <= 1:
+            return y
+        with np.errstate(divide="ignore", invalid="ignore"):
+            log_y = np.log10(np.clip(y, 1e-30, None))
+        return 10.0 ** uniform_filter1d(log_y, size=smooth_window, mode="nearest")
+
     fig, ax = plt.subplots(figsize=(9, 6))
     lo_pct, hi_pct = pctile
     colors = ["gray", "steelblue", "tomato", "seagreen"]
@@ -125,10 +144,10 @@ def plot_pctile_band_ratio(x, ratio_stacks: dict, out_path, xlabel=r"$\ell$",
     for (label, stack), color in zip(ratio_stacks.items(), colors):
         stack = np.asarray(stack, dtype=np.float64)
         n_samples = stack.shape[0]
-        med = np.nanmedian(stack, axis=0)
-        p_lo = np.nanpercentile(stack, lo_pct, axis=0)
-        p_hi = np.nanpercentile(stack, hi_pct, axis=0)
-        ax.semilogx(x, med, "-o", ms=3, color=color, label=label)
+        med = _smooth(np.nanmedian(stack, axis=0))
+        p_lo = _smooth(np.nanpercentile(stack, lo_pct, axis=0))
+        p_hi = _smooth(np.nanpercentile(stack, hi_pct, axis=0))
+        ax.semilogx(x, med, "-", lw=1.6, color=color, label=label)
         ax.fill_between(x, p_lo, p_hi, color=color, alpha=0.2)
 
     ax.axhline(1.0, color="k", ls="--", lw=1)
@@ -144,7 +163,8 @@ def plot_pctile_band_ratio(x, ratio_stacks: dict, out_path, xlabel=r"$\ell$",
     fig.tight_layout()
     out_path = Path(out_path); out_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out_path, dpi=300); plt.close(fig)
-    print(f"[plotting] pctile-band ratio ({n_samples} samples) -> {out_path}", flush=True)
+    print(f"[plotting] pctile-band ratio ({n_samples} samples, smooth_window="
+          f"{smooth_window}) -> {out_path}", flush=True)
     return out_path
 
 
@@ -357,12 +377,12 @@ def plot_moments_vs_shell(shell_idx, series: dict, out_path, suptitle=None, note
     catches one-point-PDF drift that a Cl-ratio plot (phase-blind, two-point only)
     cannot see (see moments.py).
 
-    PCTILE-BAND presentation (2026-07-16, matches plot_cl_ratio_pctile_grid): per
-    shell, the marker is the MEDIAN moment value across samples and the errorbar is
-    the [pctile] spread -- so the cosmology-to-cosmology (or patch-to-patch) spread
-    is visible directly, instead of being hidden by pooling every sample into one
-    number per shell before computing the moment (the old behaviour). Series are
-    nudged apart horizontally so overlapping errorbars stay distinguishable. Pass
+    PCTILE-BAND presentation (2026-07-16, matches plot_pctile_band_ratio): per
+    shell, a MEDIAN line is drawn across shells with a continuous [pctile] shaded
+    band per series -- so the cosmology-to-cosmology (or patch-to-patch) spread is
+    visible as a band, instead of being hidden by pooling every sample into one
+    number per shell before computing the moment (the old behaviour), or shown as
+    disconnected per-shell errorbars (the 2026-07-16 intermediate version). Pass
     the per-cosmology parameters via `note` (rendered under the panels) so an
     outlier cosmology -- e.g. cosmo_000003's sigma8=1.15 -- is visible on the
     figure itself instead of needing a params.yml lookup."""
@@ -373,28 +393,23 @@ def plot_moments_vs_shell(shell_idx, series: dict, out_path, suptitle=None, note
     markers = ["o", "s", "^", "d"]
     lo_pct, hi_pct = pctile
     x = np.asarray(shell_idx, dtype=np.float64)
-    n_series = len(series)
-    # spread series within +-0.3 shell-index units around each x -- comfortably
-    # inside the minimum spacing of every --*-shells default list used (>=2).
-    offsets = np.linspace(-0.3, 0.3, n_series) if n_series > 1 else np.zeros(1)
     n_samples = 0
     for ax, (key, title) in zip(axes, panels):
-        for (label, moms_per_shell), color, marker, off in zip(
-                series.items(), colors, markers, offsets):
-            med, elo, ehi = [], [], []
+        for (label, moms_per_shell), color, marker in zip(
+                series.items(), colors, markers):
+            med, p_lo, p_hi = [], [], []
             for shell_moms in moms_per_shell:
                 vals = np.asarray([m[key] for m in shell_moms], dtype=np.float64)
                 vals = vals[np.isfinite(vals)]
                 n_samples = max(n_samples, vals.size)
                 if vals.size == 0:
-                    med.append(np.nan); elo.append(0.0); ehi.append(0.0)
+                    med.append(np.nan); p_lo.append(np.nan); p_hi.append(np.nan)
                     continue
-                m = float(np.median(vals))
-                med.append(m)
-                elo.append(m - float(np.percentile(vals, lo_pct)))
-                ehi.append(float(np.percentile(vals, hi_pct)) - m)
-            ax.errorbar(x + off, med, yerr=[elo, ehi], fmt=marker, ms=4.5, lw=1.1,
-                       capsize=2.5, color=color, label=label)
+                med.append(float(np.median(vals)))
+                p_lo.append(float(np.percentile(vals, lo_pct)))
+                p_hi.append(float(np.percentile(vals, hi_pct)))
+            ax.plot(x, med, "-", marker=marker, ms=4.5, lw=1.4, color=color, label=label)
+            ax.fill_between(x, p_lo, p_hi, color=color, alpha=0.2)
         ax.set_xlabel("shell index (depth)"); ax.set_title(title)
         ax.tick_params(labelsize=8)
         if ax is axes[0]:

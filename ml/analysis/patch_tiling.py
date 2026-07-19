@@ -97,17 +97,43 @@ def cosine_taper(patch_size: int) -> np.ndarray:
 
 def tile_and_predict(predict_batch: Callable[[np.ndarray], np.ndarray], low_shell: np.ndarray,
                      nside_centers: int, patch_size: int, batch_size: int = 32,
-                     n_workers: int = 16, log_every: int = 16):
+                     n_workers: int = 16, log_every: int = 16,
+                     pass_indices: bool = False, taper_power: float = 1.0):
     """Tile the sphere, call predict_batch on each mini-batch of low patches, blend
     back. predict_batch: (B,patch_size,patch_size) low-count patches -> (B,H,W)
     corrected-count patches (the model-specific part; e.g. a flow ODE integration).
     Returns (pred_map with NaN where uncovered, covered boolean mask).
 
     Tile extraction is a fancy-index into the cached geometry (gnomonic_index_maps),
-    not a per-tile healpy re-projection -- see that function for why."""
+    not a per-tile healpy re-projection -- see that function for why.
+
+    pass_indices (default False, so every existing caller is unaffected): when True,
+    predict_batch is called as predict_batch(low_batch, batch_idx) with batch_idx the
+    (B, patch_size*patch_size) int32 array of HEALPix pixel indices each tile pixel
+    reads from. A STOCHASTIC per-tile model needs this: each sky pixel is covered by
+    ~N overlapping tiles and this function AVERAGES them, so if every tile draws its
+    own independent randomness the tiles disagree and the average destroys most of the
+    generated structure (measured: only ~41% of the injected amplitude, ~17% of the
+    power, survives at ~16x overlap -- vs ~97% for a deterministic per-tile model).
+    Knowing its sphere indices lets a caller crop a SINGLE global noise field so
+    overlapping tiles share the same realization and therefore agree. See
+    diffusion/apply_diffusion.py's full-sky predict_batch for the reference use.
+
+    taper_power (default 1.0 = existing behaviour for every caller): raises the
+    cosine blend weight to this power BEFORE normalizing, so large powers make the
+    nearest tile own each pixel (soft Voronoi) instead of ~16 tiles averaging it --
+    the Ronneberger overlap-tile idea: overlap provides CONTEXT, but each output
+    pixel comes from ~one prediction. This matters ONLY for STOCHASTIC per-tile
+    models (diffusion): a weighted mean of N_eff independent samples keeps the
+    conditional-mean part of the prediction but shrinks the sample-to-sample
+    (stochastic) part by 1/sqrt(N_eff), where N_eff = (sum w)^2 / sum w^2. At the
+    default overlap, p=1 gives N_eff~6 (stochastic amplitude retention ~0.41);
+    p=8 gives retention ~0.9+. Deterministic models (unet's flow) are unaffected by
+    p since their overlapping predictions already agree -- keep p=1 there, the extra
+    averaging is free seam smoothing."""
     nside = hp.npix2nside(len(low_shell))
     npix = hp.nside2npix(nside)
-    taper = cosine_taper(patch_size).ravel().astype(np.float64)
+    taper = cosine_taper(patch_size).ravel().astype(np.float64) ** taper_power
 
     idx = gnomonic_index_maps(nside, nside_centers, patch_size, n_workers)  # (n_centers, ps*ps)
     n_centers = idx.shape[0]
@@ -115,7 +141,7 @@ def tile_and_predict(predict_batch: Callable[[np.ndarray], np.ndarray], low_shel
     # The blend weights depend only on the taper and the (cached) geometry, so they
     # are the SAME for every shell and cosmology -- accumulate them once, not once
     # per shell (this was half of all the np.add.at work).
-    key = (nside, nside_centers, patch_size)
+    key = (nside, nside_centers, patch_size, round(float(taper_power), 4))
     weight = _WEIGHT_CACHE.get(key)
     build_weight = weight is None
     if build_weight:
@@ -129,7 +155,7 @@ def tile_and_predict(predict_batch: Callable[[np.ndarray], np.ndarray], low_shel
         low_batch = low_shell[batch_idx].astype(np.float32).reshape(
             end - start, patch_size, patch_size)
 
-        pred_counts = predict_batch(low_batch)
+        pred_counts = predict_batch(low_batch, batch_idx) if pass_indices else predict_batch(low_batch)
 
         for k in range(end - start):
             idx_map = batch_idx[k]
@@ -151,9 +177,22 @@ def tile_and_predict(predict_batch: Callable[[np.ndarray], np.ndarray], low_shel
 
 def reconstruct_shell(predict_batch: Callable[[np.ndarray], np.ndarray], low_shell: np.ndarray,
                       nside_centers: int, patch_size: int, batch_size: int = 32,
-                      min_coverage: float = 0.995):
+                      min_coverage: float = 0.995, pass_indices: bool = False,
+                      fill_map: np.ndarray | None = None, taper_power: float = 1.0):
     """Tile+predict one shell, gap-fill, and hard-fail on genuine undercoverage.
     Returns pred_filled (the corrected full-sky map).
+
+    pass_indices is forwarded to tile_and_predict -- see there (stochastic per-tile
+    models must share randomness across overlapping tiles or the blend averages it away).
+
+    fill_map (default None -> low_shell): what the residual uncovered pixels are filled
+    with. This MUST be in the same space predict_batch returns. It exists because a
+    caller may blend in a transformed space -- e.g. diffusion/apply_diffusion.py returns
+    log(counts) so the blend is a geometric mean -- in which case filling with raw
+    low_shell counts would inject values that are nonsense in that space (a count of
+    ~500 read as a log-count becomes e^500 = inf on the way back, silently NaN-ing the
+    entire Cl via anafast). This is not hypothetical: nside=2048 leaves ~2824 gap
+    pixels per shell (0.006%).
 
     A gap filled with raw DISCO is not a model failure but a TILING failure -- it
     would inject fake boundary discontinuities into the Cl and could easily be
@@ -161,7 +200,8 @@ def reconstruct_shell(predict_batch: Callable[[np.ndarray], np.ndarray], low_she
     silently reporting a misleading plot.
     """
     pred_map, covered = tile_and_predict(predict_batch, low_shell, nside_centers,
-                                         patch_size, batch_size)
+                                         patch_size, batch_size, pass_indices=pass_indices,
+                                         taper_power=taper_power)
     cov_frac = covered.mean()
     if cov_frac < min_coverage:
         raise RuntimeError(
@@ -172,7 +212,9 @@ def reconstruct_shell(predict_batch: Callable[[np.ndarray], np.ndarray], low_she
     # handling, so even a few hundred leftover NaN pixels silently NaN out the ENTIRE
     # Cl array, not just those pixels. Fill the negligible remainder with DISCO.
     n_gap = int((~covered).sum())
+    fill = low_shell if fill_map is None else fill_map
     if n_gap:
         print(f"[patch_tiling]   filling {n_gap} residual gap pixels "
-              f"({100 * n_gap / len(covered):.3f}%) with DISCO", flush=True)
-    return np.where(covered, pred_map, low_shell)
+              f"({100 * n_gap / len(covered):.3f}%) with DISCO"
+              f"{'' if fill_map is None else ' (caller-supplied fill_map)'}", flush=True)
+    return np.where(covered, pred_map, fill)

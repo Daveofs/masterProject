@@ -24,8 +24,8 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
 
-from dataset import PatchDataset, split_by_cosmo, raw_to_log1p_delta_pair, cosmo_z_vector
-from model import DenoiserUNet, EDMPrecond, edm_loss
+from dataset import PatchDataset, split_by_cosmo, transform_pair, cosmo_z_vector
+from model import DenoiserUNet, EDMPrecond, edm_loss, residual_target
 
 
 def is_distributed():
@@ -41,26 +41,30 @@ def reduce_mean(value: float, device) -> float:
 
 
 @torch.no_grad()
-def estimate_sigma_data(loader, device, n_batches: int = 8) -> float:
-    """Std of the target field (high_log) over a few real batches -- EDM's own
-    sigma_data=0.5 default is tuned for 8-bit CIFAR pixel statistics and has no
-    reason to fit log1p(overdensity) patches. Measuring this from data avoids
-    silently mis-scaling the whole preconditioning (c_skip/c_out/c_in all depend
-    on it)."""
+def estimate_sigma_data(loader, device, hp_cutoff: float, hp_transition: float,
+                        space: str, n_batches: int = 8) -> float:
+    """Std of the diffusion TARGET (the high-pass residual, residual_target) over a
+    few real batches -- EDM's own sigma_data=0.5 default is tuned for 8-bit CIFAR
+    pixel statistics and has no reason to fit this. The target here is the SMALL-SCALE
+    residual (highpass(high_log-low_log)), which has far less variance than the full
+    field, so measuring sigma_data on it (not on high_log) is what keeps the EDM
+    preconditioning c_skip/c_out/c_in correctly scaled."""
     vals = []
     for i, batch in enumerate(loader):
         if i >= n_batches:
             break
         low_raw = batch["low"].to(device)
         high_raw = batch["high"].to(device)
-        _, high_log = raw_to_log1p_delta_pair(low_raw, high_raw)
-        vals.append(high_log.flatten())
+        low_f, high_f = transform_pair(low_raw, high_raw, space)
+        x1 = residual_target(low_f, high_f, hp_cutoff, hp_transition)
+        vals.append(x1.flatten())
     return torch.cat(vals).std().item()
 
 
 def run_epoch(precond, loader, optimizer, device, train: bool, epoch: int,
               grad_clip: float, is_main: bool, p_mean: float, p_std: float,
-              sigma_data: float, log_every: int = 100):
+              sigma_data: float, hp_cutoff: float, hp_transition: float,
+              space: str, log_every: int = 100):
     precond.train(train)
     if isinstance(loader.sampler, DistributedSampler):
         loader.sampler.set_epoch(epoch)
@@ -73,7 +77,11 @@ def run_epoch(precond, loader, optimizer, device, train: bool, epoch: int,
         for step, batch in enumerate(loader):
             low_raw = batch["low"].to(device, non_blocking=True)
             high_raw = batch["high"].to(device, non_blocking=True)
-            cond, x1 = raw_to_log1p_delta_pair(low_raw, high_raw)
+            low_f, high_f = transform_pair(low_raw, high_raw, space)
+            # cond = the FULL low map (all scales -- the denoiser needs large-scale
+            # context); x1 = the high-pass residual it must generate (small scales).
+            cond = low_f
+            x1 = residual_target(low_f, high_f, hp_cutoff, hp_transition)
 
             cosmo = batch["cosmo"].to(device, non_blocking=True)
             z = batch["z"].to(device, non_blocking=True).to(x1.dtype)
@@ -118,6 +126,29 @@ def main():
     p.add_argument("--use-cosmo-cond", action=argparse.BooleanOptionalAction, default=True,
                    help="condition DenoiserUNet on cosmology + shell redshift at the "
                         "bottleneck (see model.DenoiserUNet). Default: on.")
+    # High-pass residual formulation (see model.py docstring): the model diffuses only
+    # highpass(high_log-low_log); large scales below the cutoff are supplied by the low
+    # map at compose time. These fractions are of the patch NYQUIST frequency. Default
+    # 0.10/0.10: pins everything below ~0.1*Nyquist to DISCO (at nside=2048/patch256
+    # that's roughly ell<~300, the coherent large scales that must be preserved for the
+    # kappa Cl), smoothly handing over to the generator by ~0.2*Nyquist (~ell 600).
+    # MUST be saved into the checkpoint (they are, via args.json/ckpt["args"]) so
+    # apply_diffusion.py composes with the exact same cutoff the target was built with.
+    # THE space the model works in. 'delta' (linear overdensity n/<n>-1) is the
+    # space analysis.full_sky.od_cl actually measures, and is the default after the
+    # 2026-07-18 finding that training on 'log1p' optimizes a statistic that is
+    # already ~correct while leaving the evaluated one broken -- see
+    # dataset.raw_to_delta_pair for the measured numbers. 'log1p' reproduces the old
+    # (broken) formulation for comparison only.
+    p.add_argument("--space", choices=["delta", "log1p"], default="delta",
+                   help="field the residual is modelled in (default: delta, the space "
+                        "od_cl measures)")
+    p.add_argument("--hp-cutoff", type=float, default=0.10,
+                   help="high-pass cutoff as a fraction of patch Nyquist (below this: "
+                        "pinned to the low map, not generated)")
+    p.add_argument("--hp-transition", type=float, default=0.10,
+                   help="width of the raised-cosine hand-over band above --hp-cutoff, "
+                        "as a fraction of patch Nyquist")
     p.add_argument("--sigma-data", type=float, default=None,
                    help="EDM preconditioning scale (see model.EDMPrecond). Default: "
                         "measure it from --sigma-data-batches real training batches "
@@ -182,7 +213,9 @@ def main():
 
     sigma_data = args.sigma_data
     if sigma_data is None:
-        sigma_data = estimate_sigma_data(train_loader, device, args.sigma_data_batches)
+        sigma_data = estimate_sigma_data(train_loader, device, args.hp_cutoff,
+                                          args.hp_transition, args.space,
+                                          args.sigma_data_batches)
         if distributed:
             sigma_data = reduce_mean(sigma_data, device)  # average the per-rank estimates
         if is_main:
@@ -224,14 +257,17 @@ def main():
     n_params = sum(p.numel() for p in (precond.module if distributed else precond).parameters())
     if is_main:
         print(f"[train_diffusion] model has {n_params:,} parameters, device={device}, lr={lr:.2e}, "
-              f"use_cosmo_cond={args.use_cosmo_cond}, sigma_data={sigma_data:.4f}")
+              f"use_cosmo_cond={args.use_cosmo_cond}, sigma_data={sigma_data:.4f}, "
+              f"space={args.space}")
 
     for epoch in range(start_epoch, args.epochs):
         t0 = time.time()
         train_loss = run_epoch(precond, train_loader, optimizer, device, True, epoch,
-                                args.grad_clip, is_main, args.p_mean, args.p_std, sigma_data)
+                                args.grad_clip, is_main, args.p_mean, args.p_std, sigma_data,
+                                args.hp_cutoff, args.hp_transition, args.space)
         val_loss = run_epoch(precond, val_loader, optimizer, device, False, epoch,
-                              args.grad_clip, is_main, args.p_mean, args.p_std, sigma_data)
+                              args.grad_clip, is_main, args.p_mean, args.p_std, sigma_data,
+                              args.hp_cutoff, args.hp_transition, args.space)
         scheduler.step()
         dt = time.time() - t0
 

@@ -101,28 +101,6 @@ def _nz_tag(nz_path) -> str:
     return m.group(0) if m else Path(nz_path).stem
 
 
-def _cosmo_note(run_dirs):
-    """One line of cosmological parameters per held-out run dir (params.yml) --
-    IDENTICAL to transfer/apply_transfer.py's and sphereflow/apply_sphere_flow.py's
-    own copy (kept as a local duplicate, not an import: these pipeline dirs stay
-    independently runnable). Rendered on the moments figure so an outlier
-    cosmology -- e.g. cosmo_000003's sigma8=1.15 vs 0.5-0.7 for the others -- is
-    visible on the plot itself instead of needing a params.yml lookup."""
-    import yaml
-    lines = []
-    for r in run_dirs:
-        f = Path(r) / "params.yml"
-        if not f.exists():
-            continue
-        c = yaml.safe_load(f.read_text())
-        lines.append(f"{Path(r).parent.name}:  s8={c['s8']:<8.4g} Om={c['Om']:<8.4g} "
-                     f"Ob={c['Ob']:<8.4g} H0={c['H0']:<7.4g} ns={c['ns']:<8.4g} "
-                     f"w0={c['w0']:<8.4g}")
-    if len(lines) > 12:
-        lines = lines[:12] + [f"... +{len(lines) - 12} more cosmologies"]
-    return "\n".join(lines)
-
-
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--patch-dir", required=True)
@@ -517,14 +495,13 @@ def main():
             fs_hist_rows = [(f"shell {s}", np.concatenate(hist_low_per_s[s]),
                             np.concatenate(hist_pred_per_s[s]),
                             np.concatenate(hist_high_per_s[s])) for s in example_shells]
-            fs_run_dirs = [Path(args.data_root) / c / args.run for c in fs_cosmos]
-
             plot_moments_vs_shell(
                 example_shells, {"low": fs_mom_low, "high (true)": fs_mom_high, "flow pred": fs_mom_pred},
-                out_dir / "moments_vs_shell.png", note=_cosmo_note(fs_run_dirs),
+                out_dir / "moments_vs_shell.png",
                 suptitle=f"moments vs. shell depth -- full-sky reconstruction (raw counts). "
                         f"Median + 16-84th pctile band ACROSS {len(fs_cosmos)} held-out "
-                        f"cosmologies (one sample per cosmology); their parameters are printed below.")
+                        f"cosmologies (one sample per cosmology; see heldout_cosmo_params.png "
+                        f"for their parameters).")
             plot_histogram_grid(
                 fs_hist_rows, out_dir / "example_histograms.png", corrected_label="flow-corrected",
                 suptitle=f"full-sky raw pixel-count histogram per shell, pooled over "

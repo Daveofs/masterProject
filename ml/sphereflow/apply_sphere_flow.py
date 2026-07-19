@@ -338,10 +338,10 @@ def plot_full_sky(args, run_dirs: list[Path], corrected_by_run: dict, method_lab
             args.fullsky_shells, {"low": mom_low, "high (true)": mom_high,
                                   f"corrected ({method_label})": mom_corr},
             out_dir / "moments_vs_shell.png",
-            note=_cosmo_note(run_dirs),
             suptitle=f"moments vs. shell depth -- full-sky (raw counts). Median + "
                      f"16-84th pctile band ACROSS {len(run_dirs)} held-out cosmologies "
-                     f"(one sample per cosmology); their parameters are printed below.")
+                     f"(one sample per cosmology; see heldout_cosmo_params.png for "
+                     f"their parameters).")
         plot_histogram_grid(
             hist_rows, out_dir / "example_histograms.png",
             corrected_label=f"corrected ({method_label})",
@@ -396,26 +396,6 @@ def plot_cl_zbin_grid(args, run_dirs: list[Path], corrected_by_run: dict, method
         grid, out_dir / "cl_ratio_by_zbin_grid.png",
         corrected_label=f"corrected ({method_label}) / true (after)",
         suptitle=f"Full-sky Cl ratio by redshift bin ({method_label})")
-
-
-def _cosmo_note(run_dirs):
-    """One line of cosmological parameters per held-out run dir (params.yml) --
-    rendered on the moments figure so an outlier cosmology (e.g. cosmo_000003's
-    sigma8=1.15 vs 0.5-0.7 for the others) is visible on the plot itself instead
-    of needing a params.yml lookup to interpret a jump."""
-    import yaml
-    lines = []
-    for r in run_dirs:
-        f = Path(r) / "params.yml"
-        if not f.exists():
-            continue
-        c = yaml.safe_load(f.read_text())
-        lines.append(f"{Path(r).parent.name}:  s8={c['s8']:<8.4g} Om={c['Om']:<8.4g} "
-                     f"Ob={c['Ob']:<8.4g} H0={c['H0']:<7.4g} ns={c['ns']:<8.4g} "
-                     f"w0={c['w0']:<8.4g}")
-    if len(lines) > 12:
-        lines = lines[:12] + [f"... +{len(lines) - 12} more cosmologies"]
-    return "\n".join(lines)
 
 
 def _nz_tag(nz_path) -> str:

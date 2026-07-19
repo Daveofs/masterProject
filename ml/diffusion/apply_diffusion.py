@@ -9,18 +9,21 @@ model + sampling differ: DenoiserUNet+EDMPrecond and model.sample_heun instead o
 FlowUNet and flow_model.sample_ode.
 
 Test data = the validation (held-out COSMOLOGY) split of the patch dataset. For each
-patch we run the EDM Heun ODE sampler from x_T ~ N(0, sigma_max^2 I) (NOT from the
-low map -- see model.py) conditioned on low (log1p-delta), then compare the denoised
-sample vs the true high by:
+patch we run the EDM Heun ODE sampler from x_T ~ N(0, sigma_max^2 I) conditioned on
+low (log1p-delta) to draw a high-pass RESIDUAL, then compose the corrected map as
+low + highpass(sample) (model.compose_corrected -- large scales pinned to the low
+map, see model.py's docstring for why), and compare corrected vs the true high by:
   * the 2D-FFT radial power spectrum ratio (the flat-patch analogue of the C_ell
     ratio -- does the correction restore small-scale power?),
   * example low / corrected / high patch triptychs (judge by eye).
 
 Because a diffusion SAMPLE (not a conditional mean) carries the full high-field
-variance, the corrected power should track the truth at small scales where a
-deterministic regressor would sag -- same rationale as the flow models, but via a
-genuine multi-step (non-straight-line) generative trajectory instead of a 2-point
-flow, which is the thing being tested here.
+variance, the corrected SMALL-SCALE power should track the truth where a
+deterministic regressor would sag -- same rationale as the flow models. Unlike the
+first (full-field) version of this pipeline, the large scales are NOT generated: they
+come from the low map, so the full-sky / kappa Cl at low ell is preserved by
+construction (the earlier full-field run destroyed it -- see diffusion-pipeline-build
+memory).
 
 SHARED EVAL SET: same statistics/shared analysis/ plotting code/shells/kappa
 resolution as transfer/apply_transfer.py, sphereflow/apply_sphere_flow.py, and
@@ -47,9 +50,9 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from model import DenoiserUNet, EDMPrecond, sample_heun          # noqa: E402
-from dataset import (PatchDataset, split_by_cosmo, raw_to_log1p_delta_pair,  # noqa: E402
-                     cosmo_z_vector, COSMO_FIELDS)
+from model import DenoiserUNet, EDMPrecond, sample_heun, compose_corrected  # noqa: E402
+from dataset import (PatchDataset, split_by_cosmo, transform_pair,  # noqa: E402
+                     low_to_field, field_to_counts, cosmo_z_vector, COSMO_FIELDS)
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 from analysis.plotting import (plot_example_patch_grid, plot_pctile_band_ratio,  # noqa: E402
@@ -116,6 +119,20 @@ def main():
     p.add_argument("--sigma-min", type=float, default=0.002)
     p.add_argument("--sigma-max", type=float, default=80.0)
     p.add_argument("--rho", type=float, default=7.0, help="EDM Karras schedule exponent")
+    p.add_argument("--taper-power", type=float, default=32.0,
+                   help="blend-weight sharpening for the full-sky tiling (see "
+                        "analysis.patch_tiling.tile_and_predict). Each sky pixel is "
+                        "covered by ~16 overlapping tiles whose INDEPENDENT diffusion "
+                        "samples get weight-averaged; at the default cosine taper "
+                        "(power 1) that shrinks the stochastic part of the correction "
+                        "to ~0.41 of its amplitude (the conditional-mean part "
+                        "survives), which showed up as a huge downward Cl percentile "
+                        "band on faint shells. Sharpening toward nearest-tile-wins "
+                        "restores it. Measured on the real delta-512 checkpoint, "
+                        "faint shell 5 corrected/high at ell 800-1535: p=1 0.597, "
+                        "p=16 0.781, p=32 0.800, p=128 0.816 (saturates; low/high "
+                        "baseline 0.535) -- 32 is the knee. Only the full-sky "
+                        "sections use this; 1.0 reproduces the old blend.")
     p.add_argument("--n-stat-patches", type=int, default=64,
                    help="held-out patches PER --example-shells shell to pool for "
                         "patch_moments_vs_shell.png / patch_example_histograms.png")
@@ -163,6 +180,32 @@ def main():
     cfg = ckpt.get("args", {})
     use_cosmo_cond = bool(cfg.get("use_cosmo_cond", False))
     sigma_data = float(cfg.get("sigma_data", 0.5))
+    # High-pass residual formulation (see model.py): MUST use the exact cutoff the
+    # target was built with at train time, so the checkpoint is authoritative.
+    #
+    # HARD ERROR, not a default: a checkpoint without hp_cutoff is a v1 FULL-FIELD
+    # model (trained to output the whole high map, before the residual redesign).
+    # Composing its output as low + highpass(sample) is semantically wrong -- it adds
+    # a whole field on top of the low map instead of a small-scale residual, giving
+    # ~4x the correct power and ~40x the correct variance. That is NOT a crash, it is
+    # plausible-looking garbage, which is exactly why this must refuse rather than
+    # fall back (it silently produced a full bogus eval for the nside=512 v1
+    # checkpoint before this guard existed -- see diffusion-pipeline-build memory).
+    if "hp_cutoff" not in cfg:
+        raise SystemExit(
+            f"{args.model} is a v1 FULL-FIELD checkpoint (no 'hp_cutoff' in its saved "
+            f"args; sigma_data={sigma_data:.4f} was measured on the full field, not the "
+            f"residual). This script implements the HIGH-PASS RESIDUAL formulation and "
+            f"would silently produce meaningless results for it (~4x power, ~40x "
+            f"variance). Use a checkpoint trained by the current train_diffusion.py, "
+            f"e.g. outputs/diffusionruns/diffusion_cosmogridv1_nside2048_patch256_"
+            f"n100000_ch32_b32_e40/best.pt, or retrain this configuration.")
+    hp_cutoff = float(cfg["hp_cutoff"])
+    hp_transition = float(cfg["hp_transition"])
+    # Which field the residual was modelled in. Absent => a pre-2026-07-18 checkpoint,
+    # which was necessarily log1p -- so this default is CORRECT for old checkpoints,
+    # not a silent guess (unlike the hp_cutoff case guarded above).
+    space = str(cfg.get("space", "log1p"))
     net = DenoiserUNet(in_channels=2, out_channels=1,
                        base_channels=int(cfg.get("base_channels", 32)),
                        noise_emb_dim=int(cfg.get("noise_emb_dim", 128)),
@@ -170,11 +213,25 @@ def main():
     precond = EDMPrecond(net, sigma_data=sigma_data).to(dev)
     precond.load_state_dict(ckpt["model"])
     precond.eval()
-    print(f"[eval] checkpoint use_cosmo_cond={use_cosmo_cond} sigma_data={sigma_data:.4f}", flush=True)
+    print(f"[eval] checkpoint use_cosmo_cond={use_cosmo_cond} sigma_data={sigma_data:.4f} "
+          f"hp_cutoff={hp_cutoff} hp_transition={hp_transition} space={space}", flush=True)
 
-    def sample(cond, cosmo_z):
-        return sample_heun(precond, cond, n_steps=args.steps, cosmo_z=cosmo_z,
-                           sigma_min=args.sigma_min, sigma_max=args.sigma_max, rho=args.rho)
+    def sample(cond, cosmo_z, noise=None):
+        """Draw a high-pass-residual diffusion sample and RETURN THE COMPOSED corrected
+        log-map (low + highpass(sample)) -- so every call site below gets the corrected
+        map directly, exactly as the old full-field sample() returned it. The large
+        scales of the returned map are pinned to `cond` (the low map) by construction
+        (see model.compose_corrected).
+
+        noise: optional unit-variance initial state (see model.sample_heun). Left None
+        for the standalone PATCH diagnostics below (independent draws are correct
+        there -- those patches don't overlap and are never blended); supplied by the
+        FULL-SKY path, where overlapping tiles must share one global sphere noise
+        field or the blend averages the generated structure away."""
+        r = sample_heun(precond, cond, n_steps=args.steps, cosmo_z=cosmo_z,
+                        sigma_min=args.sigma_min, sigma_max=args.sigma_max, rho=args.rho,
+                        noise=noise)
+        return compose_corrected(cond, r, hp_cutoff, hp_transition)
 
     # held-out cosmologies = our test data
     _, val_idx, val_cosmos = split_by_cosmo(args.patch_dir, args.val_frac, args.seed)
@@ -203,7 +260,7 @@ def main():
     low_log_parts, high_log_parts, corr_log_parts = [], [], []
     for b in range(0, low_all.shape[0], mb):
         lo = low_all[b:b + mb].to(dev); hi = high_all[b:b + mb].to(dev)
-        lo_log, hi_log = raw_to_log1p_delta_pair(lo, hi)
+        lo_log, hi_log = transform_pair(lo, hi, space)
         with torch.no_grad():
             co_log = sample(lo_log, cosmo_z_all[b:b + mb])
         low_log_parts.append(lo_log); high_log_parts.append(hi_log); corr_log_parts.append(co_log)
@@ -257,7 +314,7 @@ def main():
     ex_low = torch.stack([ex_ds[i]["low"] for i in range(ns)]).to(dev)
     ex_high = torch.stack([ex_ds[i]["high"] for i in range(ns)]).to(dev)
     ex_cosmo_z = stack_cosmo_z(ex_ds, dev, ex_low.dtype)
-    ex_low_log, ex_high_log = raw_to_log1p_delta_pair(ex_low, ex_high)
+    ex_low_log, ex_high_log = transform_pair(ex_low, ex_high, space)
     with torch.no_grad():
         ex_corr_log = sample(ex_low_log, ex_cosmo_z)
 
@@ -279,10 +336,10 @@ def main():
         s_high = torch.stack([sd[i]["high"] for i in range(len(sd))]).to(dev)
         s_cosmo_z = stack_cosmo_z(sd, dev, s_low.dtype)
         s_low_mean = s_low.mean(dim=(2, 3), keepdim=True)
-        s_low_log, _ = raw_to_log1p_delta_pair(s_low, s_high)
+        s_low_log, _ = transform_pair(s_low, s_high, space)
         with torch.no_grad():
             s_corr_log = sample(s_low_log, s_cosmo_z)
-        s_corr_raw = (1.0 + torch.expm1(s_corr_log)) * s_low_mean
+        s_corr_raw = field_to_counts(s_corr_log, s_low_mean, space)
 
         low_np, high_np, corr_np = s_low.cpu().numpy(), s_high.cpu().numpy(), s_corr_raw.cpu().numpy()
         moment_shells.append(s)
@@ -330,26 +387,48 @@ def main():
             return cosmo_z_vector(cosmo_vec, z)[0]
 
         def make_predict_batch_fs(cosmo_z_vec: np.ndarray | None):
+            """Per-tile prediction for the full-sky reconstruction.
+
+            NOTE ON TILE NOISE (2026-07-18): each tile deliberately draws its OWN white
+            x_T. A "shared global sphere noise" variant was tried -- crop every tile's
+            initial state from one white (npix,) field via its HEALPix indices, so
+            overlapping tiles agree and survive patch_tiling's averaging blend -- and it
+            was MEASURABLY HARMFUL, so it was reverted. The gnomonic index map duplicates
+            ~17% of pixels within a tile, making the crop ~8% lag-1 correlated instead of
+            white; the denoiser is trained on white x_T, so that is out-of-distribution
+            input and it degraded high-k power from 1.013 (white) to 0.799 (cropped) --
+            worse than applying no model at all (0.956). Do NOT reintroduce shared noise
+            without first making the crop genuinely white in the PATCH grid.
+
+            Returns raw counts. In the default 'delta' space the correction is
+            ADDITIVE (corrected = delta_low + highpass(sample)), so averaging
+            overlapping tiles in counts space is linear and unbiased -- no special
+            blending space is needed. (A log-space/geometric-mean blend was tried while
+            the model was still multiplicative and EXPLODED on sparse shells:
+            zero-count pixels clamp to log(1e-6) = -13.8 and dominate the average,
+            giving Cl ratios ~3e4. Do not reintroduce it.)
+            """
             cosmo_z_t = None if cosmo_z_vec is None else torch.from_numpy(cosmo_z_vec).to(dev)
 
             def predict_batch(low_batch: np.ndarray) -> np.ndarray:
                 low_t = torch.from_numpy(low_batch).unsqueeze(1).to(dev)
-                low_mean = low_t.mean(dim=(2, 3), keepdim=True)
-                eps = 0.5 / low_mean
-                low_log = torch.log1p(torch.maximum(low_t / low_mean - 1.0, -1.0 + eps))
+                low_f, low_mean = low_to_field(low_t, space)
                 cz = (None if cosmo_z_t is None else
-                     cosmo_z_t.unsqueeze(0).expand(low_t.shape[0], -1).to(low_log.dtype))
+                     cosmo_z_t.unsqueeze(0).expand(low_t.shape[0], -1).to(low_f.dtype))
                 with torch.no_grad():
-                    pred_log = sample(low_log, cz)
-                pred_delta = torch.expm1(pred_log)
-                return ((1.0 + pred_delta) * low_mean).squeeze(1).cpu().numpy()
+                    pred_f = sample(low_f, cz)
+                return field_to_counts(pred_f, low_mean, space).squeeze(1).cpu().numpy()
             return predict_batch
 
         def reconstruct(low_shell, cosmo_name, shell_idx):
+            """predict_batch returns raw COUNTS, so patch_tiling's blend and its
+            default gap fill (raw DISCO counts for the ~0.006% pixels no tile covers)
+            are both already in the right space -- no fill_map override needed."""
             cosmo_z_vec = lookup_cosmo_z_fs(cosmo_name, shell_idx) if use_cosmo_cond else None
             predict_batch = make_predict_batch_fs(cosmo_z_vec)
             return reconstruct_shell(predict_batch, low_shell, nside_centers,
-                                     args.fullsky_patch_size, args.eval_batch)
+                                     args.fullsky_patch_size, args.eval_batch,
+                                     taper_power=args.taper_power)
 
         fs_cosmo = args.cosmo
         if fs_cosmo is None:
