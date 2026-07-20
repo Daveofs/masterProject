@@ -231,8 +231,9 @@ def plot_cl_ratio_pctile_grid(grid, out_path, pctile=(16, 84), suptitle=None,
             ax.fill_between(xs, p_lo_arr, p_hi_arr, color=color, alpha=0.2)
 
         ax.axhline(1.0, color="k", ls="--", lw=0.8)
-        ax.set_title(f"{bin_label}\n(pooled: {n_cosmo} cosmologies x "
-                     f"{len(shells_ref)} shells)", fontsize=9, wrap=True)
+        shell_list = [int(s) for s in shells_ref]
+        ax.set_title(f"{bin_label} ({shell_list})\n(pooled: {n_cosmo} cosmologies x "
+                     f"{len(shell_list)} shells)", fontsize=9, wrap=True)
         ax.set_xlabel(r"$\ell$", fontsize=9)
         ax.tick_params(labelsize=8)
         if j == 0:

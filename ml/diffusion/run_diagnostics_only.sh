@@ -45,8 +45,8 @@ DIFFUSION=/users/damrein/masterProject/ml/diffusion
 # checkpoint. (The older diffusion_cosmogridv1_* runs are LOG1P-space and their
 # small-scale numbers are misleading, see dataset.raw_to_delta_pair.)
 DATA_ROOT=${DATA_ROOT:-/capstor/scratch/cscs/damrein/cosmogridv1}
-PATCH_DIR=${PATCH_DIR:-/capstor/scratch/cscs/damrein/outputs/flowpatches/cosmogridv1_nside512_256_100000}
-OUT_DIR=${OUT_DIR:-/capstor/scratch/cscs/damrein/outputs/diffusionruns/diffusion_delta_cosmogridv1_nside512_patch256_n100000_ch32_b32_e40}
+PATCH_DIR=${PATCH_DIR:-/capstor/scratch/cscs/damrein/outputs/flowpatches/grid_nside512_256_100000}
+OUT_DIR=${OUT_DIR:-/capstor/scratch/cscs/damrein/outputs/diffusionruns/diffusion_delta_grid_nside512_patch256_n100000_ch32_b32_e40}
 
 # EDM sampler settings -- must match how you want to sample, NOT stored in the
 # checkpoint (unlike hp_cutoff/hp_transition/sigma_data, which apply_diffusion.py
@@ -58,6 +58,11 @@ RHO=${RHO:-7.0}
 TAPER_POWER=${TAPER_POWER:-32}
 
 export PYTHONUNBUFFERED=1
+# Pin OpenMP-using CPU work (healpy's Cl/anafast, UFalcon's kappa-map construction)
+# to the cores SLURM actually allocated (--cpus-per-task=128 above) -- unset, these
+# libraries can silently default to 1 thread inside a cgroup, wasting most of the
+# allocation on the CPU-bound diagnostic stages.
+export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK:-128}"
 KAPPA=${KAPPA:-1}
 KAPPA_FLAG=""; [ "${KAPPA}" = "1" ] && KAPPA_FLAG="--kappa"
 # 3 cosmologies: enough for a REAL 16-84th percentile band (1 cosmology = no band at

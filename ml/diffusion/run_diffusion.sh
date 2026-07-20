@@ -5,7 +5,7 @@
 #SBATCH --account=sk037
 #SBATCH --ntasks-per-node=1
 #SBATCH --gres=gpu:4
-#SBATCH --cpus-per-task=64
+#SBATCH --cpus-per-task=128
 #SBATCH --time=12:00:00
 #SBATCH --output=/capstor/scratch/cscs/damrein/outputs/logs/diffusion/slurm-%j.out
 #SBATCH --error=/capstor/scratch/cscs/damrein/outputs/logs/diffusion/slurm-%j.err
@@ -110,8 +110,8 @@ KAPPA_FLAG=""; [ "${KAPPA}" = "1" ] && KAPPA_FLAG="--kappa"
 # KAPPA_MAX_COSMOLOGIES x ~47 (every usable shell) -- kappa is by far the most
 # expensive section and runs LAST, so if the job runs out of time the Cl plots are
 # already written.
-MAX_COSMOLOGIES=${MAX_COSMOLOGIES:-3}
-KAPPA_MAX_COSMOLOGIES=${KAPPA_MAX_COSMOLOGIES:-3}
+MAX_COSMOLOGIES=${MAX_COSMOLOGIES:-10}
+KAPPA_MAX_COSMOLOGIES=${KAPPA_MAX_COSMOLOGIES:-10}
 N_ZBINS=${N_ZBINS:-3}
 N_SHELLS_PER_ZBIN=${N_SHELLS_PER_ZBIN:-5}
 

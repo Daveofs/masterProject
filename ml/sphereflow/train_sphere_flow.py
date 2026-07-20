@@ -273,7 +273,14 @@ def main():
                  hidden=args.hidden, n_layers=args.n_layers, cond_dim=cond_dim,
                  sig_scale=sig_scale, resid_scale=1.0, softening=args.softening,
                  formulation="direct", cosmo_mean=cmean, cosmo_std=cstd,
-                 test_cosmos=np.array(sorted(val_cosmos)))
+                 test_cosmos=np.array(sorted(val_cosmos)),
+                 # 2026-07-20: patches are now drawn at random (lon,lat,psi) via
+                 # sphere_flow.rotated_patch_ids, not the old disjoint quad-tree
+                 # blocks -- apply_sphere_flow.py uses this marker to pick the
+                 # overlap-blend reconstruction path (a checkpoint trained this
+                 # way has never seen the old fixed alignment, and vice versa;
+                 # see sphere_flow.py's "OVERLAPPING patch geometry" section).
+                 patch_mode="overlap")
 
     log_path = out_dir / "train_log.jsonl"
     for epoch in range(start_epoch, args.epochs):

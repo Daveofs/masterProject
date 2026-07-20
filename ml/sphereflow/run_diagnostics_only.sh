@@ -46,6 +46,12 @@
 export UENV_REPO_PATH=/capstor/scratch/cscs/damrein/.uenv-images
 VENV=/capstor/scratch/cscs/damrein/venvs/sphereflow
 
+# Pin OpenMP-using CPU work (healpy's Cl/anafast, UFalcon's kappa-map construction)
+# to the cores SLURM actually allocated (--cpus-per-task=128 above) -- unset, these
+# libraries can silently default to 1 thread inside a cgroup, wasting most of the
+# allocation on the CPU-bound diagnostic stages.
+export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK:-128}"
+
 # All env-overridable so run_sphere_flow.sh can submit this as a dependent eval job
 # for whatever model/dataset it just trained. --run-dirs is NOT passed ->
 # apply_sphere_flow.py reads the held-out set straight from MODEL_DIR/meta.npz's
@@ -70,6 +76,12 @@ STEPS="${STEPS:-10}"
 MAX_COSMOLOGIES="${MAX_COSMOLOGIES:-10}"
 KAPPA="${KAPPA:-1}"
 KAPPA_FLAG=""; [ "${KAPPA}" = "1" ] && KAPPA_FLAG="--kappa --kappa-nside 1024 --kappa-lmax 2048"
+# OVERLAP checkpoints only (meta['patch_mode']=='overlap', see sphere_flow.py) --
+# ignored for pre-2026-07-20 disjoint checkpoints. Both left UNSET by default so
+# apply_sphere_flow.py's own auto-scaled/UNTUNED defaults apply; override to
+# re-run diagnostics at a different center density / taper sharpness.
+NSIDE_CENTERS_FLAG=""; [ -n "${NSIDE_CENTERS}" ] && NSIDE_CENTERS_FLAG="--nside-centers ${NSIDE_CENTERS}"
+TAPER_POWER_FLAG=""; [ -n "${TAPER_POWER}" ] && TAPER_POWER_FLAG="--taper-power ${TAPER_POWER}"
 mkdir -p "$OUT_DIR" /capstor/scratch/cscs/damrein/outputs/logs/sphereflow
 
 echo "==== sphereflow diagnostics | job ${SLURM_JOB_ID} | model ${MODEL_DIR} | data ${DATA_ROOT} ===="
@@ -86,7 +98,7 @@ srun --nodes=1 --ntasks=1 uenv run pytorch/v2.9.1:v2 --view=default -- bash -c "
       --patch-shells 5 10 15 30 50 \
       --fullsky-shells 5 10 15 30 50 \
       --n-zbins 3 --n-shells-per-zbin 5 \
-      ${KAPPA_FLAG} \
+      ${KAPPA_FLAG} ${NSIDE_CENTERS_FLAG} ${TAPER_POWER_FLAG} \
       --out-dir    '${OUT_DIR}' \
       $EXTRA_ARGS
 "

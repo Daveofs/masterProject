@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --nodes=4
+#SBATCH --nodes=1
 #SBATCH --job-name=sphere-flow
 #SBATCH --partition=normal
 #SBATCH --account=sk037
@@ -19,6 +19,19 @@
 #   stage 1  (low, high) HEALPix-superpixel patch set  (sphereflow/make_patch_dataset.py)
 #   stage 2  DDP train the flow, 1 node / 4 GPUs       (sphereflow/train_sphere_flow.py)
 #   stage 3  full eval suite vs DISCO + CosmoGrid      (sphereflow/apply_sphere_flow.py)
+#
+# OVERLAP-CAPABLE PATCHES (2026-07-20): stage 1 now draws patches at RANDOM
+# (lon,lat,psi) instead of the old fixed, disjoint 12*ORDER^2 quad-tree blocks --
+# so apply_sphere_flow.py can reconstruct with OVERLAPPING, taper-blended patches
+# at inference (same spirit as unet/diffusion's gnomonic overlap, adapted to the
+# HEALPix graph -- see sphere_flow.py's "OVERLAPPING patch geometry" section for
+# the validated rotation math). This is a TRAINING-DATA change, not just an
+# inference one: a checkpoint must be trained on the same distribution of
+# rotations it will be reconstructed with, so any RUN_NAME/PATCH_DIR from before
+# this date is trained on the OLD disjoint scheme and will auto-use the OLD
+# (correct_shell, non-overlapping) reconstruction path at apply time via
+# meta['patch_mode'] -- the two are not interchangeable, hence the "ovlp" tag
+# in PATCH_DIR below (never silently reuses an old disjoint-block cache).
 #
 # REBUILT 2026-07-14 on unet/run_flow.sh's structure, which is stable, after this
 # job died the same way twice (jobs 3852435 and 4210107, both SIGABRT/NCCL around
@@ -101,13 +114,15 @@ DATA_TAG=${DATA_TAG:-$(basename "${DATA_ROOT}")}
 [ "$DATA_TAG" = "cosmogridv1" ] && DATA_TAG=""
 DATA_TAG=${DATA_TAG:+${DATA_TAG}_}
 # Patch caches live in outputs/flowpatches/ -- the SAME parent dir unet uses -- so
-# all patch datasets sit in one place. The "sphere_" marker distinguishes the FORMAT:
-# these are HEALPix-superpixel pixel blocks for the graph conv, NOT unet's flat
-# gnomonic images (the two are not interchangeable -- unet names have a patch SIZE
-# as their 2nd field, e.g. grid_nside512_256_100000; sphereflow names have sphere_
-# + order). Override PATCH_DIR explicitly to reuse a cache from elsewhere.
-PATCH_DIR="${PATCH_DIR:-/capstor/scratch/cscs/damrein/outputs/flowpatches/${DATA_TAG}sphere_nside${NSIDE}_order${ORDER}_n${NPATCH}}"
-RUN_NAME=${RUN_NAME:-direct_${DATA_TAG}nside${NSIDE}_o${ORDER}_n${NPATCH}_h${HIDDEN}_b${BATCH}_e${EPOCHS}}
+# all patch datasets sit in one place. The "sphere_ovlp_" marker distinguishes
+# BOTH the format (HEALPix-superpixel pixel blocks for the graph conv, not unet's
+# flat gnomonic images) AND the scheme (overlap-capable random-rotation patches,
+# not the old disjoint quad-tree blocks -- "ovlp" so this NEVER silently reuses a
+# pre-2026-07-20 disjoint-block cache, which would train correctly but leave the
+# resulting checkpoint unable to use the overlap reconstruction path). Override
+# PATCH_DIR explicitly to reuse a cache from elsewhere.
+PATCH_DIR="${PATCH_DIR:-/capstor/scratch/cscs/damrein/outputs/flowpatches/${DATA_TAG}sphere_ovlp_nside${NSIDE}_order${ORDER}_n${NPATCH}}"
+RUN_NAME=${RUN_NAME:-direct_ovlp_${DATA_TAG}nside${NSIDE}_o${ORDER}_n${NPATCH}_h${HIDDEN}_b${BATCH}_e${EPOCHS}}
 OUT_DIR="/capstor/scratch/cscs/damrein/outputs/sphereflow/${RUN_NAME}"
 mkdir -p "$PATCH_DIR" "$OUT_DIR" /capstor/scratch/cscs/damrein/outputs/logs/sphereflow
 
@@ -186,7 +201,7 @@ srun --nodes=1 --ntasks=1 uenv run pytorch/v2.9.1:v2 --view=default -- bash -c "
 #      Depends on THIS job (afterok) so it only runs if training succeeded, and
 #      reads the held-out set from ${OUT_DIR}/meta.npz (no --run-dirs drift).
 sbatch --dependency=afterok:${SLURM_JOB_ID} \
-       --export=ALL,MODEL_DIR="${OUT_DIR}",DATA_ROOT="${DATA_ROOT}",EVAL_OUT_DIR="${OUT_DIR}/eval",NSIDE="${NSIDE}",STEPS="${STEPS}",MAX_COSMOLOGIES="${MAX_COSMOLOGIES}",KAPPA="${KAPPA}" \
+       --export=ALL,MODEL_DIR="${OUT_DIR}",DATA_ROOT="${DATA_ROOT}",EVAL_OUT_DIR="${OUT_DIR}/eval",NSIDE="${NSIDE}",STEPS="${STEPS}",MAX_COSMOLOGIES="${MAX_COSMOLOGIES}",KAPPA="${KAPPA}",NSIDE_CENTERS="${NSIDE_CENTERS:-}",TAPER_POWER="${TAPER_POWER:-}" \
        ${SPHEREFLOW}/run_diagnostics_only.sh \
   && echo "[stage 3] diagnostics job submitted (afterok:${SLURM_JOB_ID}) -> ${OUT_DIR}/eval"
 

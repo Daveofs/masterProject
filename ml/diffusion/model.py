@@ -318,13 +318,15 @@ def edm_loss(precond: EDMPrecond, x1: torch.Tensor, cond: torch.Tensor, sigma_da
 def sample_heun(precond: EDMPrecond, cond: torch.Tensor, n_steps: int = 32,
                 cosmo_z: torch.Tensor | None = None, sigma_min: float = 0.002,
                 sigma_max: float = 80.0, rho: float = 7.0,
-                noise: torch.Tensor | None = None) -> torch.Tensor:
+                noise: torch.Tensor | None = None, amp: bool = False) -> torch.Tensor:
     """EDM Algorithm 1, deterministic (S_churn=0): 2nd-order Heun ODE solver over the
     Karras sigma schedule, starting from x_T ~ N(0, sigma_max^2 I) -- independent of
     cond, unlike sample_ode's x0=low_log. n_steps=32 by default (vs. the flow
     models' 4-8): a real diffusion trajectory is not a straight line, so it needs
     materially more function evaluations -- that is the whole point of trying this
-    alternative, not a bug to tune away.
+    alternative, not a bug to tune away. Heun does UP TO 2 precond() calls per
+    step, so this sampler is already the most expensive of the three pipelines'
+    per-shell reconstruction cost; amp matters more here than anywhere else.
 
     noise: optional UNIT-variance N(0,I) tensor shaped like cond, used as the initial
     state (scaled by sigma_max here) instead of a fresh internal draw. This is what
@@ -333,7 +335,14 @@ def sample_heun(precond: EDMPrecond, cond: torch.Tensor, n_steps: int = 32,
     sphere noise produce consistent output on their overlap and survive
     patch_tiling's averaging blend. With independent per-tile draws the blend
     destroys ~83% of the generated small-scale POWER (measured) -- see
-    analysis/patch_tiling.tile_and_predict's pass_indices."""
+    analysis/patch_tiling.tile_and_predict's pass_indices.
+
+    amp=True runs each precond() call under bf16 autocast -- same pattern as
+    sphere_flow.sample_ode's amp flag (flow_model.sample_ode mirrors it too).
+    x/d_cur/d_next stay fp32 (precond returns bf16 under autocast, but
+    fp32 +/- bf16 type-promotes to fp32), so precision doesn't degrade across
+    steps. Default False here -- never benchmarked for this sampler; opt in via
+    --amp once measured on a real reconstruction."""
     precond.eval()
     device, dtype = cond.device, cond.dtype
     bs = cond.shape[0]
@@ -350,17 +359,18 @@ def sample_heun(precond: EDMPrecond, cond: torch.Tensor, n_steps: int = 32,
                          f"{tuple(cond.shape)}")
     x = noise.to(device=device, dtype=dtype) * t_steps[0].to(dtype)
 
-    for i in range(n_steps):
-        sigma_cur = t_steps[i].to(dtype).expand(bs)
-        sigma_next = t_steps[i + 1].to(dtype).expand(bs)
+    with torch.autocast("cuda", dtype=torch.bfloat16, enabled=amp and x.is_cuda):
+        for i in range(n_steps):
+            sigma_cur = t_steps[i].to(dtype).expand(bs)
+            sigma_next = t_steps[i + 1].to(dtype).expand(bs)
 
-        d_cur = (x - precond(x, sigma_cur, cond, cosmo_z=cosmo_z)) / sigma_cur.reshape(-1, 1, 1, 1)
-        x_next = x + (sigma_next - sigma_cur).reshape(-1, 1, 1, 1) * d_cur
+            d_cur = (x - precond(x, sigma_cur, cond, cosmo_z=cosmo_z)) / sigma_cur.reshape(-1, 1, 1, 1)
+            x_next = x + (sigma_next - sigma_cur).reshape(-1, 1, 1, 1) * d_cur
 
-        if t_steps[i + 1] > 0:
-            d_next = (x_next - precond(x_next, sigma_next, cond, cosmo_z=cosmo_z)) / sigma_next.reshape(-1, 1, 1, 1)
-            x_next = x + (sigma_next - sigma_cur).reshape(-1, 1, 1, 1) * 0.5 * (d_cur + d_next)
+            if t_steps[i + 1] > 0:
+                d_next = (x_next - precond(x_next, sigma_next, cond, cosmo_z=cosmo_z)) / sigma_next.reshape(-1, 1, 1, 1)
+                x_next = x + (sigma_next - sigma_cur).reshape(-1, 1, 1, 1) * 0.5 * (d_cur + d_next)
 
-        x = x_next
+            x = x_next
 
     return x

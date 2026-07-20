@@ -105,8 +105,17 @@ def main():
     p.add_argument("--val-frac", type=float, default=0.15)
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--n-eval", type=int, default=512, help="held-out patches to evaluate")
-    p.add_argument("--eval-batch", type=int, default=64,
-                   help="mini-batch size for the diffusion sampling pass (memory control)")
+    p.add_argument("--eval-batch", type=int, default=256,
+                   help="mini-batch size for the diffusion sampling pass (memory control). "
+                        "UNTESTED bump from the old default of 64 -- matches unet's own "
+                        "bump, watch for OOM on the first real run.")
+    p.add_argument("--amp", dest="amp", action="store_true", default=True,
+                   help="run each Heun precond() call under bf16 autocast (default: on). "
+                        "See model.sample_heun's docstring -- Heun does up to 2 precond() "
+                        "calls/step, so this is the most expensive sampler of the three "
+                        "pipelines and benefits the most from amp.")
+    p.add_argument("--no-amp", dest="amp", action="store_false",
+                   help="disable bf16 autocast (fp32 sampling, slower).")
     p.add_argument("--example-shells", type=int, nargs="+", default=[5, 10, 15, 30, 50],
                    help="shell indices to show as rows in example_patches.png. Default "
                         "matches transfer/unet/sphereflow's, so all four pipelines' "
@@ -230,7 +239,7 @@ def main():
         field or the blend averages the generated structure away."""
         r = sample_heun(precond, cond, n_steps=args.steps, cosmo_z=cosmo_z,
                         sigma_min=args.sigma_min, sigma_max=args.sigma_max, rho=args.rho,
-                        noise=noise)
+                        noise=noise, amp=args.amp)
         return compose_corrected(cond, r, hp_cutoff, hp_transition)
 
     # held-out cosmologies = our test data
@@ -480,6 +489,16 @@ def main():
                 suptitle=f"full-sky raw pixel-count histogram per shell\n{fs_cosmo}/{args.run}")
 
         n_shells_total = low_full_all.shape[0]
+        # EXCLUDE the LAST lightcone shell (2026-07-20 data-quality finding): measured
+        # across every grid AND cosmogridv1 cosmology checked, DISCO's low map at the
+        # final shell (index n_shells_total-1, z~3.46-3.50 -- a narrow, truncated shell
+        # at the lightcone/box edge) carries only 16-65% of CosmoGrid's true mean count,
+        # vs 99.8-99.9% agreement on every other shell (0-67). A raw-count DEFICIT of
+        # that size is a DISCO input artifact, not a correction-model failure -- no
+        # transfer function or generative model can restore mass DISCO never had. Left
+        # in, it single-handedly blew the old "shells 45-68" panel's pctile band out to
+        # ~1.9 in every pipeline's cl_ratio_by_zbin_grid.png (now "shells 45-67").
+        n_shells_total -= 1
         zbins = zbin_shell_samples(n_shells_total, args.zbin_start, args.n_zbins,
                                    args.n_shells_per_zbin)
         grid_cosmos = list(val_cosmos[:args.max_cosmologies])

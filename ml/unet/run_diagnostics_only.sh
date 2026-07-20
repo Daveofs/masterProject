@@ -39,6 +39,11 @@ PATCH_DIR=${PATCH_DIR:-/capstor/scratch/cscs/damrein/outputs/flowpatches/grid_ns
 OUT_DIR=${OUT_DIR:-/capstor/scratch/cscs/damrein/outputs/flowruns/flow_nside512_patch256_n100000_ch32_b32_e40_cond_cos200}
 
 export PYTHONUNBUFFERED=1
+# Pin OpenMP-using CPU work (healpy's Cl/anafast, UFalcon's kappa-map construction)
+# to the cores SLURM actually allocated (--cpus-per-task=128 above) -- unset, these
+# libraries can silently default to 1 thread inside a cgroup, wasting most of the
+# allocation on the CPU-bound diagnostic stages.
+export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK:-128}"
 # weak-lensing kappa map diagnostic -- off by default, see run_flow.sh's KAPPA note.
 KAPPA=${KAPPA:-1}
 KAPPA_FLAG=""; [ "${KAPPA}" = "1" ] && KAPPA_FLAG="--kappa"

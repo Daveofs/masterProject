@@ -158,16 +158,26 @@ class FlowUNet(nn.Module):
 
 @torch.no_grad()
 def sample_ode(model: FlowUNet, x0: torch.Tensor, n_steps: int = 4,
-              cosmo_z: torch.Tensor | None = None) -> torch.Tensor:
+              cosmo_z: torch.Tensor | None = None, amp: bool = False) -> torch.Tensor:
     """Integrate dx/dt = v_theta(x, t [, cosmo_z]) from t=0 (x0 = low_log) to t=1
     (predicted high_log), simple Euler steps. x0 is close to x1 by construction (same
     large-scale structure), so few steps should suffice - unlike diffusion
-    sampling from pure noise, which typically needs dozens+."""
+    sampling from pure noise, which typically needs dozens+.
+
+    amp=True runs each model() call under bf16 autocast -- same pattern and
+    rationale as sphere_flow.sample_ode's own amp flag (memory-bandwidth-bound
+    2D convs benefit the same way as the graph gather-convs do on this hardware).
+    The Euler accumulator x stays fp32: model(...) returns bf16 under autocast,
+    but `x (fp32) + bf16_tensor * dt` type-promotes to fp32 automatically, so
+    precision doesn't degrade across steps. Default False here (unlike
+    sphere_flow's default True) because this was never benchmarked for unet's
+    FlowUNet -- opt in via --amp once measured on a real reconstruction."""
     model.eval()
     x = x0.clone()
     dt = 1.0 / n_steps
-    for i in range(n_steps):
-        t = torch.full((x.shape[0],), i * dt, device=x.device, dtype=x.dtype)
-        v = model(x, t, cosmo_z=cosmo_z)
-        x = x + v * dt
+    with torch.autocast("cuda", dtype=torch.bfloat16, enabled=amp and x.is_cuda):
+        for i in range(n_steps):
+            t = torch.full((x.shape[0],), i * dt, device=x.device, dtype=x.dtype)
+            v = model(x, t, cosmo_z=cosmo_z)
+            x = x + v * dt
     return x

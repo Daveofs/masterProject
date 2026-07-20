@@ -450,6 +450,16 @@ def plot_cl_zbin_grid(args, run_dirs: list[Path], corrected_by_run: dict):
 
     run0 = run_dirs[0]
     n_shells_total = np.load(run0 / f"low_shells_nside={nside}.npy", mmap_mode="r").shape[0]
+    # EXCLUDE the LAST lightcone shell (2026-07-20 data-quality finding): measured
+    # across every grid AND cosmogridv1 cosmology checked, DISCO's low map at the
+    # final shell (index n_shells_total-1, z~3.46-3.50 -- a narrow, truncated shell
+    # at the lightcone/box edge) carries only 16-65% of CosmoGrid's true mean count,
+    # vs 99.8-99.9% agreement on every other shell (0-67). A raw-count DEFICIT of
+    # that size is a DISCO input artifact, not a correction-model failure -- no
+    # transfer function or generative model can restore mass DISCO never had. Left
+    # in, it single-handedly blew the old "shells 45-68" panel's pctile band out to
+    # ~1.9 in every pipeline's cl_ratio_by_zbin_grid.png (now "shells 45-67").
+    n_shells_total -= 1
     zbins = zbin_shell_samples(n_shells_total, args.zbin_start, args.n_zbins,
                                args.n_shells_per_zbin)
     grid_runs = run_dirs[:args.max_cosmologies]

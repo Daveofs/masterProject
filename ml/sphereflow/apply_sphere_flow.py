@@ -162,6 +162,74 @@ def correct_shell(net, meta, in_map, cosmo_vec, device, steps, patch_batch, amp:
     return hp.reorder(corrected_nest, n2r=True)
 
 
+@torch.no_grad()
+def overlap_correct_shell(net, meta, in_map, cosmo_vec, device, steps, patch_batch,
+                          nside_centers, amp: bool = False, taper_power: float = 8.0):
+    """Flow-corrected physical map for one shell, OVERLAPPING taper-blended
+    patches instead of correct_shell's disjoint, non-overlapping blocks -- for
+    checkpoints trained by the 2026-07-20 overlap-capable make_patch_dataset.py
+    (meta['patch_mode']=='overlap'; see sphere_flow.py's "OVERLAPPING patch
+    geometry" section). Same formulation handling / normalization / RING<->NESTED
+    convention as correct_shell -- only the patch extraction + reassembly differ.
+
+    taper_power: sphereflow's ODE draws x0 ~ N(0,I) fresh PER PATCH (unlike
+    unet's deterministic x0=low), so -- exactly like diffusion's own overlap
+    tiling -- overlapping patches predict INDEPENDENT stochastic samples of the
+    same sky region, and a plain (taper_power=1) weighted average shrinks the
+    injected small-scale power (a weighted mean of N_eff independent draws keeps
+    the conditional-mean part but damps the stochastic part by 1/sqrt(N_eff)).
+    Default 8.0 is an UNTUNED starting point reasoned from diffusion's own
+    measured knee (p=32 at ~16x mean overlap, see analysis.patch_tiling and
+    diffusion/apply_diffusion.py's --taper-power docstring) and this scheme's
+    similar ~16x mean overlap (see sphere_flow.auto_overlap_nside_centers) --
+    re-measure the actual Cl-ratio-vs-taper_power knee on a real trained
+    checkpoint before trusting this value, the same way diffusion's was
+    calibrated post-hoc, not assumed."""
+    order = int(meta["order"])
+    nside = int(meta["nside"])
+    scale, soft = float(meta["sig_scale"]), float(meta["softening"])
+    rscale = float(meta["resid_scale"])
+    formulation = str(meta.get("formulation", "residual"))
+
+    idx, _centers = sf.healpix_overlap_index_maps(nside, order, nside_centers)  # (n_centers, npix_patch) NESTED ids
+    ring_idx = hp.nest2ring(nside, idx)
+    taper = sf.patch_angular_taper(nside, order, taper_power=taper_power)        # (npix_patch,)
+
+    in_map64 = np.asarray(in_map, dtype=np.float64)
+    mean = max(float(in_map64.mean()), 1e-12)
+    d_in = in_map64 / mean - 1.0
+    signal_full = sf.signal_forward(d_in[None], scale, soft)[0]                  # (npix,) RING, signal space
+
+    cosmo = torch.from_numpy(cosmo_vec[None]).to(device)
+    n_centers = idx.shape[0]
+    accum = np.zeros(hp.nside2npix(nside), dtype=np.float64)
+    weight = np.zeros(hp.nside2npix(nside), dtype=np.float64)
+    for b in range(0, n_centers, patch_batch):
+        batch_ring_idx = ring_idx[b:b + patch_batch]                             # (B, npix_patch)
+        cond_np = signal_full[batch_ring_idx]                                    # (B, npix_patch)
+        c = torch.from_numpy(cond_np.astype(np.float32)).to(device)
+        r = sf.sample_ode(net, c, cosmo.expand(c.shape[0], -1), steps=steps, amp=amp)
+        out = r.cpu().numpy().astype(np.float64)                                 # (B, npix_patch)
+        patch_sig = out if formulation == "direct" else cond_np + rscale * out
+        for k in range(batch_ring_idx.shape[0]):
+            ring_ids = batch_ring_idx[k]
+            np.add.at(accum, ring_ids, patch_sig[k] * taper)
+            np.add.at(weight, ring_ids, taper)
+        print(f"  [sphereflow-overlap]   {min(b + patch_batch, n_centers)}/{n_centers} "
+              f"patches", flush=True)
+
+    covered = weight > 0
+    if not covered.all():
+        n_gap = int((~covered).sum())
+        print(f"  [sphereflow-overlap]   filling {n_gap} residual gap pixels "
+              f"({100 * n_gap / len(covered):.3f}%) with the input signal", flush=True)
+    sig_blend = np.where(covered, np.divide(accum, weight, out=np.zeros_like(accum),
+                                            where=covered), signal_full)
+    delta = sf.signal_inverse(sig_blend, scale, soft)
+    corrected = (mean * (1.0 + delta)).astype(np.float32)
+    return corrected                    # already RING (gather/scatter used RING ids throughout)
+
+
 def _resolve_run_dir(data_root, cosmo_name):
     """cosmo name -> its run dir, same convention as train_sphere_flow.build_runs
     (first subdir starting with "run_", else the cosmology dir itself)."""
@@ -181,13 +249,22 @@ class LazyCorrected:
     closed-form transfer correction is not, so it can afford to be eager).
     """
 
-    def __init__(self, net, meta, low_all, cosmo_base, device, steps, patch_batch, amp=True):
+    def __init__(self, net, meta, low_all, cosmo_base, device, steps, patch_batch, amp=True,
+                nside_centers=None, taper_power=8.0):
         self.net, self.meta = net, meta
         self.low_all = low_all
         self.cosmo_base = cosmo_base
         self.device, self.steps, self.patch_batch, self.amp = device, steps, patch_batch, amp
         self.n_shells = low_all.shape[0]
         self._cache = {}
+        # Dispatch on how this checkpoint's patches were built (see
+        # train_sphere_flow.py's meta['patch_mode'] and sphere_flow.py's
+        # "OVERLAPPING patch geometry" section) -- a checkpoint predating the
+        # 2026-07-20 overlap change has no 'patch_mode' key and MUST use the old
+        # disjoint reconstruction (it never saw a rotated patch boundary).
+        self.overlap = str(meta.get("patch_mode", "disjoint")) == "overlap"
+        self.nside_centers = nside_centers or sf.auto_overlap_nside_centers(int(meta["order"]))
+        self.taper_power = taper_power
 
     def __getitem__(self, s):
         s = int(s)
@@ -195,10 +272,19 @@ class LazyCorrected:
             shell_norm = np.float32(s / max(self.n_shells - 1, 1))
             cosmo_vec = np.concatenate([self.cosmo_base, [shell_norm]]).astype(np.float32)
             in_map = np.asarray(self.low_all[s], dtype=np.float32)
-            print(f"  [sphereflow] sampling shell {s} ({self.steps} ODE steps)...", flush=True)
-            self._cache[s] = correct_shell(self.net, self.meta, in_map, cosmo_vec,
-                                               self.device, self.steps, self.patch_batch,
-                                               amp=self.amp)
+            if self.overlap:
+                print(f"  [sphereflow-overlap] sampling shell {s} ({self.steps} ODE "
+                      f"steps, nside_centers={self.nside_centers}, "
+                      f"taper_power={self.taper_power})...", flush=True)
+                self._cache[s] = overlap_correct_shell(
+                    self.net, self.meta, in_map, cosmo_vec, self.device, self.steps,
+                    self.patch_batch, self.nside_centers, amp=self.amp,
+                    taper_power=self.taper_power)
+            else:
+                print(f"  [sphereflow] sampling shell {s} ({self.steps} ODE steps)...", flush=True)
+                self._cache[s] = correct_shell(self.net, self.meta, in_map, cosmo_vec,
+                                                   self.device, self.steps, self.patch_batch,
+                                                   amp=self.amp)
         return self._cache[s]
 
 
@@ -366,6 +452,16 @@ def plot_cl_zbin_grid(args, run_dirs: list[Path], corrected_by_run: dict, method
 
     run0 = run_dirs[0]
     n_shells_total = np.load(run0 / f"low_shells_nside={nside}.npy", mmap_mode="r").shape[0]
+    # EXCLUDE the LAST lightcone shell (2026-07-20 data-quality finding): measured
+    # across every grid AND cosmogridv1 cosmology checked, DISCO's low map at the
+    # final shell (index n_shells_total-1, z~3.46-3.50 -- a narrow, truncated shell
+    # at the lightcone/box edge) carries only 16-65% of CosmoGrid's true mean count,
+    # vs 99.8-99.9% agreement on every other shell (0-67). A raw-count DEFICIT of
+    # that size is a DISCO input artifact, not a correction-model failure -- no
+    # transfer function or generative model can restore mass DISCO never had. Left
+    # in, it single-handedly blew the old "shells 45-68" panel's pctile band out to
+    # ~1.9 in every pipeline's cl_ratio_by_zbin_grid.png (now "shells 45-67").
+    n_shells_total -= 1
     zbins = zbin_shell_samples(n_shells_total, args.zbin_start, args.n_zbins,
                                args.n_shells_per_zbin)
     grid_runs = run_dirs[:args.max_cosmologies]
@@ -528,6 +624,20 @@ def main():
     p.add_argument("--amp", action="store_true", default=True,
                    help="bf16 autocast during ODE sampling -- on by default here.")
     p.add_argument("--no-amp", dest="amp", action="store_false")
+    p.add_argument("--nside-centers", type=int, default=None,
+                   help="OVERLAP checkpoints only (meta['patch_mode']=='overlap'): "
+                        "center-grid nside for the overlapping-patch reconstruction "
+                        "sweep (see sphere_flow.healpix_overlap_index_maps). Default: "
+                        "auto-scaled from --order via "
+                        "sphere_flow.auto_overlap_nside_centers (~16x mean overlap, "
+                        "matching analysis.patch_tiling's own target density). "
+                        "Ignored for pre-2026-07-20 disjoint checkpoints.")
+    p.add_argument("--taper-power", type=float, default=8.0,
+                   help="OVERLAP checkpoints only: blend-weight sharpening (see "
+                        "overlap_correct_shell's docstring) -- UNTUNED default, "
+                        "reasoned from diffusion's own measured p=32 knee at a "
+                        "similar ~16x overlap; re-measure the Cl-ratio-vs-taper_power "
+                        "knee on a real trained checkpoint before trusting it.")
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--method-label", default=None,
                    help="Defaults to 'sphereflow ({formulation}, {model-dir name})'.")
@@ -636,7 +746,9 @@ def main():
                          if (run / "params.yml").exists()
                          else np.zeros(int(meta["cond_dim"]) - 1, np.float32))
             corrected_by_run[run] = LazyCorrected(net, meta, low_all, cosmo_base, dev,
-                                                  args.steps, args.patch_batch, amp=args.amp)
+                                                  args.steps, args.patch_batch, amp=args.amp,
+                                                  nside_centers=args.nside_centers,
+                                                  taper_power=args.taper_power)
             print(f"=== [apply_sphere_flow] {cosmo_label} ready "
                   f"(shells corrected on demand) ===", flush=True)
         except Exception as e:

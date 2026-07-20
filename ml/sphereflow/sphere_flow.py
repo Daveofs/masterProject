@@ -38,6 +38,7 @@ from __future__ import annotations
 import math
 import os
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
 
 import numpy as np
@@ -324,6 +325,151 @@ def patches_to_maps(patches: np.ndarray, order: int, n_maps: int) -> np.ndarray:
         return patches
     p = n_patches(order)
     return patches.reshape(n_maps, p, patches.shape[1]).reshape(n_maps, -1)
+
+
+# ---------------------------------------------------------------------------
+# OVERLAPPING patch geometry (2026-07-20): rotate an ARBITRARY sky direction onto
+# "canonical patch 0" (the same npix_patch NESTED pixels _healpix_weightmatrix
+# already builds the graph Laplacian for), instead of only ever reading the
+# n_patches(order) DISJOINT, quad-tree-aligned NESTED blocks map_to_patches above
+# reshapes out. This is what makes overlapping, taper-blended full-sky
+# reconstruction possible for the graph-conv model (same spirit as
+# analysis/patch_tiling.py's gnomonic overlap, adapted to the HEALPix graph): a
+# patch can now be centered at ANY (lon, lat, psi), not just one of the
+# n_patches(order) fixed centers, while its INTERNAL pixel adjacency is always
+# (up to HEALPix's own pixelization irregularity under rotation -- see
+# duplicate-pixel note below) the SAME topology the model's Laplacian was built
+# for -- so NO changes are needed to healpix_laplacian/ChebConv/SphereFlowNet.
+#
+# THIS IS A TRAINING-TIME CHANGE, NOT JUST AN INFERENCE ONE: a checkpoint trained
+# only on the OLD disjoint quad-tree blocks has only ever seen that one exact
+# alignment, so applying it to an arbitrarily-rotated patch at inference is an
+# extrapolation with unknown behaviour right at the patch boundary (precisely
+# where the overlap/blend is supposed to help). make_patch_dataset.py therefore
+# draws patches at RANDOM (lon, lat, psi) at TRAINING time too (mirroring how
+# unet/diffusion's make_patch_dataset.py already draws random gnomonic centers +
+# psi), so the model is trained on the SAME distribution of local topologies
+# (any rotation) it will see reconstructed at inference.
+#
+# Geometry, validated 2026-07-20 (round-trip self-match 1.0, target-center
+# recovery to 1e-5 deg, psi actually rotates the patch, duplicate-pixel rate
+# ~4% away from poles / ~18% near them -- comparable to gnomonic tiling's own
+# known ~17% duplicate rate, see diffusion/apply_diffusion.py):
+#   R0 = Rotator(rot=(lon0, lat0, 0))         # canonical patch-0 center's rotator
+#   v_local  = R0(canonical_directions)        # global(canonical) -> local ref frame
+#   Rt_inv   = Rotator(rot=(lon, lat, psi)).get_inverse()
+#   v_target = Rt_inv(v_local)                 # local ref frame -> global(target)
+# (healpy's Rotator(rot=(lon,lat,psi)) convention: FORWARD maps a GLOBAL direction
+# to the LOCAL frame where the requested (lon,lat) sits at the local X-axis
+# [1,0,0] -- NOT the pole -- so going canonical-global -> local -> target-global
+# needs R0 forward then Rt INVERSE, not the other way around.)
+# ---------------------------------------------------------------------------
+
+_CANON_CACHE: dict[tuple[int, int], tuple] = {}  # (nside, order) -> (canon_vec, lon0, lat0, R0)
+
+
+def _canonical_patch(nside: int, order: int):
+    """(canon_vec (npix_patch,3), lon0, lat0, R0) for canonical patch 0 -- cached,
+    depends only on (nside, order)."""
+    key = (nside, order)
+    if key in _CANON_CACHE:
+        return _CANON_CACHE[key]
+    p = patch_npix(nside, order)
+    x, y, z = hp.pix2vec(nside, np.arange(p), nest=True)
+    canon_vec = np.vstack([x, y, z]).T.astype(np.float64)
+    center = canon_vec.mean(axis=0); center /= np.linalg.norm(center)
+    lon0, lat0 = hp.vec2ang(center[None, :], lonlat=True)
+    lon0, lat0 = float(lon0[0]), float(lat0[0])
+    R0 = hp.Rotator(rot=(lon0, lat0, 0.0), deg=True)
+    _CANON_CACHE[key] = (canon_vec, lon0, lat0, R0)
+    return _CANON_CACHE[key]
+
+
+def rotated_patch_ids(nside: int, order: int, lon: float, lat: float,
+                      psi: float = 0.0) -> np.ndarray:
+    """(npix_patch,) NESTED pixel ids on the TRUE sky for a patch centered at
+    (lon, lat) with in-plane rotation psi (degrees) -- the overlap-capable
+    replacement for map_to_patches' fixed disjoint blocks. ONE-OFF (uncached
+    Rotator per call): used by make_patch_dataset.py, where every draw is a
+    fresh random center. For the reconstruction sweep (many shells/cosmologies
+    reusing the SAME grid of centers), use healpix_overlap_index_maps instead,
+    which caches this per center."""
+    canon_vec, _lon0, _lat0, R0 = _canonical_patch(nside, order)
+    v = canon_vec.T
+    v_local = np.asarray(R0(v[0], v[1], v[2]))
+    Rt_inv = hp.Rotator(rot=(lon, lat, psi), deg=True).get_inverse()
+    v_t = np.asarray(Rt_inv(v_local[0], v_local[1], v_local[2]))
+    return hp.vec2pix(nside, v_t[0], v_t[1], v_t[2], nest=True).astype(np.int64)
+
+
+def patch_angular_taper(nside: int, order: int, taper_power: float = 1.0) -> np.ndarray:
+    """(npix_patch,) blend weight, 1.0 at the canonical patch's own center falling
+    to 0 at its angular edge (raised-cosine over angular distance from center) --
+    the HEALPix-graph analogue of analysis.patch_tiling.cosine_taper, using
+    angular separation instead of flat (x,y) distance. Same for EVERY rotated
+    copy of the patch by construction (rotation preserves angular distances), so
+    this is computed ONCE from the canonical geometry and reused for every
+    center. taper_power sharpens toward nearest-patch-wins (see
+    analysis.patch_tiling.tile_and_predict's taper_power docstring) -- relevant
+    if/when this model's sampling is stochastic per patch."""
+    canon_vec, _lon0, _lat0, _R0 = _canonical_patch(nside, order)
+    center = canon_vec.mean(axis=0); center /= np.linalg.norm(center)
+    cos_ang = np.clip(canon_vec @ center, -1.0, 1.0)
+    ang = np.arccos(cos_ang)
+    edge = ang.max()
+    if edge <= 0:
+        return np.ones(len(canon_vec), dtype=np.float64)
+    t = np.clip(ang / edge, 0.0, 1.0)
+    taper = 0.5 * (1 + np.cos(np.pi * t))          # 1 at center, 0 at edge
+    return taper ** taper_power
+
+
+_OVERLAP_IDX_CACHE: dict[tuple, np.ndarray] = {}   # (nside, order, nside_centers) -> (n_centers, npix_patch) int64
+_OVERLAP_CENTERS_CACHE: dict[tuple, np.ndarray] = {}  # same key -> (n_centers, 2) lon,lat deg
+
+
+def healpix_overlap_index_maps(nside: int, order: int, nside_centers: int,
+                               n_workers: int = 16) -> tuple[np.ndarray, np.ndarray]:
+    """(idx, centers_lonlat): idx is (n_centers, npix_patch) int64 true-sky NESTED
+    pixel ids -- one row per overlapping patch, centers on a hp.nside2npix
+    (nside_centers)-direction grid. Cached (built once per (nside, order,
+    nside_centers), reused across every shell/cosmology) -- same role as
+    analysis.patch_tiling.gnomonic_index_maps, adapted to rotated HEALPix
+    patches instead of gnomonic projection. nside_centers should be finer than
+    `order` (more centers than n_patches(order)) for genuine overlap; see
+    auto_overlap_nside_centers."""
+    key = (nside, order, nside_centers)
+    if key in _OVERLAP_IDX_CACHE:
+        return _OVERLAP_IDX_CACHE[key], _OVERLAP_CENTERS_CACHE[key]
+
+    n_centers = hp.nside2npix(nside_centers)
+    lon, lat = hp.pix2ang(nside_centers, np.arange(n_centers), nest=False, lonlat=True)
+    print(f"[sphere_flow] building overlap index cache: {n_centers} patches "
+          f"(nside={nside}, order={order}) -- once, then reused for every "
+          f"shell/cosmology", flush=True)
+
+    def build(c: int) -> np.ndarray:
+        return rotated_patch_ids(nside, order, float(lon[c]), float(lat[c]))
+
+    with ThreadPoolExecutor(max_workers=n_workers) as ex:
+        idx = np.stack(list(ex.map(build, range(n_centers))))
+    print(f"[sphere_flow] overlap index cache ready ({idx.nbytes / 1e9:.2f} GB)", flush=True)
+
+    centers = np.stack([lon, lat], axis=1)
+    _OVERLAP_IDX_CACHE[key] = idx
+    _OVERLAP_CENTERS_CACHE[key] = centers
+    return idx, centers
+
+
+def auto_overlap_nside_centers(order: int, target_ratio: float = 4.0) -> int:
+    """Pick a center-grid nside so patch-diameter / center-spacing ~= target_ratio
+    -- the HEALPix-graph analogue of analysis.patch_tiling.auto_nside_centers.
+    `order` itself defines the DISJOINT grid (n_patches(order) centers, spacing
+    == patch diameter, ratio 1); this scales up to get real overlap."""
+    for nc in [order, 2 * order, 4 * order, 8 * order, 16 * order]:
+        if nc / order >= target_ratio:
+            return nc
+    return 16 * order
 
 
 def to_overdensity(maps: np.ndarray):

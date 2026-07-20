@@ -109,8 +109,19 @@ def main():
     p.add_argument("--val-frac", type=float, default=0.15)
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--n-eval", type=int, default=512, help="held-out patches to evaluate")
-    p.add_argument("--eval-batch", type=int, default=64,
-                   help="mini-batch size for the ODE sampling pass (memory control)")
+    p.add_argument("--eval-batch", type=int, default=256,
+                   help="mini-batch size for the ODE sampling pass (memory control). "
+                        "256 (was 64) -- UNTESTED bump, reasoned from FlowUNet's modest "
+                        "size (base_channels=32, 256x256 patches) leaving a GH200's "
+                        "96GB HBM mostly idle at the old default; profile and adjust "
+                        "if it OOMs or doesn't help.")
+    p.add_argument("--amp", action="store_true", default=True,
+                   help="bf16 autocast during ODE sampling -- same pattern as "
+                        "sphere_flow.sample_ode's own amp flag (see "
+                        "flow_model.sample_ode's docstring). On by default; "
+                        "UNTESTED for this sampler specifically, --no-amp to disable "
+                        "if results look off.")
+    p.add_argument("--no-amp", dest="amp", action="store_false")
     p.add_argument("--example-shells", type=int, nargs="+", default=[5, 10, 15, 30, 50],
                    help="shell indices to show as rows in example_patches.png (one "
                         "held-out patch per shell, picked via patch metadata) and to "
@@ -150,6 +161,22 @@ def main():
     p.add_argument("--fullsky-patch-size", type=int, default=256,
                    help="gnomonic tile size for full-sky reconstruction -- should "
                         "match the patch size this checkpoint was trained on")
+    p.add_argument("--taper-power", type=float, default=1.0,
+                   help="blend-weight sharpening for the full-sky tiling (see "
+                        "analysis.patch_tiling.tile_and_predict) -- SAME knob "
+                        "diffusion/apply_diffusion.py exposes, added here for tooling "
+                        "parity/comparability, not because unet needs a different "
+                        "value: unet's flow starts from x0=low (deterministic, no "
+                        "noise draw), so overlapping tiles predicting the same sky "
+                        "pixel already AGREE and 1.0 (plain cosine-taper averaging) "
+                        "is optimal -- it is free seam smoothing, not lossy averaging "
+                        "of independent samples. Sharpening toward nearest-tile-wins "
+                        "(as diffusion's tuned p=32 does) only matters for a "
+                        "genuinely STOCHASTIC per-tile model (diffusion draws a fresh "
+                        "x_T per tile; sphereflow's ODE also starts from noise, but "
+                        "its HEALPix-superpixel tiling has no overlap to average over "
+                        "in the first place). Override only to A/B-test this claim on "
+                        "your own checkpoint.")
     p.add_argument("--lmax", type=int, default=3000)
     # --- example_full_sky.png: Cl-ratio-by-redshift-bin pctile grid (rows = held-out
     # cosmologies, columns = redshift/shell bins) -- no images (see example_patches.png
@@ -268,7 +295,7 @@ def main():
         lo = low_all[b:b + mb].to(dev); hi = high_all[b:b + mb].to(dev)
         lo_log, hi_log = raw_to_log1p_delta_pair(lo, hi)
         with torch.no_grad():
-            co_log = sample_ode(net, lo_log, n_steps=args.steps, cosmo_z=cosmo_z_all[b:b + mb])
+            co_log = sample_ode(net, lo_log, n_steps=args.steps, cosmo_z=cosmo_z_all[b:b + mb], amp=args.amp)
         low_log_parts.append(lo_log); high_log_parts.append(hi_log); corr_log_parts.append(co_log)
     low_log = torch.cat(low_log_parts); high_log = torch.cat(high_log_parts)
     corr_log = torch.cat(corr_log_parts)
@@ -327,7 +354,7 @@ def main():
     ex_cosmo_z = stack_cosmo_z(ex_ds, dev, ex_low.dtype)
     ex_low_log, ex_high_log = raw_to_log1p_delta_pair(ex_low, ex_high)
     with torch.no_grad():
-        ex_corr_log = sample_ode(net, ex_low_log, n_steps=args.steps, cosmo_z=ex_cosmo_z)
+        ex_corr_log = sample_ode(net, ex_low_log, n_steps=args.steps, cosmo_z=ex_cosmo_z, amp=args.amp)
 
     rows = [(f"shell {example_shells[i]}", ex_low_log[i, 0].cpu().numpy(),
             ex_corr_log[i, 0].cpu().numpy(), ex_high_log[i, 0].cpu().numpy())
@@ -353,7 +380,7 @@ def main():
         s_low_mean = s_low.mean(dim=(2, 3), keepdim=True)
         s_low_log, _ = raw_to_log1p_delta_pair(s_low, s_high)
         with torch.no_grad():
-            s_corr_log = sample_ode(net, s_low_log, n_steps=args.steps, cosmo_z=s_cosmo_z)
+            s_corr_log = sample_ode(net, s_low_log, n_steps=args.steps, cosmo_z=s_cosmo_z, amp=args.amp)
         s_corr_raw = (1.0 + torch.expm1(s_corr_log)) * s_low_mean
 
         low_np, high_np, corr_np = s_low.cpu().numpy(), s_high.cpu().numpy(), s_corr_raw.cpu().numpy()
@@ -421,7 +448,7 @@ def main():
                 cz = (None if cosmo_z_t is None else
                      cosmo_z_t.unsqueeze(0).expand(low_t.shape[0], -1).to(low_log.dtype))
                 with torch.no_grad():
-                    pred_log = sample_ode(net, low_log, n_steps=args.steps, cosmo_z=cz)
+                    pred_log = sample_ode(net, low_log, n_steps=args.steps, cosmo_z=cz, amp=args.amp)
                 pred_delta = torch.expm1(pred_log)
                 return ((1.0 + pred_delta) * low_mean).squeeze(1).cpu().numpy()
             return predict_batch
@@ -430,7 +457,8 @@ def main():
             cosmo_z_vec = lookup_cosmo_z_fs(cosmo_name, shell_idx) if use_cosmo_cond else None
             predict_batch = make_predict_batch_fs(cosmo_z_vec)
             return reconstruct_shell(predict_batch, low_shell, nside_centers,
-                                     args.fullsky_patch_size, args.eval_batch)
+                                     args.fullsky_patch_size, args.eval_batch,
+                                     taper_power=args.taper_power)
 
         # --- single-cosmology diagnostics: standalone cl_shell*.png + full-sky
         # moments/histograms (--cosmo, default: first held-out cosmology) ---
@@ -513,6 +541,16 @@ def main():
         # --n-shells-per-zbin sampled shells per bin. No images (already in
         # example_patches.png); this is purely the aggregate two-point check. ---
         n_shells_total = low_full_all.shape[0]
+        # EXCLUDE the LAST lightcone shell (2026-07-20 data-quality finding): measured
+        # across every grid AND cosmogridv1 cosmology checked, DISCO's low map at the
+        # final shell (index n_shells_total-1, z~3.46-3.50 -- a narrow, truncated shell
+        # at the lightcone/box edge) carries only 16-65% of CosmoGrid's true mean count,
+        # vs 99.8-99.9% agreement on every other shell (0-67). A raw-count DEFICIT of
+        # that size is a DISCO input artifact, not a correction-model failure -- no
+        # transfer function or generative model can restore mass DISCO never had. Left
+        # in, it single-handedly blew the old "shells 45-68" panel's pctile band out to
+        # ~1.9 in every pipeline's cl_ratio_by_zbin_grid.png (now "shells 45-67").
+        n_shells_total -= 1
         zbins = zbin_shell_samples(n_shells_total, args.zbin_start, args.n_zbins,
                                    args.n_shells_per_zbin)
         grid_cosmos = list(val_cosmos[:args.max_cosmologies])

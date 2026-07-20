@@ -2,21 +2,34 @@
 """Build a (low, high) HEALPix-superpixel patch dataset for the sphere-flow.
 
 Direct analogue of unet/make_patch_dataset.py, but the "patch" here is a
-NESTED HEALPix superpixel (the unit sphere_flow's Chebyshev graph convolution
-operates on), NOT a gnomonic flat image: the sphere is split into
-12*order^2 contiguous NESTED superpixels of npix/(12*order^2) pixels each
-(order=16, nside=2048 -> 3072 patches of 16,384 pixels), exactly the split
-sphere_flow.map_to_patches does, so the graph Laplacian built on one patch
-applies to every patch.
+ROTATED HEALPix superpixel (the shape sphere_flow's Chebyshev graph
+convolution operates on), NOT a gnomonic flat image.
 
-ORDERING (critical, fixed 2026-07-15): the source shell .npy stacks are stored
-RING-ordered (verified by a controlled sphere-neighbour-correlation test). A
-contiguous slice of a RING array is a LATITUDE ANNULUS (up to ~89 deg wide), NOT
-a compact superpixel -- so we MUST reorder each shell RING->NESTED
-(hp.reorder(r2n=True)) BEFORE slicing, or the "patches" don't match the nest=True
-graph Laplacian and the conv mixes wrong neighbours. The stored patches are
-therefore NESTED superpixels; apply_sphere_flow.correct_shell does the same
-reorder on its input and the inverse (NESTED->RING) on its output.
+OVERLAP-CAPABLE PATCHES (2026-07-20, replaces the old disjoint quad-tree
+scheme): each patch is drawn at a RANDOM (lon, lat, psi) -- a uniformly random
+sky center + random in-plane rotation, exactly the SAME draw convention
+unet/make_patch_dataset.py already uses for its gnomonic patches -- via
+sphere_flow.rotated_patch_ids, which rotates canonical patch 0's own npix_patch
+NESTED pixels onto that (lon, lat, psi). This is what lets
+apply_sphere_flow.py reconstruct a shell from OVERLAPPING, taper-blended
+patches at inference (analogous to analysis/patch_tiling.py's gnomonic overlap
+for unet/diffusion) instead of the old hard, disjoint 12*order^2-block
+partition: a model trained ONLY on that one fixed alignment has no reason to
+behave sanely on an arbitrarily-rotated patch boundary, so training must see
+the same distribution of rotations reconstruction will use. See sphere_flow.py's
+"OVERLAPPING patch geometry" section for the validated rotation math.
+
+The graph Laplacian is UNCHANGED (still built once, for canonical patch 0's
+own npix_patch NESTED pixels) and applies to every rotated patch exactly as
+before -- rotated_patch_ids always returns pixels in the SAME canonical
+relative order, so the model architecture needed no changes, only what patches
+it is trained/applied on.
+
+ORDERING: rotated_patch_ids returns NESTED ids on the true sky; converted to
+RING ids (hp.nest2ring) and gathered DIRECTLY from the shell in its native RING
+order (the .npy stacks are stored RING) -- no whole-shell hp.reorder needed any
+more (that was the old scheme's per-shell-group R2N reorder before slicing a
+disjoint block; a rotated gather doesn't need it).
 
 WHY this exists (2026-07-14): training used to stream shells straight off the
 14 GB per-run .npy stacks through a hand-rolled per-rank producer thread. That
@@ -52,18 +65,26 @@ mean from the stored patch alone would be a DIFFERENT (and wrong) normalization.
 """
 from __future__ import annotations
 import argparse
+import os
+import sys
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 
 import numpy as np
 import healpy as hp
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import sphere_flow as sf  # noqa: E402
+
 META_DTYPE = np.dtype([
     ("idx", "i8"),
     ("cosmo", "U16"),
     ("run", "U16"),
     ("shell_idx", "i4"),
-    ("patch_idx", "i4"),          # which of the 12*order^2 NESTED superpixels
+    ("center_ipix", "i8"),        # healpix index (RING, --nside) the patch was drawn at
+    ("center_lon_deg", "f8"),
+    ("center_lat_deg", "f8"),
+    ("psi_deg", "f8"),
     ("n_shells", "i4"),           # that run's shell count -> normalized shell index
     ("low_shell_mean", "f8"),     # mean over the WHOLE shell (see module docstring)
     ("high_shell_mean", "f8"),
@@ -116,8 +137,9 @@ def load_shell_info(run_dir: Path):
         return None
 
 
-def _process_run_shard(run_dir_str, cosmo, run_name, indices, shell_idxs, patch_idxs,
-                       nside, order, n_patches_per_shell, npix_patch,
+def _process_run_shard(run_dir_str, cosmo, run_name, indices, shell_idxs,
+                       center_ipixs, lons, lats, psis,
+                       nside, order, npix_patch,
                        low_path_str, high_path_str):
     """Worker: fill every patch assigned to ONE run, writing directly into the
     shared output memmaps at each patch's global index (disjoint writes across
@@ -125,6 +147,22 @@ def _process_run_shard(run_dir_str, cosmo, run_name, indices, shell_idxs, patch_
 
     Shells are grouped so each shell's 200 MB row is read from the big stack
     ONCE, no matter how many patches were drawn from it.
+
+    OVERLAP-CAPABLE PATCHES (2026-07-20): each patch is a rotated copy of
+    canonical patch 0 (sphere_flow.rotated_patch_ids), centered at a RANDOM
+    (lon, lat, psi) -- NOT one of the n_patches(order) fixed disjoint quad-tree
+    blocks the old version sliced out. This is what lets apply_sphere_flow.py
+    reconstruct with overlapping, taper-blended patches at inference (a model
+    that only ever saw the disjoint alignment during training has no reason to
+    behave sanely on an arbitrarily-rotated patch's boundary at apply time) --
+    see sphere_flow.py's "OVERLAPPING patch geometry" section for the full
+    rationale and the validated rotation math.
+
+    Also FASTER than the old version: rotated_patch_ids returns NESTED ids on
+    the true sky, converted to RING ids and gathered DIRECTLY from the shell in
+    its native RING order -- no whole-shell hp.reorder(r2n=True) needed per
+    shell group any more (that was an O(npix) call per shell; this is an
+    O(npix_patch) gather per patch).
     """
     run_dir = Path(run_dir_str)
     lo_mm = np.load(run_dir / f"low_shells_nside={nside}.npy", mmap_mode="r")
@@ -139,12 +177,10 @@ def _process_run_shard(run_dir_str, cosmo, run_name, indices, shell_idxs, patch_
     for s in np.unique(shell_idxs):
         s = int(s)
         sel = np.where(shell_idxs == s)[0]
-        # ONE read per shell, reordered RING->NESTED so the contiguous slices below
-        # are compact superpixels matching sphere_flow's nest=True Laplacian (the
-        # .npy are RING; a raw RING slice would be a latitude annulus -- see the
-        # module docstring). reorder is order-invariant for the shell means below.
-        lo_shell = hp.reorder(np.asarray(lo_mm[s], dtype=np.float32), r2n=True)
-        hi_shell = hp.reorder(np.asarray(hi_mm[s], dtype=np.float32), r2n=True)
+        # ONE read per shell, RING-ordered as stored (no reorder needed -- see
+        # docstring above).
+        lo_shell = np.asarray(lo_mm[s], dtype=np.float32)
+        hi_shell = np.asarray(hi_mm[s], dtype=np.float32)
         # Shell-GLOBAL means -- the normalization the model is trained/applied
         # with (see module docstring). Guard a degenerate all-zero shell.
         lo_mean = float(lo_shell.mean()) or 1.0
@@ -154,12 +190,14 @@ def _process_run_shard(run_dir_str, cosmo, run_name, indices, shell_idxs, patch_
 
         for j in sel:
             gi = int(indices[j])
-            p = int(patch_idxs[j])
-            sl = slice(p * npix_patch, (p + 1) * npix_patch)
-            low_out[gi] = lo_shell[sl]
-            high_out[gi] = hi_shell[sl]
-            rows.append((gi, cosmo, run_name, s, p, n_shells,
-                         lo_mean, hi_mean, lz, uz, nside, order))
+            nested_ids = sf.rotated_patch_ids(nside, order, float(lons[j]), float(lats[j]),
+                                              float(psis[j]))
+            ring_ids = hp.nest2ring(nside, nested_ids)
+            low_out[gi] = lo_shell[ring_ids]
+            high_out[gi] = hi_shell[ring_ids]
+            rows.append((gi, cosmo, run_name, s, int(center_ipixs[j]),
+                        float(lons[j]), float(lats[j]), float(psis[j]), n_shells,
+                        lo_mean, hi_mean, lz, uz, nside, order))
 
     low_out.flush()
     high_out.flush()
@@ -191,7 +229,7 @@ def main():
         raise SystemExit(f"no runs with nside={args.nside} low/high .npy pairs under "
                          f"{data_dir} -- run preprocess/prepare_maps.py first")
 
-    n_patches_per_shell = 12 * args.order * args.order
+    n_patches_per_shell = 12 * args.order * args.order   # informational only now
     npix = hp.nside2npix(args.nside)
     if npix % n_patches_per_shell:
         raise SystemExit(f"nside={args.nside} npix={npix} not divisible by "
@@ -201,16 +239,23 @@ def main():
     n_shells = int(np.load(runs[0][2] / f"low_shells_nside={args.nside}.npy",
                            mmap_mode="r").shape[0])
     print(f"[make_patch_dataset] {len(runs)} runs | nside={args.nside} order={args.order} "
-          f"-> {n_patches_per_shell} patches/shell x {npix_patch} px | ~{n_shells} shells/run",
+          f"-> {npix_patch} px/patch, RANDOM (lon,lat,psi) centers | ~{n_shells} shells/run",
           flush=True)
 
-    # Draw every patch's (run, shell, patch) up front -- deterministic given --seed,
-    # independent of how the work is later split across workers.
+    # Draw every patch's (run, shell, center, psi) up front -- deterministic given
+    # --seed, independent of how the work is later split across workers. center_ipix
+    # (a uniformly random HEALPix pixel index -> uniform on the sphere via pix2ang)
+    # + psi is the SAME draw convention unet/make_patch_dataset.py already uses for
+    # its gnomonic patches -- kept identical here so the two pipelines' "random
+    # patch" conventions read the same way, even though the patch SHAPE differs
+    # (rotated HEALPix superpixel vs gnomonic projection).
     rng = np.random.default_rng(args.seed)
     n = args.n_patches
     run_idx = rng.integers(0, len(runs), size=n)
     shell_idx = rng.integers(0, n_shells, size=n)
-    patch_idx = rng.integers(0, n_patches_per_shell, size=n)
+    center_ipix = rng.integers(0, npix, size=n)
+    center_lon, center_lat = hp.pix2ang(args.nside, center_ipix, nest=False, lonlat=True)
+    psi = rng.uniform(0.0, 360.0, size=n)
 
     low_path = out_dir / "low.npy"
     high_path = out_dir / "high.npy"
@@ -245,8 +290,9 @@ def main():
                     continue
                 futures.append(ex.submit(
                     _process_run_shard, str(run_dir), cosmo, run_name, sub,
-                    shell_idx[sub], patch_idx[sub], args.nside, args.order,
-                    n_patches_per_shell, npix_patch, str(low_path), str(high_path)))
+                    shell_idx[sub], center_ipix[sub], center_lon[sub], center_lat[sub],
+                    psi[sub], args.nside, args.order, npix_patch,
+                    str(low_path), str(high_path)))
 
         for f in as_completed(futures):
             rows = f.result()
