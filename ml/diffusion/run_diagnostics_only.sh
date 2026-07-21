@@ -29,6 +29,18 @@
 # "shared global sphere noise" fix was tried and REVERTED: cropping noise through the
 # gnomonic index map made it ~8%% correlated (not white), out-of-distribution for the
 # denoiser -- high-k went 1.013 -> 0.799, worse than no model.
+#
+# MULTI-NODE EVAL (2026-07-21, matching sphereflow/run_diagnostics_only.sh's
+# identical pattern): the --nodes=1 header above is just the sbatch default --
+# override at submission (`sbatch --nodes=4 diffusion/run_diagnostics_only.sh`) to
+# scale past one node's 4 GPUs. WORLD_SIZE below is derived from however many
+# nodes SLURM actually gave this job (SLURM_NNODES x GPUS_PER_NODE), via a genuine
+# multi-node torchrun c10d rendezvous (MASTER_ADDR from the node list, srun spans
+# every node). This eval job's own distributed calls are a couple of
+# dist.all_gather_object per diagnostic stage (zbin-grid, kappa) -- a handful of
+# collectives total -- so it's a materially lighter cross-node workload than
+# sustained DDP training. Not proven crash-proof, just a different, lower-frequency
+# usage pattern.
 
 export UENV_REPO_PATH=/capstor/scratch/cscs/damrein/.uenv-images
 VENV=/capstor/scratch/cscs/damrein/venvs/sphereflow
@@ -58,17 +70,20 @@ RHO=${RHO:-7.0}
 TAPER_POWER=${TAPER_POWER:-32}
 
 export PYTHONUNBUFFERED=1
-# EVAL_GPUS defined here (used below by both OMP_NUM_THREADS and the torchrun launch)
-# -- apply_diffusion.py splits its zbin-grid/kappa sections (dominant cost) across
-# this many GPUs via torch.distributed, single-node intra-NVLink. Drop to 1 to fall
-# back to the original single-process path.
-EVAL_GPUS=${EVAL_GPUS:-4}
+# GPUS_PER_NODE x SLURM_NNODES = total ranks -- apply_diffusion.py splits its two
+# dominant-cost sections (zbin-grid, kappa) across ALL of them via
+# torch.distributed. SLURM_NNODES reflects whatever --nodes this job was actually
+# submitted with (see the multi-node note above); GPUS_PER_NODE=4 is this
+# cluster's fixed per-node GPU count, not a tunable.
+GPUS_PER_NODE=4
+NNODES=${SLURM_NNODES:-1}
+EVAL_GPUS=$(( GPUS_PER_NODE * NNODES ))
 # Pin OpenMP-using CPU work (healpy's Cl/anafast, UFalcon's kappa-map construction)
-# to the cores SLURM actually allocated (--cpus-per-task=128 above), DIVIDED across
-# the EVAL_GPUS concurrent rank processes -- the parallel zbin-grid/kappa sections
-# run all ranks' CPU-bound work at once, so giving every rank the full core count
-# would oversubscribe (EVAL_GPUS x 128 threads contending for 128 cores).
-export OMP_NUM_THREADS=$(( ${SLURM_CPUS_PER_TASK:-128} / EVAL_GPUS ))
+# to the cores SLURM actually allocated PER NODE (--cpus-per-task=128 above),
+# DIVIDED across the GPUS_PER_NODE concurrent rank processes THAT NODE RUNS -- the
+# parallel zbin-grid/kappa sections run all ranks' CPU-bound work at once, so
+# giving every rank the full per-node core count would oversubscribe.
+export OMP_NUM_THREADS=$(( ${SLURM_CPUS_PER_TASK:-128} / GPUS_PER_NODE ))
 KAPPA=${KAPPA:-1}
 KAPPA_FLAG=""; [ "${KAPPA}" = "1" ] && KAPPA_FLAG="--kappa"
 # 3 cosmologies: enough for a REAL 16-84th percentile band (1 cosmology = no band at
@@ -84,10 +99,19 @@ mkdir -p /capstor/scratch/cscs/damrein/outputs/logs/diffusion
 # / MAX_COSMOLOGIES are the real cost knobs. Drop STEPS if this needs to fit in less
 # walltime (quality/speed tradeoff, unlike the tiling which is free after the cache).
 
-srun --nodes=1 --ntasks=1 --gres=gpu:${EVAL_GPUS} uenv run pytorch/v2.9.1:v2 --view=default -- bash -c "
+export MASTER_ADDR=$(scontrol show hostnames "$SLURM_JOB_NODELIST" | head -n1)
+export MASTER_PORT=29500
+
+echo "==== diffusion diagnostics | job ${SLURM_JOB_ID} | ${NNODES} node(s) x ${GPUS_PER_NODE} GPU = ${EVAL_GPUS} ranks ===="
+
+# srun spans EVERY allocated node (one task/node, torchrun fans out to
+# GPUS_PER_NODE local ranks) -- NOT --nodes=1 like the old single-node version.
+srun --ntasks=${NNODES} --ntasks-per-node=1 --gres=gpu:${GPUS_PER_NODE} uenv run pytorch/v2.9.1:v2 --view=default -- bash -c "
   source ${VENV}/bin/activate
   python ${DIFFUSION}/plot_diffusion_loss.py --run-dir '${OUT_DIR}'
-  python -m torch.distributed.run --nnodes=1 --nproc_per_node=${EVAL_GPUS} \
+  python -m torch.distributed.run \
+    --nnodes=${NNODES} --nproc_per_node=${GPUS_PER_NODE} \
+    --rdzv_id=${SLURM_JOB_ID} --rdzv_backend=c10d --rdzv_endpoint=${MASTER_ADDR}:${MASTER_PORT} \
     ${DIFFUSION}/apply_diffusion.py \
     --patch-dir '${PATCH_DIR}' \
     --model     '${OUT_DIR}/best.pt' \

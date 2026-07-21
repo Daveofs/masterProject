@@ -314,39 +314,33 @@ def split_val_cosmos(data_dir: Path, val_frac: float = 0.15, seed: int = 0,
 # Fit: accumulate mean Cl_low / Cl_high per (shell, ell) over training runs
 # ---------------------------------------------------------------------------
 
-def fit(args):
-    data_dir = Path(args.data_dir)
-    lmax = args.lmax
-    N_alm = (lmax + 1) * (lmax + 2) // 2
-
-    # Hold out a SET of cosmologies (explicit --test-cosmos, or auto-selected via
-    # --val-frac/--val-seed -- same whole-cosmology-split convention as
-    # unet/dataset.py's split_by_cosmo) so validation covers MULTIPLE
-    # cosmologies, not just one -- a single held-out cosmo can't distinguish a
-    # genuinely generalizing T from one that got lucky on that particular cosmology.
-    test_cosmos = set(args.test_cosmos) if args.test_cosmos \
-        else set(split_val_cosmos(data_dir, args.val_frac, args.val_seed))
-
+def _discover_fit_runs(data_dir: Path, lmax: int, test_cosmos: set[str],
+                       include_test: bool, log_density: bool):
+    """(lo, hi) alm path pairs for `fit`'s training set -- same exclusion logic as
+    _discover_runs, kept separate since fit() works with alm file PATHS directly
+    (no per-run object needed) whereas train()/_discover_runs returns run dirs."""
     cosmos = sorted(d for d in data_dir.iterdir()
                     if d.is_dir() and d.name.startswith("cosmo_"))
     runs = []
     for c in cosmos:
-        # Leave held-out cosmologies out (proper generalization test) unless
-        # --include-test is set (SANITY CHECK: fit on them too, expect ~perfect).
-        if c.name in test_cosmos and not args.include_test:
+        if c.name in test_cosmos and not include_test:
             continue
         rs = [r for r in sorted(c.iterdir()) if r.is_dir() and r.name.startswith("run_")]
         for ld in (rs or [c]):
-            lo = ld / alm_fname("low", lmax, args.log_density)
-            hi = ld / alm_fname("high", lmax, args.log_density)
+            lo = ld / alm_fname("low", lmax, log_density)
+            hi = ld / alm_fname("high", lmax, log_density)
             if lo.exists() and hi.exists():
                 runs.append((lo, hi))
-    if not runs:
-        raise RuntimeError(f"No low/high alm files (lmax={lmax}) found under {data_dir}")
-    mode = "INCLUDING test (sanity check)" if args.include_test \
-        else f"excluding {len(test_cosmos)} held-out cosmologies: {sorted(test_cosmos)}"
-    print(f"[fit] {len(runs)} training runs ({mode})", flush=True)
+    return runs
 
+
+def _gather_fit_runs(runs, lmax: int, log_density: bool, gather_workers: int):
+    """The accumulation half of `fit`: sum_low/sum_high/sum_cross/counts over
+    `runs` (a LIST of (lo, hi) alm path pairs -- may be the FULL training set, or
+    just one node's SHARD of it for multi-node gather -- see `gather-shard`/
+    `gather-merge`). Split out of fit() so both the single-node path and the
+    sharded multi-node path call the exact same code."""
+    N_alm = (lmax + 1) * (lmax + 2) // 2
     sum_low = sum_high = sum_cross = None
     counts = None
 
@@ -368,11 +362,13 @@ def fit(args):
     # poisson_resample.py's parallel path handles, so (unlike that path, which
     # was measured to be memory-bandwidth-bound and net-negative) this is
     # embarrassingly parallel and safe to scale up. Default 1 (sequential) --
-    # opt in explicitly once validated on your hardware.
-    if args.gather_workers > 1:
-        threads_per_worker = max(1, (os.cpu_count() or args.gather_workers) // args.gather_workers)
-        tasks = [(lo, hi, lmax, args.log_density) for lo, hi in runs]
-        with ProcessPoolExecutor(max_workers=args.gather_workers,
+    # opt in explicitly once validated on your hardware. For scaling BEYOND one
+    # node, see gather-shard/gather-merge, which run this same function once per
+    # node on a disjoint slice of `runs` and sum the results together.
+    if gather_workers > 1:
+        threads_per_worker = max(1, (os.cpu_count() or gather_workers) // gather_workers)
+        tasks = [(lo, hi, lmax, log_density) for lo, hi in runs]
+        with ProcessPoolExecutor(max_workers=gather_workers,
                                  initializer=_gather_worker_init,
                                  initargs=(threads_per_worker,)) as ex:
             futures = {ex.submit(_gather_fit_task, t): t for t in tasks}
@@ -395,6 +391,14 @@ def fit(args):
             _accumulate(cl_low, cl_high, cl_cross)
             print(f"  processed {lo.parent}", flush=True)
 
+    return sum_low, sum_high, sum_cross, counts
+
+
+def _finalize_fit(sum_low, sum_high, sum_cross, counts, lmax: int, log_density: bool,
+                  test_cosmos: set[str], out):
+    """T(ell,shell)/R(ell,shell) from fit()'s (possibly MERGED, see gather-merge)
+    accumulators, and save transfer.npz. Split out of fit() so both the
+    single-node and sharded-then-merged paths produce byte-identical output."""
     mean_low = sum_low / counts[:, None]
     mean_high = sum_high / counts[:, None]
     mean_cross = sum_cross / counts[:, None]
@@ -413,12 +417,37 @@ def fit(args):
     T = np.nan_to_num(T, nan=1.0, posinf=1.0, neginf=1.0).astype(np.float32)
     R = np.clip(np.nan_to_num(R, nan=0.0, posinf=1.0, neginf=0.0), 0.0, 1.0).astype(np.float32)
 
-    Path(args.out).parent.mkdir(parents=True, exist_ok=True)
-    np.savez(args.out, T=T, R=R, lmax=lmax, log_density=args.log_density,
+    Path(out).parent.mkdir(parents=True, exist_ok=True)
+    np.savez(out, T=T, R=R, lmax=lmax, log_density=log_density,
              mean_low=mean_low.astype(np.float32), mean_high=mean_high.astype(np.float32),
              test_cosmos=np.array(sorted(test_cosmos)))
     print(f"[fit] saved transfer function T{T.shape} (mean r={R.mean():.3f}, "
-          f"log_density={args.log_density}) to {args.out}", flush=True)
+          f"log_density={log_density}) to {out}", flush=True)
+
+
+def fit(args):
+    data_dir = Path(args.data_dir)
+    lmax = args.lmax
+
+    # Hold out a SET of cosmologies (explicit --test-cosmos, or auto-selected via
+    # --val-frac/--val-seed -- same whole-cosmology-split convention as
+    # unet/dataset.py's split_by_cosmo) so validation covers MULTIPLE
+    # cosmologies, not just one -- a single held-out cosmo can't distinguish a
+    # genuinely generalizing T from one that got lucky on that particular cosmology.
+    test_cosmos = set(args.test_cosmos) if args.test_cosmos \
+        else set(split_val_cosmos(data_dir, args.val_frac, args.val_seed))
+
+    runs = _discover_fit_runs(data_dir, lmax, test_cosmos, args.include_test, args.log_density)
+    if not runs:
+        raise RuntimeError(f"No low/high alm files (lmax={lmax}) found under {data_dir}")
+    mode = "INCLUDING test (sanity check)" if args.include_test \
+        else f"excluding {len(test_cosmos)} held-out cosmologies: {sorted(test_cosmos)}"
+    print(f"[fit] {len(runs)} training runs ({mode})", flush=True)
+
+    sum_low, sum_high, sum_cross, counts = _gather_fit_runs(
+        runs, lmax, args.log_density, args.gather_workers)
+    _finalize_fit(sum_low, sum_high, sum_cross, counts, lmax, args.log_density,
+                  test_cosmos, args.out)
 
 
 # ---------------------------------------------------------------------------
@@ -446,26 +475,18 @@ def _discover_runs(data_dir: Path, lmax: int, test_cosmos: set[str], include_tes
     return runs
 
 
-def train(args):
-    from sklearn.neural_network import MLPRegressor
-    from sklearn.preprocessing import StandardScaler
-    import joblib
-
-    data_dir = Path(args.data_dir)
-    lmax = args.lmax
+def _gather_train_runs(runs, lmax: int, log_density: bool, info_npz, smooth_window,
+                       sample_frac: float, gather_workers: int):
+    """The gather half of `train`: builds the concatenated (X, y) feature/target
+    arrays plus the r(ell,shell) accumulators over `runs` (a LIST of run dirs --
+    may be the FULL training set, or just one node's SHARD of it for multi-node
+    gather -- see `gather-shard`/`gather-merge`). Split out of train() so both the
+    single-node path and the sharded multi-node path call the exact same code.
+    Returns (X, y, sum_cross, sum_low, sum_high, r_counts, last_cosmo, last_z,
+    last_cl_low_s) -- the last three are just SOME real (cosmo, z, cl_low) triple
+    (whichever run finishes last) for the cosmo-vector sanity check in
+    _finalize_train."""
     ell = np.arange(lmax + 1)
-    # See fit()'s docstring comment: MULTIPLE held-out cosmologies (explicit
-    # --test-cosmos, or auto-selected via --val-frac/--val-seed, same convention
-    # as unet's split_by_cosmo), not just one.
-    test_cosmos = set(args.test_cosmos) if args.test_cosmos \
-        else set(split_val_cosmos(data_dir, args.val_frac, args.val_seed))
-    runs = _discover_runs(data_dir, lmax, test_cosmos, args.include_test, args.log_density)
-    if not runs:
-        raise RuntimeError(f"No low/high alm files (lmax={lmax}) found under {data_dir}")
-    mode = "INCLUDING test (sanity)" if args.include_test \
-        else f"excluding {len(test_cosmos)} held-out cosmologies: {sorted(test_cosmos)}"
-    print(f"[train] {len(runs)} training runs ({mode})", flush=True)
-
     Xs, ys = [], []
     # r(ell,shell) (phase cross-correlation, see `fit`) is averaged over training
     # cosmologies rather than emulated: it's mostly a shot-noise/resolution
@@ -497,12 +518,14 @@ def train(args):
     # independent, and _gather_train_task bundles the ENTIRE per-run body
     # (alm2cl + smoothing + feature-building) so a worker returns everything
     # the main process needs to just accumulate/concatenate. Default 1
-    # (sequential, exactly today's behavior).
-    if args.gather_workers > 1:
-        threads_per_worker = max(1, (os.cpu_count() or args.gather_workers) // args.gather_workers)
-        tasks = [(ld, lmax, args.log_density, args.info_npz, args.smooth_window,
-                 args.sample_frac, i) for i, ld in enumerate(runs)]
-        with ProcessPoolExecutor(max_workers=args.gather_workers,
+    # (sequential, exactly today's behavior). For scaling BEYOND one node, see
+    # gather-shard/gather-merge, which run this same function once per node on a
+    # disjoint slice of `runs` and merge the results together.
+    if gather_workers > 1:
+        threads_per_worker = max(1, (os.cpu_count() or gather_workers) // gather_workers)
+        tasks = [(ld, lmax, log_density, info_npz, smooth_window,
+                 sample_frac, i) for i, ld in enumerate(runs)]
+        with ProcessPoolExecutor(max_workers=gather_workers,
                                  initializer=_gather_worker_init,
                                  initargs=(threads_per_worker,)) as ex:
             futures = {ex.submit(_gather_train_task, t): t for t in tasks}
@@ -513,14 +536,14 @@ def train(args):
         rng = np.random.default_rng(0)
         for ld in runs:
             cosmo = load_cosmo(ld)
-            cl_low, cl_high, cl_cross = _run_cls(ld, lmax, args.log_density)
+            cl_low, cl_high, cl_cross = _run_cls(ld, lmax, log_density)
             n_shells = cl_low.shape[0]
-            z = shell_redshifts(ld, n_shells, args.info_npz)
+            z = shell_redshifts(ld, n_shells, info_npz)
             # Smooth BEFORE computing the ratio: T's target is otherwise a per-ell,
             # per-realization noisy ratio (see smooth_cl docstring for why this is
             # the actual source of the oscillating predictions).
-            cl_low_s = np.stack([smooth_cl(c, args.smooth_window) for c in cl_low])
-            cl_high_s = np.stack([smooth_cl(c, args.smooth_window) for c in cl_high])
+            cl_low_s = np.stack([smooth_cl(c, smooth_window) for c in cl_low])
+            cl_high_s = np.stack([smooth_cl(c, smooth_window) for c in cl_high])
             with np.errstate(divide="ignore", invalid="ignore"):
                 T = np.sqrt(np.where(cl_low_s > 0, cl_high_s / cl_low_s, 1.0))
             T = np.nan_to_num(T, nan=1.0, posinf=1.0, neginf=1.0)
@@ -528,13 +551,32 @@ def train(args):
             for i in range(n_shells):
                 X = build_features(ell, float(z[i]), cosmo, cl_low_s[i])
                 y = T[i]
-                if args.sample_frac < 1.0:                # subsample ell for tractability
-                    keep = rng.random(ell.shape[0]) < args.sample_frac
+                if sample_frac < 1.0:                     # subsample ell for tractability
+                    keep = rng.random(ell.shape[0]) < sample_frac
                     X, y = X[keep], y[keep]
                 run_Xs.append(X); run_ys.append(y)
             _accumulate(str(ld), n_shells, cl_low, cl_high, cl_cross,
                        np.concatenate(run_Xs), np.concatenate(run_ys), cosmo, z, cl_low_s)
 
+    X = np.concatenate(Xs); y = np.concatenate(ys)
+    return X, y, sum_cross, sum_low, sum_high, r_counts, last_cosmo, last_z, last_cl_low_s
+
+
+def _finalize_train(X, y, sum_cross, sum_low, sum_high, r_counts, last_cosmo, last_z,
+                    last_cl_low_s, lmax: int, log_density: bool, test_cosmos: set[str],
+                    hidden_str: str, alpha: float, max_iter: int, smooth_window, out):
+    """R(ell,shell) + MLP training + save, from train()'s (possibly MERGED, see
+    gather-merge) gather outputs. Split out of train() so both the single-node
+    and sharded-then-merged paths run the exact same finalize logic -- unlike
+    _finalize_fit, this is NOT byte-identical between the two paths, since the
+    manual train/val split + partial_fit loop below is inherently seeded by
+    array ORDER, which differs once shards from different nodes are
+    concatenated (see gather-merge's docstring for why this is acceptable)."""
+    from sklearn.neural_network import MLPRegressor
+    from sklearn.preprocessing import StandardScaler
+    import joblib
+
+    ell = np.arange(lmax + 1)
     with np.errstate(divide="ignore", invalid="ignore"):
         mean_cross, mean_low_r, mean_high_r = (s / r_counts[:, None]
                                                 for s in (sum_cross, sum_low, sum_high))
@@ -542,13 +584,11 @@ def train(args):
                      mean_cross / np.sqrt(mean_low_r * mean_high_r), 0.0)
     R = np.clip(np.nan_to_num(R, nan=0.0, posinf=1.0, neginf=0.0), 0.0, 1.0).astype(np.float32)
     print(f"[train] mean r(ell,shell) across training set = {R.mean():.3f}", flush=True)
-
-    X = np.concatenate(Xs); y = np.concatenate(ys)
     print(f"[train] {X.shape[0]:,} samples x {X.shape[1]} features", flush=True)
 
     scaler = StandardScaler().fit(X)
     Xs = scaler.transform(X)
-    hidden = tuple(int(h) for h in args.hidden.split(","))
+    hidden = tuple(int(h) for h in hidden_str.split(","))
 
     # Manual train/val split + partial_fit loop, NOT model.fit(early_stopping=True):
     # sklearn's built-in early stopping only exposes validation_scores_ (R^2, a
@@ -580,11 +620,11 @@ def train(args):
     X_va_eval, y_va_eval = X_va[va_eval_idx], y_va[va_eval_idx]
 
     model = MLPRegressor(hidden_layer_sizes=hidden, activation="relu",
-                         solver="adam", alpha=args.alpha, batch_size=4096,
+                         solver="adam", alpha=alpha, batch_size=4096,
                          learning_rate_init=1e-3, verbose=False, random_state=0)
     train_loss_hist, val_loss_hist = [], []
     best_val, best_weights, no_improve, patience = np.inf, None, 0, 10
-    for it in range(args.max_iter):
+    for it in range(max_iter):
         model.partial_fit(X_tr, y_tr)                  # one epoch (adam, batch_size=4096)
         train_loss = float(np.mean((model.predict(X_tr_eval) - y_tr_eval) ** 2)) / 2
         val_loss = float(np.mean((model.predict(X_va_eval) - y_va_eval) ** 2)) / 2
@@ -605,13 +645,13 @@ def train(args):
     print(f"[train] final: train_loss={train_loss_hist[-1]:.3e} "
           f"best_val_loss={best_val:.3e}", flush=True)
 
-    Path(args.out).parent.mkdir(parents=True, exist_ok=True)
+    Path(out).parent.mkdir(parents=True, exist_ok=True)
     joblib.dump({"model": model, "scaler": scaler, "lmax": lmax,
-                 "smooth_window": args.smooth_window, "R": R,
-                 "log_density": args.log_density, "test_cosmos": sorted(test_cosmos),
+                 "smooth_window": smooth_window, "R": R,
+                 "log_density": log_density, "test_cosmos": sorted(test_cosmos),
                  "cosmo_keys": COSMO_KEYS, "feature_order":
-                 ["log10(l+1)", "z", *COSMO_KEYS, "log10(Cl_low)"]}, args.out)
-    print(f"[train] saved emulator to {args.out}", flush=True)
+                 ["log10(l+1)", "z", *COSMO_KEYS, "log10(Cl_low)"]}, out)
+    print(f"[train] saved emulator to {out}", flush=True)
 
     # ---- loss / validation-loss curve plot ----
     # Same shared figure (analysis.plot_train_val_loss) as jbucko's plot_flow_loss.py
@@ -623,11 +663,11 @@ def train(args):
         import sys as _sys
         _sys.path.insert(0, str(Path(__file__).parent.parent))
         from analysis.plotting import plot_train_val_loss
-        loss_png = Path(args.out).with_suffix("").with_suffix(".loss.png")
+        loss_png = Path(out).with_suffix("").with_suffix(".loss.png")
         plot_train_val_loss(
             np.arange(len(train_loss_hist)), train_loss_hist, val_loss_hist, loss_png,
             xlabel="iteration", ylabel="MLP squared-error loss (T emulator)",
-            val_label=f"validation (10% held-out samples, alpha={args.alpha:g})",
+            val_label=f"validation (10% held-out samples, alpha={alpha:g})",
             formula=r"loss $=\frac{1}{2N}\sum_i(T_i-\hat T_i)^2$  "
                     "(L2 weight decay is an optimizer detail, not shown)")
     except Exception as e:
@@ -650,6 +690,148 @@ def train(args):
     print(f"[train] cosmo-vec sanity: |T(real cosmo) - T(mean training cosmo)| "
           f"max={diff.max():.4f} mean={diff.mean():.4f} "
           f"(near-zero would mean the model ignores cosmo)", flush=True)
+
+
+def train(args):
+    data_dir = Path(args.data_dir)
+    lmax = args.lmax
+    # See fit()'s docstring comment: MULTIPLE held-out cosmologies (explicit
+    # --test-cosmos, or auto-selected via --val-frac/--val-seed, same convention
+    # as unet's split_by_cosmo), not just one.
+    test_cosmos = set(args.test_cosmos) if args.test_cosmos \
+        else set(split_val_cosmos(data_dir, args.val_frac, args.val_seed))
+    runs = _discover_runs(data_dir, lmax, test_cosmos, args.include_test, args.log_density)
+    if not runs:
+        raise RuntimeError(f"No low/high alm files (lmax={lmax}) found under {data_dir}")
+    mode = "INCLUDING test (sanity)" if args.include_test \
+        else f"excluding {len(test_cosmos)} held-out cosmologies: {sorted(test_cosmos)}"
+    print(f"[train] {len(runs)} training runs ({mode})", flush=True)
+
+    X, y, sum_cross, sum_low, sum_high, r_counts, last_cosmo, last_z, last_cl_low_s = \
+        _gather_train_runs(runs, lmax, args.log_density, args.info_npz, args.smooth_window,
+                           args.sample_frac, args.gather_workers)
+    _finalize_train(X, y, sum_cross, sum_low, sum_high, r_counts, last_cosmo, last_z,
+                    last_cl_low_s, lmax, args.log_density, test_cosmos, args.hidden,
+                    args.alpha, args.max_iter, args.smooth_window, args.out)
+
+
+def _pad_rows(arr, n):
+    """Zero-pad `arr` (shape (m, ...)) along axis 0 out to n rows. Used by
+    gather-merge: a shard's accumulator shape is set by whichever run its OWN
+    gather loop processes first, so two shards can disagree on n_shells if runs
+    happen to have different shell counts (a pre-existing quirk of the single-node
+    _accumulate closures too -- not new here). Padding with zero rows is safe
+    because the matching `counts`/`r_counts` row is also 0 there, so it never
+    contributes to the merged mean (mean = sum/counts, and _finalize_fit/
+    _finalize_train already nan_to_num the resulting 0/0)."""
+    if arr.shape[0] == n:
+        return arr
+    pad = np.zeros((n - arr.shape[0],) + arr.shape[1:], dtype=arr.dtype)
+    return np.concatenate([arr, pad], axis=0)
+
+
+def gather_shard(args):
+    """Multi-node stage-2 gather, ONE shard: run fit's or train's gather step
+    over just this shard's slice of the (identical, deterministically-sorted)
+    training-run list (`runs[shard_index::num_shards]`), and save the raw
+    (unfinalized) accumulators to --out. Meant to be launched once per node
+    (see run_transfer.sh) with a different --shard-index each; `gather-merge`
+    then combines every shard's --out file into the final transfer.npz /
+    emulator.pkl. Uses the SAME test_cosmos resolution (--test-cosmos, or
+    --val-frac/--val-seed) as `fit`/`train` so every shard excludes the exact
+    same held-out cosmologies."""
+    import joblib
+    data_dir = Path(args.data_dir)
+    lmax = args.lmax
+    test_cosmos = set(args.test_cosmos) if args.test_cosmos \
+        else set(split_val_cosmos(data_dir, args.val_frac, args.val_seed))
+
+    if args.method == "fit":
+        runs = _discover_fit_runs(data_dir, lmax, test_cosmos, args.include_test, args.log_density)
+    else:
+        runs = _discover_runs(data_dir, lmax, test_cosmos, args.include_test, args.log_density)
+    if not runs:
+        raise RuntimeError(f"No runs found under {data_dir} for method={args.method}")
+
+    shard_runs = runs[args.shard_index::args.num_shards]
+    print(f"[gather-shard] method={args.method} shard {args.shard_index}/{args.num_shards}: "
+          f"{len(shard_runs)}/{len(runs)} runs", flush=True)
+    if not shard_runs:
+        raise RuntimeError(f"Shard {args.shard_index}/{args.num_shards} got 0 runs "
+                           f"out of {len(runs)} total -- --num-shards too high?")
+
+    Path(args.out).parent.mkdir(parents=True, exist_ok=True)
+    if args.method == "fit":
+        sum_low, sum_high, sum_cross, counts = _gather_fit_runs(
+            shard_runs, lmax, args.log_density, args.gather_workers)
+        joblib.dump({"method": "fit", "lmax": lmax, "log_density": args.log_density,
+                    "sum_low": sum_low, "sum_high": sum_high, "sum_cross": sum_cross,
+                    "counts": counts, "test_cosmos": sorted(test_cosmos)}, args.out)
+    else:
+        X, y, sum_cross, sum_low, sum_high, r_counts, last_cosmo, last_z, last_cl_low_s = \
+            _gather_train_runs(shard_runs, lmax, args.log_density, args.info_npz,
+                               args.smooth_window, args.sample_frac, args.gather_workers)
+        joblib.dump({"method": "train", "lmax": lmax, "log_density": args.log_density,
+                    "smooth_window": args.smooth_window, "X": X, "y": y,
+                    "sum_cross": sum_cross, "sum_low": sum_low, "sum_high": sum_high,
+                    "r_counts": r_counts, "last_cosmo": last_cosmo, "last_z": last_z,
+                    "last_cl_low_s": last_cl_low_s, "test_cosmos": sorted(test_cosmos)}, args.out)
+    print(f"[gather-shard] saved shard to {args.out}", flush=True)
+
+
+def gather_merge(args):
+    """Combine every shard file from `gather-shard` (one per node) into the
+    final transfer.npz (method=fit) or emulator.pkl (method=train). For fit,
+    this is byte-identical to running `fit` single-node on the full run list
+    (plain accumulator sums). For train, the MERGED (X, y) is handed to the
+    exact same manual partial_fit/early-stopping loop as single-node `train` --
+    NOT byte-identical (that loop's random train/val split and eval subsample
+    are seeded by array ORDER, which differs once shards are concatenated), but
+    trains on the same total data with the same procedure."""
+    import joblib
+    shards = [joblib.load(s) for s in args.shards]
+    if len({s["method"] for s in shards}) != 1:
+        raise RuntimeError(f"Mixed shard methods in --shards: "
+                           f"{sorted({s['method'] for s in shards})}")
+    method = shards[0]["method"]
+    lmaxes = {s["lmax"] for s in shards}
+    log_densities = {s["log_density"] for s in shards}
+    if len(lmaxes) != 1 or len(log_densities) != 1:
+        raise RuntimeError("Shards disagree on lmax/log_density -- were they all "
+                           "produced by the same gather-shard invocation pattern?")
+    lmax, log_density = lmaxes.pop(), log_densities.pop()
+    test_cosmos = set(shards[0]["test_cosmos"])
+    if any(set(s["test_cosmos"]) != test_cosmos for s in shards[1:]):
+        raise RuntimeError("Shards disagree on held-out test_cosmos -- were they "
+                           "produced with the same --test-cosmos/--val-frac/--val-seed?")
+
+    if method == "fit":
+        n = max(s["sum_low"].shape[0] for s in shards)
+        sum_low = sum(_pad_rows(s["sum_low"], n) for s in shards)
+        sum_high = sum(_pad_rows(s["sum_high"], n) for s in shards)
+        sum_cross = sum(_pad_rows(s["sum_cross"], n) for s in shards)
+        counts = sum(_pad_rows(s["counts"], n) for s in shards)
+        _finalize_fit(sum_low, sum_high, sum_cross, counts, lmax, log_density,
+                      test_cosmos, args.out)
+    else:
+        smooth_windows = {s["smooth_window"] for s in shards}
+        if len(smooth_windows) != 1:
+            raise RuntimeError("Shards disagree on --smooth-window -- were they all "
+                               "gathered with the same value?")
+        smooth_window = smooth_windows.pop()
+        X = np.concatenate([s["X"] for s in shards])
+        y = np.concatenate([s["y"] for s in shards])
+        n = max(s["sum_low"].shape[0] for s in shards)
+        sum_cross = sum(_pad_rows(s["sum_cross"], n) for s in shards)
+        sum_low = sum(_pad_rows(s["sum_low"], n) for s in shards)
+        sum_high = sum(_pad_rows(s["sum_high"], n) for s in shards)
+        r_counts = sum(_pad_rows(s["r_counts"], n) for s in shards)
+        last = shards[-1]        # any shard's real (cosmo, z, cl_low) triple works
+        _finalize_train(X, y, sum_cross, sum_low, sum_high, r_counts,
+                        last["last_cosmo"], last["last_z"], last["last_cl_low_s"],
+                        lmax, log_density, test_cosmos, args.hidden,
+                        args.alpha, args.max_iter, smooth_window, args.out)
+    print(f"[gather-merge] merged {len(shards)} shards (method={method}) -> {args.out}", flush=True)
 
 
 def emulate(args):
@@ -812,6 +994,58 @@ if __name__ == "__main__":
     pe.add_argument("--info-npz", default="compressed_shells.npz")
     pe.add_argument("--out", required=True, help="transfer.npz (same schema as fit).")
     pe.set_defaults(func=emulate)
+
+    # ---- multi-node stage-2 gather: run `gather-shard` once per node (each with a
+    # different --shard-index, same --num-shards), then one `gather-merge` call
+    # combining every shard's --out file into the final transfer.npz/emulator.pkl.
+    # See run_transfer.sh for the actual srun/wait orchestration. Single-node `fit`/
+    # `train` are unaffected -- this is an alternative entry point into the same
+    # _gather_fit_runs/_gather_train_runs + _finalize_fit/_finalize_train code.
+    ps = sub.add_parser("gather-shard",
+                        help="Multi-node: gather ONE shard of fit's/train's training "
+                             "runs (--shard-index/--num-shards) to a partial-"
+                             "accumulator file. Combine shards with `gather-merge`.")
+    ps.add_argument("--data-dir", required=True)
+    ps.add_argument("--lmax", type=int, default=3000)
+    ps.add_argument("--method", required=True, choices=["fit", "train"],
+                    help="Which gather step to shard -- must match the eventual "
+                         "`gather-merge --method`.")
+    ps.add_argument("--test-cosmos", nargs="*", default=None,
+                    help="Must match across every shard for a given merge -- "
+                         "pass the SAME explicit list (or the same --val-frac/"
+                         "--val-seed) to every gather-shard invocation.")
+    ps.add_argument("--val-frac", type=float, default=0.15)
+    ps.add_argument("--val-seed", type=int, default=0)
+    ps.add_argument("--include-test", action="store_true")
+    ps.add_argument("--log-density", action="store_true")
+    ps.add_argument("--info-npz", default="compressed_shells.npz",
+                    help="train method only.")
+    ps.add_argument("--smooth-window", type=int, default=21, help="train method only.")
+    ps.add_argument("--sample-frac", type=float, default=1.0, help="train method only.")
+    ps.add_argument("--shard-index", type=int, required=True,
+                    help="This shard's index in [0, num_shards) -- "
+                         "runs[shard_index::num_shards] get processed here.")
+    ps.add_argument("--num-shards", type=int, required=True,
+                    help="Total number of shards (nodes) splitting the run list.")
+    ps.add_argument("--gather-workers", type=int, default=1,
+                    help="Within-node parallelism, same meaning as `fit`/`train "
+                         "--gather-workers` -- combine with --num-shards for "
+                         "two-level (multi-node x multi-process) parallelism.")
+    ps.add_argument("--out", required=True, help="Partial-accumulator file (joblib).")
+    ps.set_defaults(func=gather_shard)
+
+    pm = sub.add_parser("gather-merge",
+                        help="Multi-node: combine `gather-shard` --out files into "
+                             "the final transfer.npz (method=fit) or emulator.pkl "
+                             "(method=train).")
+    pm.add_argument("--shards", nargs="+", required=True,
+                    help="Every gather-shard --out file (one per node/shard).")
+    pm.add_argument("--hidden", default="256,256,128", help="train method only.")
+    pm.add_argument("--alpha", type=float, default=1e-4, help="train method only.")
+    pm.add_argument("--max-iter", type=int, default=200, help="train method only.")
+    pm.add_argument("--out", required=True,
+                    help="Output transfer.npz (fit) or emulator .pkl (train).")
+    pm.set_defaults(func=gather_merge)
 
     args = p.parse_args()
     args.func(args)

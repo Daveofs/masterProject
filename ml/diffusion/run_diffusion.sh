@@ -174,17 +174,24 @@ srun --nodes=${SLURM_NNODES} --ntasks-per-node=1 --gres=gpu:4 uenv run pytorch/v
 "
 
 # ---- stage 3: loss/val plot + apply on held-out test patches + full-sky Cl (glue) ----
-# EVAL_GPUS: apply_diffusion.py now splits its two dominant-cost sections (the
-# zbin-grid and kappa reconstructions, one held-out cosmology's worth of ODE
-# sampling per rank) across this many GPUs via torch.distributed -- single NODE,
-# multi-GPU only (intra-node NVLink, the same "stay off the fabric" constraint the
-# header note above explains for training). 4 to match this job's own allocation;
-# harmless to drop to 1 (falls back to the original single-process path).
-EVAL_GPUS=${EVAL_GPUS:-4}
-srun --nodes=1 --ntasks=1 --gres=gpu:${EVAL_GPUS} uenv run pytorch/v2.9.1:v2 --view=default -- bash -c "
+# MULTI-NODE EVAL (2026-07-21, matching diffusion/run_diagnostics_only.sh's
+# identical pattern): apply_diffusion.py splits its two dominant-cost sections
+# (zbin-grid, kappa) across ALL of GPUS_PER_NODE x SLURM_NNODES ranks via genuine
+# multi-node torchrun c10d rendezvous -- SLURM_NNODES reflects whatever --nodes
+# this job's header (or an override at submission) actually requested. This eval
+# job's own distributed calls are a couple of dist.all_gather_object per
+# diagnostic stage -- a handful of collectives, not thousands of sustained
+# gradient-allreduce steps like stage 2 -- so it's a materially lighter cross-node
+# workload. GPUS_PER_NODE=4 is this cluster's fixed per-node GPU count.
+GPUS_PER_NODE=4
+NNODES=${SLURM_NNODES:-1}
+EVAL_GPUS=$(( GPUS_PER_NODE * NNODES ))
+srun --ntasks=${NNODES} --ntasks-per-node=1 --gres=gpu:${GPUS_PER_NODE} uenv run pytorch/v2.9.1:v2 --view=default -- bash -c "
   source ${VENV}/bin/activate
   python ${DIFFUSION}/plot_diffusion_loss.py --run-dir '${OUT_DIR}'
-  python -m torch.distributed.run --nnodes=1 --nproc_per_node=${EVAL_GPUS} \
+  python -m torch.distributed.run \
+    --nnodes=${NNODES} --nproc_per_node=${GPUS_PER_NODE} \
+    --rdzv_id=${SLURM_JOB_ID} --rdzv_backend=c10d --rdzv_endpoint=${MASTER_ADDR}:${MASTER_PORT} \
     ${DIFFUSION}/apply_diffusion.py \
     --patch-dir '${PATCH_DIR}' \
     --model     '${OUT_DIR}/best.pt' \

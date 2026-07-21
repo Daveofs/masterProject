@@ -11,6 +11,19 @@
 #SBATCH --error=/capstor/scratch/cscs/damrein/outputs/logs/unet/diag-%j.err
 #SBATCH --chdir=/users/damrein/masterProject/ml
 
+# MULTI-NODE EVAL (2026-07-21, matching sphereflow/run_diagnostics_only.sh's
+# identical pattern): the --nodes=1 header above is just the sbatch default --
+# override at submission (`sbatch --nodes=4 unet/run_diagnostics_only.sh`) to
+# scale past one node's 4 GPUs. WORLD_SIZE below is derived from however many
+# nodes SLURM actually gave this job (SLURM_NNODES x GPUS_PER_NODE), via a genuine
+# multi-node torchrun c10d rendezvous (MASTER_ADDR from the node list, srun spans
+# every node). This is a DIFFERENT risk profile from unet TRAINING's multi-node
+# conversion (run_flow.sh): this eval job's own distributed calls are a couple of
+# dist.all_gather_object per diagnostic stage (zbin-grid, kappa) -- a handful of
+# collectives total, not thousands of sustained gradient-allreduce steps -- so
+# it's a materially lighter cross-node workload. Not proven crash-proof, just a
+# different, lower-frequency usage pattern.
+
 # Diagnostic-only run against the ALREADY-TRAINED checkpoint in OUT_DIR below (no
 # retraining): apply_flow.py's full eval suite, including the full-sky section
 # (--data-root given: full-sky reconstruction + real angular Cl) and --kappa.
@@ -39,17 +52,20 @@ PATCH_DIR=${PATCH_DIR:-/capstor/scratch/cscs/damrein/outputs/flowpatches/cosmogr
 OUT_DIR=${OUT_DIR:-/capstor/scratch/cscs/damrein/outputs/flowruns/flow_cosmogridv1_nside512_patch256_n100000_ch32_b248_e40}
 
 export PYTHONUNBUFFERED=1
-# EVAL_GPUS defined here (used below by both OMP_NUM_THREADS and the torchrun launch)
-# -- apply_flow.py splits its zbin-grid/kappa sections (dominant cost) across this
-# many GPUs via torch.distributed, single-node intra-NVLink. Drop to 1 to fall back
-# to the original single-process path.
-EVAL_GPUS=${EVAL_GPUS:-4}
+# GPUS_PER_NODE x SLURM_NNODES = total ranks -- apply_flow.py splits its two
+# dominant-cost sections (zbin-grid, kappa) across ALL of them via
+# torch.distributed. SLURM_NNODES reflects whatever --nodes this job was actually
+# submitted with (see the multi-node note above); GPUS_PER_NODE=4 is this
+# cluster's fixed per-node GPU count, not a tunable.
+GPUS_PER_NODE=4
+NNODES=${SLURM_NNODES:-1}
+EVAL_GPUS=$(( GPUS_PER_NODE * NNODES ))
 # Pin OpenMP-using CPU work (healpy's Cl/anafast, UFalcon's kappa-map construction)
-# to the cores SLURM actually allocated (--cpus-per-task=128 above), DIVIDED across
-# the EVAL_GPUS concurrent rank processes -- the parallel zbin-grid/kappa sections
-# run all ranks' CPU-bound work at once, so giving every rank the full core count
-# would oversubscribe (EVAL_GPUS x 128 threads contending for 128 cores).
-export OMP_NUM_THREADS=$(( ${SLURM_CPUS_PER_TASK:-128} / EVAL_GPUS ))
+# to the cores SLURM actually allocated PER NODE (--cpus-per-task=128 above),
+# DIVIDED across the GPUS_PER_NODE concurrent rank processes THAT NODE RUNS -- the
+# parallel zbin-grid/kappa sections run all ranks' CPU-bound work at once, so
+# giving every rank the full per-node core count would oversubscribe.
+export OMP_NUM_THREADS=$(( ${SLURM_CPUS_PER_TASK:-128} / GPUS_PER_NODE ))
 # weak-lensing kappa map diagnostic -- off by default, see run_flow.sh's KAPPA note.
 KAPPA=${KAPPA:-1}
 KAPPA_FLAG=""; [ "${KAPPA}" = "1" ] && KAPPA_FLAG="--kappa"
@@ -84,10 +100,19 @@ TAPER_POWER_FLAG=""; [ -n "${TAPER_POWER}" ] && TAPER_POWER_FLAG="--taper-power 
 # the limiter. --kappa-max-cosmologies is therefore the real cost knob now, not the
 # tiling. NOTE: the index cache costs ~3.2GB RAM at nside=2048/patch=256.
 
-srun --nodes=1 --ntasks=1 --gres=gpu:${EVAL_GPUS} uenv run pytorch/v2.9.1:v2 --view=default -- bash -c "
+export MASTER_ADDR=$(scontrol show hostnames "$SLURM_JOB_NODELIST" | head -n1)
+export MASTER_PORT=29500
+
+echo "==== unet diagnostics | job ${SLURM_JOB_ID} | ${NNODES} node(s) x ${GPUS_PER_NODE} GPU = ${EVAL_GPUS} ranks ===="
+
+# srun spans EVERY allocated node (one task/node, torchrun fans out to
+# GPUS_PER_NODE local ranks) -- NOT --nodes=1 like the old single-node version.
+srun --ntasks=${NNODES} --ntasks-per-node=1 --gres=gpu:${GPUS_PER_NODE} uenv run pytorch/v2.9.1:v2 --view=default -- bash -c "
   source ${VENV}/bin/activate
   python ${UNET}/plot_flow_loss.py --run-dir '${OUT_DIR}'
-  python -m torch.distributed.run --nnodes=1 --nproc_per_node=${EVAL_GPUS} \
+  python -m torch.distributed.run \
+    --nnodes=${NNODES} --nproc_per_node=${GPUS_PER_NODE} \
+    --rdzv_id=${SLURM_JOB_ID} --rdzv_backend=c10d --rdzv_endpoint=${MASTER_ADDR}:${MASTER_PORT} \
     ${UNET}/apply_flow.py \
     --patch-dir '${PATCH_DIR}' \
     --model     '${OUT_DIR}/best.pt' \

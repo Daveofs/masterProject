@@ -10,19 +10,30 @@ high-res shells is not a deterministic function of the low-res input, so it must
 
 This module keeps DeepSphere's sphere-aware architecture (Chebyshev graph
 convolutions on the HEALPix graph) but trains it as a **conditional flow-matching**
-generator:
+generator. HIGH-PASS RESIDUAL formulation, x0 = cond (2026-07-21, see this
+section's "HIGH-PASS RESIDUAL formulation" docstring below and
+train_sphere_flow.py for the full rationale -- replaces the original x0~N(0,I)
+noise-start design, which needed 50 ODE steps to traverse the long noise->target
+trajectory, vs. 8 for this informative-start version, matching
+unet/flow_model.py's own x0=low convention exactly):
 
-    x1 = delta_high        (per-shell overdensity of the high-res target)
-    x0 ~ N(0, I)           (noise)
-    cond = delta_low       (the low-res map, as a conditioning channel)
+    cond = delta_low                                  (the low-res map)
+    x1   = cond + graph_highpass(delta_high - cond)    (target: cond's large
+                                                         scales + a high-pass
+                                                         small-scale residual)
+    x0   = cond                                        (informative start, NOT noise)
     xt = (1 - t) x0 + t x1
-    target velocity  v* = x1 - x0
+    target velocity  v* = x1 - x0  (== the high-pass residual exactly)
     train  v_theta(xt, t, cond, cosmo)  to match v*   (MSE on the velocity)
 
-At inference we sample x0 ~ N(0, I) and integrate dx/dt = v_theta from t=0..1 to
-draw a high-res realization; different noise -> different small-scale detail with
-the learned statistics. Conditioning on delta_low ties the large scales to the
-input.
+At inference we start from x0 = cond and integrate dx/dt = v_theta from t=0..1;
+because x0 is deterministic (not resampled noise), this trades away
+resample-to-resample small-scale diversity for a given input -- the same
+tradeoff unet/flow_model.py already accepts. Small-scale POWER is restored by the
+high-pass residual TARGET itself (the network must produce real small-scale
+structure to hit x1, not smooth it away like a plain MSE regressor would), not by
+noise injection -- see the model survey in [[deepsphere-shell-correction]] memory
+for why a plain deterministic regressor (unet_diff) failed this exact test.
 
 The Chebyshev conv is a faithful PyTorch port of deepsphere.models.cgcnn.chebyshev5
 (same lmax rescale to [-scale, scale], same Chebyshev recurrence). The HEALPix
@@ -272,9 +283,19 @@ class SphereFlowNet(nn.Module):
 
 def flow_matching_loss(net: SphereFlowNet, x1: torch.Tensor, delta_low: torch.Tensor,
                        cosmo: torch.Tensor) -> torch.Tensor:
-    """Conditional rectified-flow loss. x1 = delta_high (B, M); condition delta_low."""
+    """Conditional rectified-flow loss. x1 = the flow's TARGET end-state (cond +
+    high-pass residual, see train_sphere_flow.py); x0 = delta_low (cond) -- an
+    INFORMATIVE start, not noise (changed 2026-07-21, matching unet/flow_model.py's
+    x0=low convention, after measuring sphereflow needed 50 ODE steps vs unet's 8
+    because starting from pure noise is a much longer, less-straight trajectory
+    than starting already-close to the target; see sample_ode's docstring for the
+    full rationale). x0 is now DETERMINISTIC given the input (no more per-call
+    torch.randn_like draw) -- same tradeoff unet already accepts (loses
+    resample-to-resample small-scale diversity for a given input; the high-pass
+    residual target itself, not noise injection, is what restores small-scale
+    POWER here -- see [[deepsphere-shell-correction]] memory)."""
     B = x1.shape[0]
-    x0 = torch.randn_like(x1)
+    x0 = delta_low
     t = torch.rand(B, device=x1.device)
     xt = (1 - t)[:, None] * x0 + t[:, None] * x1
     v_target = x1 - x0
@@ -284,9 +305,22 @@ def flow_matching_loss(net: SphereFlowNet, x1: torch.Tensor, delta_low: torch.Te
 
 @torch.no_grad()
 def sample_ode(net: SphereFlowNet, delta_low: torch.Tensor, cosmo: torch.Tensor,
-               steps: int = 50, x0: Optional[torch.Tensor] = None,
+               steps: int = 8, x0: Optional[torch.Tensor] = None,
                amp: bool = False) -> torch.Tensor:
-    """Integrate dx/dt = v_theta from noise to a delta_high realization (Euler).
+    """Integrate dx/dt = v_theta from x0 (=delta_low, NOT noise -- changed
+    2026-07-21) to an estimate of the target end-state (Euler).
+
+    x0 defaults to delta_low (the low-fidelity conditioning map) instead of
+    torch.randn_like(delta_low): x0 is already close to the target (same
+    large-scale structure, only the high-pass small-scale residual differs -- see
+    train_sphere_flow.py's x1 = cond + residual_target(...)), so the ODE
+    trajectory is close to straight and needs far fewer steps than starting from
+    pure noise -- steps default dropped 50 -> 8 accordingly (matching
+    unet/flow_model.sample_ode's own default exactly, same underlying reasoning).
+    Checkpoints trained before this change (meta['x0_mode'] absent or != 'cond')
+    were never shown an x0 anywhere near delta_low during training -- sampling them
+    this way is out-of-distribution garbage, not just slower; apply_sphere_flow.py
+    hard-guards against this (see its formulation/x0_mode checks).
 
     amp=True runs each net() call under bf16 autocast (same dtype/pattern as
     flow_matching_loss's training-time autocast) -- the gather-based ChebConv
@@ -294,12 +328,13 @@ def sample_ode(net: SphereFlowNet, delta_low: torch.Tensor, cosmo: torch.Tensor,
     laplacian_to_gather's docstring), so bf16 roughly halves bytes moved per
     step. The Euler accumulator x stays fp32: net(...) returns bf16 under
     autocast, but `x (fp32) + bf16_tensor * dt` type-promotes to fp32
-    automatically, so precision doesn't degrade across the 50 additive steps."""
+    automatically, so precision doesn't degrade across the (now far fewer)
+    additive steps."""
     if delta_low.dim() == 1:
         delta_low = delta_low[None]
     if cosmo.dim() == 1:
         cosmo = cosmo[None]
-    x = torch.randn_like(delta_low) if x0 is None else x0
+    x = delta_low if x0 is None else x0
     dt = 1.0 / steps
     with torch.autocast("cuda", dtype=torch.bfloat16, enabled=amp and x.is_cuda):
         for s in range(steps):
@@ -470,6 +505,115 @@ def auto_overlap_nside_centers(order: int, target_ratio: float = 4.0) -> int:
         if nc / order >= target_ratio:
             return nc
     return 16 * order
+
+
+# ---------------------------------------------------------------------------
+# HIGH-PASS RESIDUAL formulation (2026-07-21, ported from diffusion/model.py after
+# comparing all three pipelines' cl_ratio_by_zbin_grid/kappa_cl_pctile_band: diffusion
+# stayed near truth everywhere; this model's 'direct' formulation showed a several-
+# percent systematic LOW bias at EVERY ell in kappa Cl, worse than doing nothing --
+# see [[deepsphere-shell-correction]] memory). Root cause: 'direct' generates the
+# WHOLE signal from noise with no constraint tying its large scales to cond, so any
+# per-shell miscalibration compounds coherently across the dozens of shells a kappa
+# map integrates -- exactly diffusion's original full-field failure mode, just not as
+# severe. Fix: generate only a RESIDUAL relative to cond, and PIN large scales to cond
+# exactly, same idea as diffusion's highpass_2d -- but this patch is a flat (B, M)
+# vector of HEALPix pixels, not a 2D image, so there's no 2D-FFT radial mask
+# available. The graph analogue used here: repeated local diffusion smoothing on the
+# patch's OWN adjacency graph (the same weighted graph healpix_laplacian builds, just
+# UNRESCALED) acts as a low-pass filter (smooth/large-scale graph signals pass through
+# almost unchanged; rough/small-scale ones are damped each step) -- highpass = x -
+# lowpass(x). n_iter/alpha play the role of diffusion's cutoff_frac/transition_frac
+# (a smoothing lengthscale instead of a literal Nyquist fraction, since an irregular
+# HEALPix superpixel mesh has no clean notion of "fraction of Nyquist"). Defaults
+# below (n_iter=20, alpha=0.25) are a REASONED BUT UNVALIDATED starting point: a
+# diffusion step of this alpha spreads influence ~1 px/step (a random-walk argument),
+# so 20 steps smooths over a ~sqrt(2*0.25*20)=3.2 px radius -- roughly 10% of this
+# patch's ~32-px effective diameter at order=16 (1024 px/patch), matching diffusion's
+# own 10%-of-Nyquist default fractionally. Re-measure the actual Cl-ratio-vs-n_iter
+# knee on a real trained checkpoint before trusting it, the same way sphereflow's own
+# taper_power was calibrated post-hoc, not assumed.
+# ---------------------------------------------------------------------------
+
+_SMOOTH_GATHER_CACHE: dict[tuple, tuple] = {}   # (nside, order) -> (idx, w) RAW-Laplacian gather
+
+
+def _smoothing_gather(nside: int, order: int):
+    """(idx, w) neighbor-gather for the RAW (unrescaled) normalized graph Laplacian
+    -- separate from laplacian_to_gather's Chebyshev-rescaled version used by the
+    model itself, since the smoothing operator below needs eigenvalues in their
+    natural [0, 2] range (rescaling would change what "a few diffusion steps" means)."""
+    key = (nside, order)
+    if key in _SMOOTH_GATHER_CACHE:
+        return _SMOOTH_GATHER_CACHE[key]
+    L = sp.csr_matrix(healpix_laplacian(nside, order=order))
+    M = L.shape[0]
+    counts = np.diff(L.indptr)
+    nmax = int(counts.max())
+    idx = np.zeros((M, nmax), dtype=np.int64)
+    w = np.zeros((M, nmax), dtype=np.float32)
+    rows = np.repeat(np.arange(M), counts)
+    pos = np.arange(L.nnz) - np.repeat(L.indptr[:-1], counts)
+    idx[rows, pos] = L.indices
+    w[rows, pos] = L.data
+    result = (torch.from_numpy(idx), torch.from_numpy(w))
+    _SMOOTH_GATHER_CACHE[key] = result
+    return result
+
+
+def graph_lowpass(x: torch.Tensor, nside: int, order: int,
+                  n_iter: int = 20, alpha: float = 0.25) -> torch.Tensor:
+    """Repeated local diffusion smoothing on the patch graph: x_{k+1} = x_k -
+    alpha * L_raw @ x_k (a discrete heat-diffusion / explicit-Euler step, stable for
+    alpha < 1/2 since L_raw's eigenvalues lie in [0,2]). x: (B, M). Acts as a
+    low-pass filter -- see this section's module-level docstring for the full
+    rationale and why n_iter/alpha are the graph analogue of a cutoff fraction."""
+    idx, w = _smoothing_gather(nside, order)
+    idx, w = idx.to(x.device), w.to(x.device)
+    B, M = x.shape
+    # Same (M, F) 2D convention as ChebConv.forward's own lap() closure (NOT a 3D
+    # (M, B, 1) tensor -- z[idx] on a 2D (M, B) tensor gathers to (M, n, B), which
+    # broadcasts against wq's (M, n, 1) correctly; a stray extra unsqueeze here
+    # previously made z[idx] 4D (M, n, B, 1), which does NOT broadcast against
+    # (M, n, 1) -- that mismatch (batch dim vs neighbor-count dim) crashed every
+    # rank in job 4250163's first training step).
+    wq = w.to(x.dtype).unsqueeze(-1)                       # (M, n, 1)
+    y = x.permute(1, 0)                                     # (M, B)
+
+    def lap(z):
+        return (z[idx] * wq).sum(1)                        # (M, B)
+
+    for _ in range(n_iter):
+        y = y - alpha * lap(y)
+    return y.permute(1, 0)                                  # (B, M)
+
+
+def graph_highpass(x: torch.Tensor, nside: int, order: int,
+                   n_iter: int = 20, alpha: float = 0.25) -> torch.Tensor:
+    """x - graph_lowpass(x): keeps only small-scale (rough) graph content."""
+    return x - graph_lowpass(x, nside, order, n_iter, alpha)
+
+
+def residual_target(low_signal: torch.Tensor, high_signal: torch.Tensor, nside: int,
+                    order: int, n_iter: int = 20, alpha: float = 0.25) -> torch.Tensor:
+    """The flow TARGET's high-pass component: graph_highpass(high_signal -
+    low_signal). x1 = cond + residual_target(...) is IDENTICAL to cond at large
+    (graph-smooth) scales; with x0 ALSO = cond (see flow_matching_loss/sample_ode's
+    2026-07-21 informative-start change -- matches unet/flow_model.py's x0=low
+    exactly now), the target velocity x1-x0 is a pure high-pass field, so the ODE
+    can only ever ADD small-scale content -- large scales start AND end at cond."""
+    return graph_highpass(high_signal - low_signal, nside, order, n_iter, alpha)
+
+
+def compose_corrected(low_signal: torch.Tensor, sample: torch.Tensor, nside: int,
+                      order: int, n_iter: int = 20, alpha: float = 0.25) -> torch.Tensor:
+    """Re-assemble the corrected signal from an ODE sample: low_signal +
+    graph_highpass(sample). Highpass-ing the sample AGAIN here (idempotent for an
+    already-high-pass field) is a hard guarantee that large scales end up EXACTLY
+    low_signal's, independent of any drift the finite-step ODE left in -- same
+    philosophy as diffusion/model.py's compose_corrected. THE inverse of
+    residual_target -- train and apply must both go through this pair."""
+    return low_signal + graph_highpass(sample, nside, order, n_iter, alpha)
 
 
 def to_overdensity(maps: np.ndarray):

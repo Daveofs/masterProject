@@ -10,9 +10,10 @@ gap. Pure plotting glue on analysis.plot_train_val_loss -- the ONE canonical los
 figure unet (plot_flow_loss.py) and transfer (transfer_function.py train()) also
 use, so all three pipelines' training diagnostics are structurally identical.
 
-The only thing that differs from unet's is the printed formula: sphere-flow's
-x0 is fresh NOISE (x0~N(0,I)) and x1 is the arcsinh-signal of the high map, whereas
-unet interpolates from x0=low -- same flow-matching objective, different endpoints.
+Since 2026-07-21 sphere-flow's endpoints match unet's exactly: x0=cond (the
+arcsinh-signal of the low map, an informative start, not noise) and x1=cond plus
+a high-pass small-scale residual -- same flow-matching objective, same starting
+convention, just a graph-conv backbone instead of a 2D UNet.
 
   python sphereflow/plot_sphere_loss.py --run-dir <train_sphere_flow --out-dir>
 """

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Apply the fitted/emulated transfer function, Poisson-resample into valid counts,
-and run every shared analysis/ diagnostic -- all in ONE script/process. Moved out of
+"""Apply the fitted/emulated transfer function and run every shared analysis/
+diagnostic -- all in ONE script/process. Moved out of
 transfer_function.py (which keeps fit/train/emulate: building T) and out of the
 formerly-separate plot_example_patches.py / infer_full_sky_transfer.py (now embedded
 below as plot_patches/plot_full_sky). Analogous to unet/apply_flow.py,
@@ -34,7 +34,7 @@ help text (the old nside=128 default was blind to the entire correction).
 
   python apply_transfer.py --transfer <transfer.npz> \
       --run-dirs <grid>/cosmo_A/run_0 <grid>/cosmo_B/run_0 <grid>/cosmo_C/run_0 \
-      --nside 2048 --ell-min-mpc 3.0 --poisson --out-counts-dir <counts_dir> \
+      --nside 2048 --ell-min-mpc 3.0 --no-clip --out-counts-dir <counts_dir> \
       --out-dir <eval_dir> --patch-shells 5 10 15 30 50 --fullsky-shells 5 10 15 30 50
 
   # `emulate` method: one transfer.npz PER held-out cosmology, same order as --run-dirs:
@@ -55,7 +55,18 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from transfer_function import (_alm, ell_of_flat_index, alm_fname, smooth_cl,      # noqa: E402
                                ell_min_from_mpc_h, load_cosmo, shell_redshifts,     # noqa: E402
                                _debias_mean)                                       # noqa: E402
-import poisson_resample                                                            # noqa: E402
+# poisson_resample.py (lognormal+Poisson re-discretization into valid counts) is no
+# longer wired in here (2026-07-16): validated that for kappa specifically, the
+# --no-clip continuous field is BOTH cheaper AND more accurate than the Poisson path
+# (kappa Cl ratio to truth: no-clip ~0.94-1.01 vs poisson ~0.81-1.08 across 5 log-ell
+# bands, on 2 held-out cosmologies, one of which also exposed a real Poisson tail-
+# calibration bug). clip-at-0 was tested as a positivity-only alternative and is
+# WORSE, not a middle ground (injects +14-23% spurious large-scale power from
+# filling in spatially-correlated void regions; a mean-rescale "fix" overcorrects in
+# the opposite direction to -20%, since the bias isn't a monopole issue). The module
+# itself is left on disk (not deleted -- no git history here to recover it from) in
+# case a FUTURE consumer needs genuine per-pixel count validity, which --no-clip
+# does not provide (its negative-pixel fraction reaches ~49% on the faintest shells).
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 from analysis.transforms import log1p_delta_pair                                   # noqa: E402
@@ -71,11 +82,11 @@ from analysis import weak_lensing                                               
 
 
 # ---------------------------------------------------------------------------
-# apply(): the transfer-function correction, moved verbatim from
-# transfer_function.py's old apply(), minus the dead in-loop --poisson branch
-# (unreachable: the --poisson path already returns early via
-# resample_all_shells_parallel) and the legacy _plot_cl/--plot-shells hook
-# (superseded by plot_full_sky's real Cl-ratio panel below).
+# apply(): the transfer-function correction. Originally moved from
+# transfer_function.py's old apply(); the legacy _plot_cl/--plot-shells hook was
+# dropped (superseded by plot_full_sky's real Cl-ratio panel below), and the
+# --poisson path (lognormal+Poisson re-discretization) was removed entirely --
+# see the import-section comment above for why.
 # ---------------------------------------------------------------------------
 
 def apply(args, run: Path, transfer_path, out_path=None):
@@ -158,77 +169,67 @@ def apply(args, run: Path, transfer_path, out_path=None):
     else:
         ell_min_per_shell = np.full(n_shells, args.ell_min, dtype=np.int64)
 
-    if args.poisson:
-        # Poisson-resample every shell in ONE call, dispatched via
-        # poisson_resample.resample_all_shells_parallel -- NOT a sequential
-        # per-shell Python loop. Shells with ell_min>=lmax (T==1 everywhere) are
-        # skipped for free inside that call (exact no-op, not resampled). Ignores
-        # --no-clip/--no-debias-mean/--wiener/--stochastic (Poisson replaces all
-        # of them -- see poisson_resample.py's docstring for why clipping/
-        # debiasing can't give Cl + positivity + the one-point pdf at once).
-        corrected = poisson_resample.resample_all_shells_parallel(
-            run, alm_fname("low", lmax, log_density), lmax, args.nside, T, R,
-            ell_min_per_shell, n_avg=args.poisson_n_avg, n_iter=args.poisson_n_iter,
-            damp=args.poisson_damp, seed=args.seed, n_workers=args.poisson_workers)
-    else:
-        for i in range(n_shells):
-            Ti = T[min(i, T.shape[0] - 1)].copy()      # per-shell transfer
-            Ri = R[min(i, R.shape[0] - 1)].copy() if R is not None else np.ones_like(Ti)
-            if args.wiener and not args.stochastic:
-                Ti = Ti * Ri                             # Wiener/MMSE gain r*T
-            ell_min_i = int(ell_min_per_shell[i])
-            if ell_min_i > 0:                            # leave large scales untouched
-                Ti[:ell_min_i] = 1.0
-                Ri[:ell_min_i] = 1.0
-            v = low[i].astype(np.float64)
-            if args.stochastic:
-                gain = Ti * Ri                            # phase-correlated part only
-                tvec = (gain - 1.0)[ell]
-                alm_signal = v[:N_alm] * tvec + 1j * v[N_alm:] * tvec
-                signal_map = hp.alm2map(alm_signal, nside=args.nside, lmax=lmax)
-                # Missing power T^2*(1-r^2) at ell where r<1: DISCO's own alm carries
-                # no usable phase info there, so fill with a FRESH random realization
-                # (uncorrelated with low_alm) instead of amplifying DISCO's noise.
-                cl_low_i = smooth_cl(hp.alm2cl(_alm(v, N_alm), lmax=lmax), args.smooth_window)
-                cl_noise = np.clip(Ti ** 2 - gain ** 2, 0.0, None) * cl_low_i
-                # healpy.synalm draws from numpy's global RNG (no seed kwarg) -> seed
-                # it explicitly per shell so --seed makes the whole run reproducible.
-                np.random.seed(int(rng.integers(0, 2**31 - 1)))
-                alm_noise = hp.synalm(cl_noise, lmax=lmax, new=True)
-                noise_map = hp.alm2map(alm_noise, nside=args.nside, lmax=lmax)
-                delta_map = signal_map + noise_map
-            else:
-                tvec = (Ti - 1.0)[ell]                    # per-mode DELTA scale (N_alm,)
-                alm_delta = (v[:N_alm] * tvec + 1j * v[N_alm:] * tvec)
-                delta_map = hp.alm2map(alm_delta, nside=args.nside, lmax=lmax)
-            rho_native = np.asarray(low_full[i], dtype=np.float64)
-            if log_density:
-                # Correction was fit/applied in log1p(rho) space, so reconstruct via
-                # expm1: ALWAYS >= -1 (i.e. rho >= 0 up to fp noise) for ANY delta_map.
-                s_native = np.log1p(rho_native)
-                s_corrected = s_native + delta_map
-                m_unclipped = np.expm1(s_corrected)
-            else:
-                # Density is a COUNT: it cannot be negative. Floor at 0. See
-                # poisson_resample.py's docstring for why this biases Cl on faint
-                # shells and why --poisson (the default pipeline path) is preferred.
-                m_unclipped = rho_native + delta_map
+    for i in range(n_shells):
+        Ti = T[min(i, T.shape[0] - 1)].copy()      # per-shell transfer
+        Ri = R[min(i, R.shape[0] - 1)].copy() if R is not None else np.ones_like(Ti)
+        if args.wiener and not args.stochastic:
+            Ti = Ti * Ri                             # Wiener/MMSE gain r*T
+        ell_min_i = int(ell_min_per_shell[i])
+        if ell_min_i > 0:                            # leave large scales untouched
+            Ti[:ell_min_i] = 1.0
+            Ri[:ell_min_i] = 1.0
+        v = low[i].astype(np.float64)
+        if args.stochastic:
+            gain = Ti * Ri                            # phase-correlated part only
+            tvec = (gain - 1.0)[ell]
+            alm_signal = v[:N_alm] * tvec + 1j * v[N_alm:] * tvec
+            signal_map = hp.alm2map(alm_signal, nside=args.nside, lmax=lmax)
+            # Missing power T^2*(1-r^2) at ell where r<1: DISCO's own alm carries
+            # no usable phase info there, so fill with a FRESH random realization
+            # (uncorrelated with low_alm) instead of amplifying DISCO's noise.
+            cl_low_i = smooth_cl(hp.alm2cl(_alm(v, N_alm), lmax=lmax), args.smooth_window)
+            cl_noise = np.clip(Ti ** 2 - gain ** 2, 0.0, None) * cl_low_i
+            # healpy.synalm draws from numpy's global RNG (no seed kwarg) -> seed
+            # it explicitly per shell so --seed makes the whole run reproducible.
+            np.random.seed(int(rng.integers(0, 2**31 - 1)))
+            alm_noise = hp.synalm(cl_noise, lmax=lmax, new=True)
+            noise_map = hp.alm2map(alm_noise, nside=args.nside, lmax=lmax)
+            delta_map = signal_map + noise_map
+        else:
+            tvec = (Ti - 1.0)[ell]                    # per-mode DELTA scale (N_alm,)
+            alm_delta = (v[:N_alm] * tvec + 1j * v[N_alm:] * tvec)
+            delta_map = hp.alm2map(alm_delta, nside=args.nside, lmax=lmax)
+        rho_native = np.asarray(low_full[i], dtype=np.float64)
+        if log_density:
+            # Correction was fit/applied in log1p(rho) space, so reconstruct via
+            # expm1: ALWAYS >= -1 (i.e. rho >= 0 up to fp noise) for ANY delta_map.
+            s_native = np.log1p(rho_native)
+            s_corrected = s_native + delta_map
+            m_unclipped = np.expm1(s_corrected)
+        else:
+            # Density is a COUNT: it cannot be negative. Floor at 0 (default) --
+            # measured to bias the mean/Cl on shot-noise shells (see _debias_mean),
+            # which is why --no-clip (the Cl-optimal, KEPT-negative field) is the
+            # pipeline's actual default for anything that doesn't need positivity
+            # (e.g. kappa -- see module docstring for why Poisson resampling, the
+            # only option that gave both positivity and correct Cl, was dropped).
+            m_unclipped = rho_native + delta_map
 
-            neg = np.mean(m_unclipped < 0.0)
-            if args.no_clip:
-                m = m_unclipped
-            elif args.no_debias_mean:
-                m = np.clip(m_unclipped, 0.0, None)
-            else:
-                m = _debias_mean(m_unclipped)
-            corrected[i] = m.astype(np.float32)
-            if i % 10 == 0 or neg > 0.02:
-                note = ""
-                if neg > 0.02:
-                    note = (f"  [{neg:.1%} pixels < 0 -> shot-noise shell; "
-                            + ("KEPT (--no-clip, Cl-optimal)]" if args.no_clip
-                               else "floored at 0, suppresses small-scale Cl]"))
-                print(f"  corrected shell {i}/{n_shells}{note}", flush=True)
+        neg = np.mean(m_unclipped < 0.0)
+        if args.no_clip:
+            m = m_unclipped
+        elif args.no_debias_mean:
+            m = np.clip(m_unclipped, 0.0, None)
+        else:
+            m = _debias_mean(m_unclipped)
+        corrected[i] = m.astype(np.float32)
+        if i % 10 == 0 or neg > 0.02:
+            note = ""
+            if neg > 0.02:
+                note = (f"  [{neg:.1%} pixels < 0 -> shot-noise shell; "
+                        + ("KEPT (--no-clip, Cl-optimal)]" if args.no_clip
+                           else "floored at 0, suppresses small-scale Cl]"))
+            print(f"  corrected shell {i}/{n_shells}{note}", flush=True)
 
     if out_path:
         out = Path(out_path); out.parent.mkdir(parents=True, exist_ok=True)
@@ -238,8 +239,7 @@ def apply(args, run: Path, transfer_path, out_path=None):
             d = np.load(info_npz, allow_pickle=True)
             extra = {k: d[k] for k in d.files if k != "shells"}
         np.savez(out, shells=corrected, **extra)
-        print(f"[apply] saved corrected{'+Poisson' if args.poisson else ''} "
-              f"shells to {out}", flush=True)
+        print(f"[apply] saved corrected shells to {out}", flush=True)
 
     return corrected
 
@@ -269,7 +269,7 @@ def plot_patches(args, run_dirs: list[Path], corrected_by_run: dict):
     nside = args.nside
     reso_arcmin = hp.nside2resol(nside, arcmin=True)
     npix = hp.nside2npix(nside)
-    method_label = "transfer+Poisson" if args.poisson else "transfer (no Poisson)"
+    method_label = "transfer (no-clip)" if args.no_clip else "transfer (clipped)"
 
     # low_full/true differ per cosmology -- load once per run, reused by both the
     # visual grid and the pooled pctile-band sampling below.
@@ -374,7 +374,7 @@ def plot_full_sky(args, run_dirs: list[Path], corrected_by_run: dict):
     now selects which shells the moments/histograms below are computed on."""
     nside = args.nside
     out_dir = Path(args.out_dir); out_dir.mkdir(parents=True, exist_ok=True)
-    method_label = "transfer+Poisson" if args.poisson else "transfer (no Poisson)"
+    method_label = "transfer (no-clip)" if args.no_clip else "transfer (clipped)"
 
     arrays = {run: (np.load(run / f"low_shells_nside={nside}.npy", mmap_mode="r"),
                     np.load(run / args.info_npz, mmap_mode="r")["shells"])
@@ -486,7 +486,7 @@ def plot_cl_zbin_grid(args, run_dirs: list[Path], corrected_by_run: dict):
             panels.append((bin_label, shells, ells, np.array(lo_stack), np.array(co_stack)))
         grid.append((f"{run.parent.name}/{run.name}", panels))
 
-    method_label = "transfer+Poisson" if args.poisson else "transfer (no Poisson)"
+    method_label = "transfer (no-clip)" if args.no_clip else "transfer (clipped)"
     plot_cl_ratio_pctile_grid(
         grid, out_dir / "cl_ratio_by_zbin_grid.png",
         corrected_label=f"corrected ({method_label}) / true (after)",
@@ -514,7 +514,7 @@ def plot_kappa(args, run_dirs: list[Path], corrected_by_run: dict):
     checked and does NOT match the lightcone it actually loads."""
     out_dir = Path(args.out_dir)
     nside = args.nside
-    method_label = "transfer+Poisson" if args.poisson else "transfer (no Poisson)"
+    method_label = "transfer (no-clip)" if args.no_clip else "transfer (clipped)"
     # One full diagnostic set PER n(z) BIN (2026-07-16; --kappa-nz takes several,
     # default DES-Y3 metacal bin1 + bin4): bin1 peaks at z~0.23, the low-z regime
     # where getting the correction right is hardest; bin4 peaks at z~0.98, needs
@@ -624,8 +624,9 @@ def main():
                          "shells / high ell), pushing Cl below even DISCO and the "
                          "map lighter than DISCO. Full T (default) matches Cl_high.")
     p.add_argument("--stochastic", action="store_true",
-                    help="Constrained-realization gain instead of plain full T "
-                         "(--no-clip / non-Poisson path only -- see apply()).")
+                    help="Constrained-realization gain instead of plain full T -- "
+                         "see apply()'s docstring comment for the Cl_high = "
+                         "(r*T)^2 + T^2*(1-r^2) derivation.")
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--smooth-window", type=int, default=21)
     p.add_argument("--ell-min", type=int, default=0,
@@ -636,21 +637,16 @@ def main():
                         "converted to a PER-SHELL ell_min via each shell's own "
                         "redshift (see ell_min_from_mpc_h). 0 disables.")
     p.add_argument("--no-clip", action="store_true",
-                   help="(non-Poisson path only) emit the raw Cl-optimal overdensity "
-                        "field instead of a valid count map.")
+                   help="Emit the raw Cl-optimal overdensity field instead of a "
+                        "positivity-clipped one -- KEEPS negative pixels (up to ~49%% "
+                        "on the faintest shells). Validated (2026-07-16) as both "
+                        "cheaper AND more accurate than Poisson resampling for kappa "
+                        "specifically (which doesn't need per-pixel positivity); "
+                        "clip-at-0 was tested as an alternative and is WORSE, not a "
+                        "middle ground (injects +14-23%% spurious large-scale power "
+                        "from filling in spatially-correlated voids). Use this unless "
+                        "you specifically need a valid (non-negative) count map.")
     p.add_argument("--no-debias-mean", action="store_true")
-    p.add_argument("--poisson", action="store_true", default=True,
-                   help="Poisson-resample into valid non-negative integer counts "
-                        "right after the correction (default ON -- this is the "
-                        "pipeline's standard path). Pass --no-poisson to disable.")
-    p.add_argument("--no-poisson", dest="poisson", action="store_false")
-    p.add_argument("--poisson-n-avg", type=int, default=4)
-    p.add_argument("--poisson-n-iter", type=int, default=5)
-    p.add_argument("--poisson-damp", type=float, default=0.4)
-    p.add_argument("--poisson-workers", type=int, default=1,
-                   help="See poisson_resample.py -- default 1 (sequential) is the "
-                        "trusted setting; process-pool parallelism was measured to "
-                        "be SLOWER here (memory-bandwidth contention).")
     p.add_argument("--out-counts-dir", default="",
                    help="Optional: also save each cosmology's corrected shells to "
                         "<dir>/<cosmo_name>_counts.npz (not required for the plots "
@@ -735,13 +731,12 @@ def main():
 
     p.add_argument("--reuse-counts", default="",
                    help="Directory of <cosmo>_counts.npz from a PREVIOUS run (i.e. a "
-                        "previous --out-counts-dir): load those corrected counts "
-                        "instead of recomputing apply()+Poisson (~50 min/cosmology). "
-                        "For iterating on the DIAGNOSTIC PLOTS only -- the counts are "
-                        "deterministic given (transfer, --seed, --ell-min-mpc, "
-                        "--poisson-*), so reusing them is exact ONLY if those are "
-                        "unchanged. Any cosmology missing from the directory is "
-                        "recomputed normally.")
+                        "previous --out-counts-dir): load those corrected shells "
+                        "instead of recomputing apply(). For iterating on the "
+                        "DIAGNOSTIC PLOTS only -- the correction is deterministic "
+                        "given (transfer, --seed, --ell-min-mpc, --no-clip), so "
+                        "reusing them is exact ONLY if those are unchanged. Any "
+                        "cosmology missing from the directory is recomputed normally.")
     p.add_argument("--out-dir", required=True, help="Where all plots are written.")
     args = p.parse_args()
 
@@ -757,9 +752,9 @@ def main():
 
     # One bad cosmology (missing/corrupt alms, a transfer.npz that failed to build
     # upstream, ...) must NOT blank out every diagnostic plot for the cosmologies
-    # that DID succeed -- apply()+Poisson costs ~50 min PER cosmology, so losing
-    # that work to an unrelated crash on cosmology N is expensive and, worse,
-    # silent (the calling shell script doesn't check python's exit code either).
+    # that DID succeed -- losing that work to an unrelated crash on cosmology N is
+    # expensive and, worse, silent (the calling shell script doesn't check
+    # python's exit code either).
     # Real incident (2026-07-13, job 4200753): cosmo_000054 had no disco_sim/ data
     # at all (a data-availability gap, not a code bug -- see split_val_cosmos's
     # docstring for the actual fix at the SELECTION point) and crashed apply() on
@@ -771,14 +766,13 @@ def main():
         out_path = (Path(args.out_counts_dir) / f"{run.parent.name}_counts.npz"
                    if args.out_counts_dir else None)
         try:
-            # --reuse-counts: skip apply()+Poisson entirely and load the corrected
-            # counts a PREVIOUS run already produced. apply()+Poisson costs ~50 min
-            # per cosmology and is fully deterministic given (transfer, --seed,
-            # --ell-min-mpc, --poisson-*), so re-running it just to redraw a plot
-            # burns hours recomputing a byte-identical array. Iterating on the
-            # DIAGNOSTICS (which is most of what we do) is what this is for.
-            # Only valid if those knobs are unchanged -- change any of them and you
-            # must regenerate, not reuse.
+            # --reuse-counts: skip apply() entirely and load the corrected shells a
+            # PREVIOUS run already produced. apply() is fully deterministic given
+            # (transfer, --seed, --ell-min-mpc, --no-clip), so re-running it just to
+            # redraw a plot burns minutes recomputing a byte-identical array.
+            # Iterating on the DIAGNOSTICS (which is most of what we do) is what
+            # this is for. Only valid if those knobs are unchanged -- change any of
+            # them and you must regenerate, not reuse.
             reuse = (Path(args.reuse_counts) / f"{run.parent.name}_counts.npz"
                     if args.reuse_counts else None)
             if reuse and reuse.exists():

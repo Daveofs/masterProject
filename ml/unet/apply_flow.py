@@ -46,9 +46,9 @@ import matplotlib.pyplot as plt
 
 # embed his files: this script lives alongside flow_model.py / dataset.py
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from flow_model import FlowUNet, sample_ode              # noqa: E402
-from dataset import (PatchDataset, split_by_cosmo, raw_to_log1p_delta_pair,  # noqa: E402
-                     cosmo_z_vector, COSMO_FIELDS)
+from flow_model import FlowUNet, sample_ode, compose_corrected  # noqa: E402
+from dataset import (PatchDataset, split_by_cosmo, transform_pair,  # noqa: E402
+                     low_to_field, field_to_counts, cosmo_z_vector, COSMO_FIELDS)
 
 # every plotting/tiling/full-sky-power routine comes from ../analysis -- nothing
 # reimplemented here (this is the ONLY diagnostics script for the flow model now;
@@ -285,13 +285,46 @@ def main():
     # older checkpoints predate this flag entirely (no cosmo_mlp in their state_dict),
     # so the fallback must be False, not the FlowUNet default of True.
     use_cosmo_cond = bool(cfg.get("use_cosmo_cond", False))
+    # High-pass residual formulation (see flow_model.py): MUST use the exact cutoff
+    # the target was built with at train time, so the checkpoint is authoritative.
+    #
+    # HARD ERROR, not a default: a checkpoint without hp_cutoff predates this
+    # formulation (trained to flow the WHOLE field, large scales included) --
+    # composing its output via compose_corrected would be semantically wrong (it
+    # would highpass-filter an output that was never trained to be pinned at large
+    # scales, silently corrupting it) rather than a crash. See
+    # diffusion/apply_diffusion.py's identical guard (job 4247908's finding: kappa Cl
+    # collapsed to ~0.55 at low ell for exactly this reason -- no large-scale pin).
+    if "hp_cutoff" not in cfg:
+        raise SystemExit(
+            f"{args.model} predates the high-pass residual formulation (no "
+            f"'hp_cutoff' in its saved args) -- it was trained to flow the WHOLE "
+            f"field, so composing its output with compose_corrected would silently "
+            f"corrupt it. Retrain with the current train_flow.py, or evaluate with "
+            f"an older apply_flow.py if you specifically need the old behavior.")
+    hp_cutoff = float(cfg["hp_cutoff"])
+    hp_transition = float(cfg["hp_transition"])
+    # Absent => a pre-2026-07-21 checkpoint would have already failed the hp_cutoff
+    # guard above, so any checkpoint reaching here is new enough that 'delta' (the
+    # current default) is the correct fallback, not a guess.
+    space = str(cfg.get("space", "delta"))
     net = FlowUNet(in_channels=1, out_channels=1,
                    base_channels=int(cfg.get("base_channels", 32)),
                    time_emb_dim=int(cfg.get("time_emb_dim", 128)),
                    use_cosmo_cond=use_cosmo_cond).to(dev)
     net.load_state_dict(ckpt["model"])
     net.eval()
-    print(f"[eval] checkpoint use_cosmo_cond={use_cosmo_cond}", flush=True)
+    print(f"[eval] checkpoint use_cosmo_cond={use_cosmo_cond} hp_cutoff={hp_cutoff} "
+          f"hp_transition={hp_transition} space={space}", flush=True)
+
+    def sample(x0, cosmo_z):
+        """Integrate the flow ODE from x0 (=low field) and compose the corrected
+        field via compose_corrected -- the hard guarantee that large scales end up
+        EXACTLY x0's, independent of any drift the finite-step ODE accumulated. Every
+        call site below goes through this, so none of them can forget the compose
+        step (see flow_model.compose_corrected's docstring)."""
+        raw = sample_ode(net, x0, n_steps=args.steps, cosmo_z=cosmo_z, amp=args.amp)
+        return compose_corrected(x0, raw - x0, hp_cutoff, hp_transition)
 
     # held-out cosmologies = our test data
     _, val_idx, val_cosmos = split_by_cosmo(args.patch_dir, args.val_frac, args.seed)
@@ -331,9 +364,9 @@ def main():
         low_log_parts, high_log_parts, corr_log_parts = [], [], []
         for b in range(0, low_all.shape[0], mb):
             lo = low_all[b:b + mb].to(dev); hi = high_all[b:b + mb].to(dev)
-            lo_log, hi_log = raw_to_log1p_delta_pair(lo, hi)
+            lo_log, hi_log = transform_pair(lo, hi, space)
             with torch.no_grad():
-                co_log = sample_ode(net, lo_log, n_steps=args.steps, cosmo_z=cosmo_z_all[b:b + mb], amp=args.amp)
+                co_log = sample(lo_log, cosmo_z_all[b:b + mb])
             low_log_parts.append(lo_log); high_log_parts.append(hi_log); corr_log_parts.append(co_log)
         low_log = torch.cat(low_log_parts); high_log = torch.cat(high_log_parts)
         corr_log = torch.cat(corr_log_parts)
@@ -390,9 +423,9 @@ def main():
         ex_low = torch.stack([ex_ds[i]["low"] for i in range(ns)]).to(dev)
         ex_high = torch.stack([ex_ds[i]["high"] for i in range(ns)]).to(dev)
         ex_cosmo_z = stack_cosmo_z(ex_ds, dev, ex_low.dtype)
-        ex_low_log, ex_high_log = raw_to_log1p_delta_pair(ex_low, ex_high)
+        ex_low_log, ex_high_log = transform_pair(ex_low, ex_high, space)
         with torch.no_grad():
-            ex_corr_log = sample_ode(net, ex_low_log, n_steps=args.steps, cosmo_z=ex_cosmo_z, amp=args.amp)
+            ex_corr_log = sample(ex_low_log, ex_cosmo_z)
 
         rows = [(f"shell {example_shells[i]}", ex_low_log[i, 0].cpu().numpy(),
                 ex_corr_log[i, 0].cpu().numpy(), ex_high_log[i, 0].cpu().numpy())
@@ -415,10 +448,10 @@ def main():
             s_high = torch.stack([sd[i]["high"] for i in range(len(sd))]).to(dev)
             s_cosmo_z = stack_cosmo_z(sd, dev, s_low.dtype)
             s_low_mean = s_low.mean(dim=(2, 3), keepdim=True)
-            s_low_log, _ = raw_to_log1p_delta_pair(s_low, s_high)
+            s_low_log, _ = transform_pair(s_low, s_high, space)
             with torch.no_grad():
-                s_corr_log = sample_ode(net, s_low_log, n_steps=args.steps, cosmo_z=s_cosmo_z, amp=args.amp)
-            s_corr_raw = (1.0 + torch.expm1(s_corr_log)) * s_low_mean
+                s_corr_log = sample(s_low_log, s_cosmo_z)
+            s_corr_raw = field_to_counts(s_corr_log, s_low_mean, space)
 
             low_np, high_np, corr_np = s_low.cpu().numpy(), s_high.cpu().numpy(), s_corr_raw.cpu().numpy()
             moment_shells.append(s)
@@ -479,15 +512,12 @@ def main():
 
             def predict_batch(low_batch: np.ndarray) -> np.ndarray:
                 low_t = torch.from_numpy(low_batch).unsqueeze(1).to(dev)
-                low_mean = low_t.mean(dim=(2, 3), keepdim=True)
-                eps = 0.5 / low_mean
-                low_log = torch.log1p(torch.maximum(low_t / low_mean - 1.0, -1.0 + eps))
+                low_f, low_mean = low_to_field(low_t, space)
                 cz = (None if cosmo_z_t is None else
-                     cosmo_z_t.unsqueeze(0).expand(low_t.shape[0], -1).to(low_log.dtype))
+                     cosmo_z_t.unsqueeze(0).expand(low_t.shape[0], -1).to(low_f.dtype))
                 with torch.no_grad():
-                    pred_log = sample_ode(net, low_log, n_steps=args.steps, cosmo_z=cz, amp=args.amp)
-                pred_delta = torch.expm1(pred_log)
-                return ((1.0 + pred_delta) * low_mean).squeeze(1).cpu().numpy()
+                    pred_f = sample(low_f, cz)
+                return field_to_counts(pred_f, low_mean, space).squeeze(1).cpu().numpy()
             return predict_batch
 
         def reconstruct(low_shell, cosmo_name, shell_idx):

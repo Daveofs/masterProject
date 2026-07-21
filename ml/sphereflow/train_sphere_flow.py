@@ -2,14 +2,23 @@
 """Train the DeepSphere-conv flow-matching model (sphere_flow.SphereFlowNet) on
 HEALPix-superpixel patches from make_patch_dataset.py.
 
-Formulation (direct): condition on the raw DISCO map, generate the CosmoGrid
-high-res signal.
+Formulation (highpass_residual, 2026-07-21): condition on the raw DISCO map,
+generate only a high-pass small-scale RESIDUAL, starting the ODE from cond itself
+(not noise) -- see sphere_flow.py's module docstring for the full rationale
+(replaces the original x0~N(0,I) formulation, which needed 50 ODE steps vs. 8 for
+this one, and the intermediate direct-generation "formulation=direct"/"residual"
+variants, both of which let the model drift cond's already-correct large scales).
     cond = arcsinh-signal( delta_low )      delta = rho/mean_shell - 1
-    x1   = arcsinh-signal( delta_high )
-    x0   ~ N(0, I);  xt = (1-t) x0 + t x1;  target velocity v* = x1 - x0
+    high = arcsinh-signal( delta_high )
+    x1   = cond + graph_highpass( high - cond )      (target: cond's large scales
+                                                       + a high-pass small-scale
+                                                       residual)
+    x0   = cond                                        (informative start, not noise)
+    xt = (1-t) x0 + t x1;  target velocity v* = x1 - x0 (== the high-pass residual)
     loss = MSE( v_theta(xt, t, cond, cosmo), v* )
-At inference (apply_sphere_flow.py) x0 is drawn fresh and the ODE integrated to
-t=1, so different noise -> different small-scale detail with learned statistics.
+At inference (apply_sphere_flow.py) x0=cond too (deterministic, not resampled), so
+this trades away resample-to-resample diversity for far fewer ODE steps -- the
+same tradeoff unet/flow_model.py already accepts.
 
 REBUILT 2026-07-14 on unet/train_flow.py's structure, which does not suffer the
 crashes this trainer kept hitting. What changed and why:
@@ -69,7 +78,8 @@ def reduce_mean(value: float, device) -> float:
 
 def run_epoch(model, loader, optimizer, device, train: bool, epoch: int,
               sig_scale: float, softening: float, grad_clip: float, amp: bool,
-              cmean: torch.Tensor, cstd: torch.Tensor,
+              cmean: torch.Tensor, cstd: torch.Tensor, nside: int, order: int,
+              hp_n_iter: int, hp_alpha: float,
               is_main: bool, log_every: int = 100):
     model.train(train)
     if isinstance(loader.sampler, DistributedSampler):
@@ -95,7 +105,13 @@ def run_epoch(model, loader, optimizer, device, train: bool, epoch: int,
             # conditioning vector = [cosmo params, normalized shell index]
             cond_vec = torch.cat([cosmo, shell_norm[:, None]], dim=-1)
 
-            cond, x1 = raw_to_signal_pair(low, high, lo_m, hi_m, sig_scale, softening)
+            cond, high_signal = raw_to_signal_pair(low, high, lo_m, hi_m, sig_scale, softening)
+            # HIGH-PASS RESIDUAL target, x0=cond (see sphere_flow.py's module
+            # docstring): x1 is the FULL end-state cond + graph-highpass(high-cond)
+            # -- identical to cond at large (graph-smooth) scales -- so that inside
+            # flow_matching_loss (x0=cond internally now, not noise) the target
+            # velocity x1-x0 works out to exactly the high-pass residual.
+            x1 = cond + sf.residual_target(cond, high_signal, nside, order, hp_n_iter, hp_alpha)
 
             with torch.autocast("cuda", dtype=torch.bfloat16,
                                 enabled=amp and device.type == "cuda"):
@@ -144,6 +160,19 @@ def main():
     p.add_argument("--n-layers", type=int, default=6)
     p.add_argument("--K", type=int, default=5)
     p.add_argument("--softening", type=float, default=1.0)
+    # High-pass residual formulation (see sphere_flow.py's module docstring): the
+    # flow now generates only graph_highpass(high-cond), pinning large (graph-smooth)
+    # scales to cond exactly. n_iter/alpha are the graph analogue of a Nyquist-
+    # fraction cutoff (a smoothing lengthscale via repeated local diffusion, since an
+    # irregular HEALPix superpixel mesh has no 2D-FFT radial mask) -- REASONED BUT
+    # UNVALIDATED defaults, see sphere_flow.graph_lowpass's docstring. MUST be saved
+    # into meta.npz/ckpt args so apply_sphere_flow.py composes with the exact
+    # smoothing the target was built with.
+    p.add_argument("--hp-n-iter", type=int, default=20,
+                   help="local-diffusion smoothing steps defining the low-pass "
+                        "(graph analogue of --hp-cutoff)")
+    p.add_argument("--hp-alpha", type=float, default=0.25,
+                   help="per-step diffusion rate, must be < 0.5 for stability")
     p.add_argument("--grad-clip", type=float, default=1.0)
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--no-lr-scaling", action="store_true",
@@ -272,7 +301,24 @@ def main():
         np.savez(out_dir / "meta.npz", nside=nside, order=order, K=args.K,
                  hidden=args.hidden, n_layers=args.n_layers, cond_dim=cond_dim,
                  sig_scale=sig_scale, resid_scale=1.0, softening=args.softening,
-                 formulation="direct", cosmo_mean=cmean, cosmo_std=cstd,
+                 # 2026-07-21: replaces the old "direct" (whole-signal-from-noise)
+                 # and "residual" (full-band cond+rscale*out) formulations -- both
+                 # let the model drift cond's already-correct large scales, which
+                 # compounded into the kappa Cl bias documented in sphere_flow.py's
+                 # high-pass section. apply_sphere_flow.py's hard formulation guard
+                 # requires this exact value; hp_n_iter/hp_alpha are saved alongside
+                 # so apply-time composition can't drift from what the target used.
+                 formulation="highpass_residual", hp_n_iter=args.hp_n_iter,
+                 hp_alpha=args.hp_alpha,
+                 # 2026-07-21: x0=cond (informative start) replaces x0~N(0,I) --
+                 # see sphere_flow.py's sample_ode docstring. A checkpoint with
+                 # formulation="highpass_residual" but WITHOUT this marker (e.g.
+                 # job 4250188, trained the same day just before this change) was
+                 # trained expecting xt to start near NOISE, not near cond --
+                 # sampling it via the new x0=cond default would be
+                 # out-of-distribution garbage, not just a slower/faster knob, so
+                 # apply_sphere_flow.py hard-guards on this exact value too.
+                 x0_mode="cond", cosmo_mean=cmean, cosmo_std=cstd,
                  test_cosmos=np.array(sorted(val_cosmos)),
                  # 2026-07-20: patches are now drawn at random (lon,lat,psi) via
                  # sphere_flow.rotated_patch_ids, not the old disjoint quad-tree
@@ -287,10 +333,12 @@ def main():
         t0 = time.time()
         train_loss = run_epoch(model, train_loader, optimizer, device, True, epoch,
                                sig_scale, args.softening, args.grad_clip, args.amp,
-                               cmean_t, cstd_t, is_main)
+                               cmean_t, cstd_t, nside, order, args.hp_n_iter,
+                               args.hp_alpha, is_main)
         val_loss = run_epoch(model, val_loader, optimizer, device, False, epoch,
                              sig_scale, args.softening, args.grad_clip, args.amp,
-                             cmean_t, cstd_t, is_main)
+                             cmean_t, cstd_t, nside, order, args.hp_n_iter,
+                             args.hp_alpha, is_main)
         scheduler.step()
         dt = time.time() - t0
 

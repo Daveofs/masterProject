@@ -58,6 +58,52 @@ def raw_to_log1p_delta_pair(low_raw: torch.Tensor, high_raw: torch.Tensor):
     return low_log, high_log
 
 
+def raw_to_delta_pair(low_raw: torch.Tensor, high_raw: torch.Tensor):
+    """LINEAR overdensity delta = n/<n> - 1 for both maps -- the space the SCIENCE
+    metric lives in (analysis.full_sky.od_cl computes the angular power spectrum of
+    exactly this field). Ported from diffusion/dataset.py's identical fix (2026-07-18
+    finding, see that module's docstring): log1p compresses density peaks, so
+    MEASURED in log space DISCO already looks ~correct (low/high power ratio
+    0.93-1.05) while linear delta shows the real deficit (down to 0.62 at high k) --
+    a model trained on the log-space residual optimizes a statistic that's nearly
+    already right and barely moves the one actually evaluated. Also the precondition
+    the high-pass residual formulation (flow_model.residual_target/compose_corrected)
+    depends on: "large scales are already correct so pin them" was only verified in
+    THIS space, not log1p's compressed one."""
+    low_mean = low_raw.mean(dim=(2, 3), keepdim=True)
+    high_mean = high_raw.mean(dim=(2, 3), keepdim=True)
+    return low_raw / low_mean - 1.0, high_raw / high_mean - 1.0
+
+
+def transform_pair(low_raw: torch.Tensor, high_raw: torch.Tensor, space: str):
+    """(low, high) raw counts -> the pair of fields the model works in. THE single
+    dispatch point for `space`, so train and apply cannot drift."""
+    if space == "delta":
+        return raw_to_delta_pair(low_raw, high_raw)
+    if space == "log1p":
+        return raw_to_log1p_delta_pair(low_raw, high_raw)
+    raise ValueError(f"unknown space {space!r} (expected 'delta' or 'log1p')")
+
+
+def low_to_field(low_raw: torch.Tensor, space: str):
+    """Full-sky/inference counterpart of transform_pair when only the LOW map exists.
+    Returns (field, low_mean) so the caller can invert with field_to_counts."""
+    low_mean = low_raw.mean(dim=(2, 3), keepdim=True)
+    if space == "delta":
+        return low_raw / low_mean - 1.0, low_mean
+    if space == "log1p":
+        eps = 0.5 / low_mean
+        return torch.log1p(torch.maximum(low_raw / low_mean - 1.0, -1.0 + eps)), low_mean
+    raise ValueError(f"unknown space {space!r} (expected 'delta' or 'log1p')")
+
+
+def field_to_counts(field: torch.Tensor, low_mean: torch.Tensor, space: str):
+    """Inverse of low_to_field: model-space field -> raw counts, using the LOW map's
+    mean (the only mean available at inference)."""
+    delta = field if space == "delta" else torch.expm1(field)
+    return (1.0 + delta) * low_mean
+
+
 class PatchDataset(Dataset):
     def __init__(self, patch_dir: str | Path, indices: np.ndarray):
         d = Path(patch_dir)

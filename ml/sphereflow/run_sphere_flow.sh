@@ -1,11 +1,11 @@
 #!/bin/bash
-#SBATCH --nodes=1
+#SBATCH --nodes=4
 #SBATCH --job-name=sphere-flow
 #SBATCH --partition=normal
 #SBATCH --account=sk037
 #SBATCH --ntasks-per-node=1
 #SBATCH --gres=gpu:4
-#SBATCH --cpus-per-task=64
+#SBATCH --cpus-per-task=128
 #SBATCH --time=12:00:00
 #SBATCH --output=/capstor/scratch/cscs/damrein/outputs/logs/sphereflow/slurm-%j.out
 #SBATCH --error=/capstor/scratch/cscs/damrein/outputs/logs/sphereflow/slurm-%j.err
@@ -37,19 +37,26 @@
 # job died the same way twice (jobs 3852435 and 4210107, both SIGABRT/NCCL around
 # step ~13.2k with "NET/OFI ... PTLTE_NOT_FOUND" / "Device or resource busy").
 #
-# NODES: 1, deliberately -- this is THE fix, not a tuning knob.
-#   Every crash was a CROSS-NODE Slingshot/libfabric (CXI) error. At 1 node x 4
-#   GPUs, NCCL stays on intra-node NVLink and never touches the fabric, so that
-#   entire failure class is gone by construction rather than papered over with
-#   FI_CXI_* tuning (which was tried repeatedly and kept not working). All the
-#   FI_CXI_*/NCCL_* env vars that used to be here are deleted for the same reason:
-#   unet/run_flow.sh sets NONE of them and trains reliably on 1 node.
-#   Scaling back out to multiple nodes means re-opening that can of worms; do it
-#   only if a single node's 4 GPUs genuinely become the bottleneck.
+# NODES: ${SLURM_NNODES} (header #SBATCH --nodes=4) -- GENUINE MULTI-NODE again as
+# of 2026-07-21, BY EXPLICIT REQUEST, after having been pinned to 1 node since
+# 2026-07-14 as the fix for repeated crashes. THIS IS A KNOWN, REOPENED RISK, not an
+# oversight: every earlier crash (jobs 3852435, 4210107, both SIGABRT/NCCL around
+# step ~13.2k, "NET/OFI ... PTLTE_NOT_FOUND" / "Device or resource busy") was a
+# CROSS-NODE Slingshot/libfabric (CXI) error that no amount of FI_CXI_*/NCCL_*
+# tuning fixed -- going single-node (NCCL stays on intra-node NVLink, never
+# touches the fabric) was what actually worked, not a config tweak. No CXI/NCCL
+# env tuning is added below (that tuning specifically did NOT fix the earlier
+# crashes) -- if this dies with a similar cross-node NCCL/libfabric error late
+# into training, that is the SAME known failure mode recurring, not a new bug.
+# Stage 2's launch below now mirrors diffusion/run_diffusion.sh's genuine c10d
+# multi-node rendezvous (unet/run_flow.sh converted alongside this one). Stages
+# 0/1/2b stay single-node: single-task CPU/prep/plotting work that does not
+# parallelize across nodes.
 #
-# The other half of the fix is in the trainer: a materialized patch dataset +
-# DistributedSampler (drop_last) instead of a hand-rolled per-rank producer
-# thread, so ranks CANNOT desync -- see train_sphere_flow.py's header.
+# The other half of the ORIGINAL 2026-07-14 fix is still in the trainer: a
+# materialized patch dataset + DistributedSampler (drop_last) instead of a
+# hand-rolled per-rank producer thread, so ranks CANNOT desync -- see
+# train_sphere_flow.py's header. That part is unrelated to node count and stays.
 # ============================================================================
 
 export UENV_REPO_PATH=/capstor/scratch/cscs/damrein/.uenv-images
@@ -65,7 +72,7 @@ SPHEREFLOW=/users/damrein/masterProject/ml/sphereflow
 
 NSIDE=${NSIDE:-512}
 ORDER=${ORDER:-16}            # 12*ORDER^2 patches/shell; must match the model's graph
-NPATCH=${NPATCH:-200000}      # ~26 GB at nside=2048/order=16 (16,384 px/patch, low+high)
+NPATCH=${NPATCH:-100000}      # ~26 GB at nside=2048/order=16 (16,384 px/patch, low+high)
 EPOCHS=${EPOCHS:-40}
 # Graph-conv defaults retuned 2026-07-16 for the nside=512/order=16 geometry
 # (1,024-px patches). The old values were sized for nside=2048's 16,384-px patches:
@@ -82,13 +89,22 @@ EPOCHS=${EPOCHS:-40}
 #   LR 2e-4 -> 3e-4  : mild (~sqrt) compensation for the 4x batch; the x world_size
 #                      scaling in the trainer still applies on top.
 BATCH=${BATCH:-248}
-HIDDEN=${HIDDEN:-128}
-N_LAYERS=${N_LAYERS:-8}
+HIDDEN=${HIDDEN:-256}
+N_LAYERS=${N_LAYERS:-12}
 K=${K:-5}
-LR=${LR:-3e-4}
+LR=${LR:-4.8e-3}
 VAL_FRAC=${VAL_FRAC:-0.15}
 SEED=${SEED:-0}
-STEPS=${STEPS:-50}            # ODE steps at eval
+# High-pass residual formulation (see sphere_flow.py's module docstring): graph
+# analogue of diffusion's --hp-cutoff/--hp-transition (smoothing steps/rate instead
+# of a literal Nyquist fraction). REASONED BUT UNVALIDATED defaults -- see
+# sphere_flow.graph_lowpass's docstring.
+HP_N_ITER=${HP_N_ITER:-20}
+HP_ALPHA=${HP_ALPHA:-0.25}
+# 50 -> 8 (2026-07-21): sample_ode now starts from x0=cond (informative start,
+# not noise -- see sphere_flow.py's docstring), so the trajectory is close to
+# straight and needs far fewer steps, matching unet's own default exactly.
+STEPS=${STEPS:-8}             # ODE steps at eval
 # Held-out cosmologies: drawn by dataset.split_by_cosmo from --val-frac/--seed, and
 # saved into meta.npz so stage 3 evaluates on exactly what training excluded. Pin
 # them explicitly with TEST_COSMOS="cosmo_000003 cosmo_000006 ..." (e.g. to match
@@ -100,7 +116,15 @@ TEST_COSMOS_FLAG=""
 # shell of every eval cosmology is a full ODE sample). KAPPA=0 skips it.
 KAPPA=${KAPPA:-1}
 KAPPA_FLAG=""; [ "${KAPPA}" = "1" ] && KAPPA_FLAG="--kappa --kappa-nside 1024 --kappa-lmax 2048"
-MAX_COSMOLOGIES=${MAX_COSMOLOGIES:-10}
+MAX_COSMOLOGIES=${MAX_COSMOLOGIES:-3}
+# EVAL_NODES: node count for the SEPARATE dependent diagnostics job (stage 3 below)
+# -- since that job is submitted fresh via sbatch (not inline, see stage 3's WHY
+# note), it does NOT automatically inherit THIS job's --nodes allocation the way
+# unet/diffusion's inline eval stages do; it must be passed explicitly. Defaults to
+# matching this training job's own SLURM_NNODES so the eval scales the same way by
+# default, but is independently overridable (eval's cross-node workload is much
+# lighter than training's, see run_diagnostics_only.sh's multi-node note).
+EVAL_NODES=${EVAL_NODES:-${SLURM_NNODES:-1}}
 
 # DATA_TAG folds the DATA ROOT into PATCH_DIR/RUN_NAME so switching datasets can
 # never silently reuse the other dataset's patch cache. Derived AUTOMATICALLY from
@@ -122,7 +146,16 @@ DATA_TAG=${DATA_TAG:+${DATA_TAG}_}
 # resulting checkpoint unable to use the overlap reconstruction path). Override
 # PATCH_DIR explicitly to reuse a cache from elsewhere.
 PATCH_DIR="${PATCH_DIR:-/capstor/scratch/cscs/damrein/outputs/flowpatches/${DATA_TAG}sphere_ovlp_nside${NSIDE}_order${ORDER}_n${NPATCH}}"
-RUN_NAME=${RUN_NAME:-direct_ovlp_${DATA_TAG}nside${NSIDE}_o${ORDER}_n${NPATCH}_h${HIDDEN}_b${BATCH}_e${EPOCHS}}
+# x0cond tag (2026-07-21, SAME DAY as the hpres_ovlp_ tag below it replaces): x0=cond
+# (informative-start ODE, see sphere_flow.py's sample_ode docstring) REPLACES the
+# x0~N(0,I) noise-start version of the SAME highpass_residual formulation trained
+# just hours earlier (job 4250188/4250214, dir hpres_ovlp_...) -- apply_sphere_flow.py
+# now ALSO hard-rejects checkpoints missing meta['x0_mode']=='cond', so this must
+# never collide with that run name (not interchangeable: that checkpoint was never
+# shown an x0 anywhere near cond during training). Older direct_ovlp_* runs are a
+# separate, earlier-still incompatible formulation (see the highpass_residual note
+# this replaced).
+RUN_NAME=${RUN_NAME:-x0cond_hpres_ovlp_${DATA_TAG}nside${NSIDE}_o${ORDER}_n${NPATCH}_h${HIDDEN}_b${BATCH}_e${EPOCHS}}
 OUT_DIR="/capstor/scratch/cscs/damrein/outputs/sphereflow/${RUN_NAME}"
 mkdir -p "$PATCH_DIR" "$OUT_DIR" /capstor/scratch/cscs/damrein/outputs/logs/sphereflow
 
@@ -157,15 +190,28 @@ else
   echo '[stage1] patch dataset already exists, skipping'
 fi
 
-# ---- stage 2: DDP training, 1 node / 4 GPUs (torchrun --standalone) ----
-srun --nodes=1 --ntasks=1 uenv run pytorch/v2.9.1:v2 --view=default -- bash -c "
+# ---- stage 2: DDP training, GENUINE multi-node (${SLURM_NNODES} nodes x 4 GPU) --
+# see the header warning above. c10d rendezvous: one torchrun launcher task per
+# node (--ntasks-per-node=1, NOT one task per GPU -- torchrun itself spawns the 4
+# per-GPU worker processes on each node), all pointed at node 0's address (same
+# pattern as diffusion/run_diffusion.sh's stage 2). ----
+MASTER_ADDR=$(scontrol show hostnames "${SLURM_JOB_NODELIST}" | head -n1)
+MASTER_PORT=29500
+echo "[stage2] multi-node rendezvous: ${SLURM_NNODES} nodes, master=${MASTER_ADDR}:${MASTER_PORT}"
+
+srun --nodes=${SLURM_NNODES} --ntasks-per-node=1 --gres=gpu:4 uenv run pytorch/v2.9.1:v2 --view=default -- bash -c "
   source ${VENV}/bin/activate
   cd ${SPHEREFLOW}
-  python -m torch.distributed.run --standalone --nproc_per_node=4 train_sphere_flow.py \
+  python -m torch.distributed.run \
+    --nnodes=${SLURM_NNODES} --nproc_per_node=4 \
+    --rdzv_id=${SLURM_JOB_ID} --rdzv_backend=c10d --rdzv_endpoint=${MASTER_ADDR}:${MASTER_PORT} \
+    train_sphere_flow.py \
     --patch-dir '${PATCH_DIR}' \
     --out-dir   '${OUT_DIR}' \
+    --no-lr-scaling \
     --epochs ${EPOCHS} --batch-size ${BATCH} --lr ${LR} \
     --hidden ${HIDDEN} --n-layers ${N_LAYERS} --K ${K} \
+    --hp-n-iter ${HP_N_ITER} --hp-alpha ${HP_ALPHA} \
     --val-frac ${VAL_FRAC} --seed ${SEED} ${TEST_COSMOS_FLAG} \
     --num-workers $((SLURM_CPUS_PER_TASK / 4))
 "
@@ -200,9 +246,12 @@ srun --nodes=1 --ntasks=1 uenv run pytorch/v2.9.1:v2 --view=default -- bash -c "
 #      written). run_diagnostics_only.sh gets its OWN 12h single-GPU walltime.
 #      Depends on THIS job (afterok) so it only runs if training succeeded, and
 #      reads the held-out set from ${OUT_DIR}/meta.npz (no --run-dirs drift).
-sbatch --dependency=afterok:${SLURM_JOB_ID} \
+#      --nodes=${EVAL_NODES} overrides run_diagnostics_only.sh's own header default
+#      (see EVAL_NODES above) -- a fresh sbatch submission does not inherit THIS
+#      job's node allocation automatically.
+sbatch --dependency=afterok:${SLURM_JOB_ID} --nodes=${EVAL_NODES} \
        --export=ALL,MODEL_DIR="${OUT_DIR}",DATA_ROOT="${DATA_ROOT}",EVAL_OUT_DIR="${OUT_DIR}/eval",NSIDE="${NSIDE}",STEPS="${STEPS}",MAX_COSMOLOGIES="${MAX_COSMOLOGIES}",KAPPA="${KAPPA}",NSIDE_CENTERS="${NSIDE_CENTERS:-}",TAPER_POWER="${TAPER_POWER:-}" \
        ${SPHEREFLOW}/run_diagnostics_only.sh \
-  && echo "[stage 3] diagnostics job submitted (afterok:${SLURM_JOB_ID}) -> ${OUT_DIR}/eval"
+  && echo "[stage 3] diagnostics job submitted (afterok:${SLURM_JOB_ID}, --nodes=${EVAL_NODES}) -> ${OUT_DIR}/eval"
 
 echo "sphere-flow TRAINING job ${SLURM_JOB_ID} finished at $(date) -> ${OUT_DIR} (eval runs as a dependent job)"

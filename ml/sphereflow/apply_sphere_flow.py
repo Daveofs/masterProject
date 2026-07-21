@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Sample the sphere-flow model (formulation=direct) on held-out cosmologies and
-run it through the SAME shared analysis/ diagnostics apply_transfer.py uses --
-for direct, apples-to-apples comparison against the transfer-function baseline's
-plots.
+"""Sample the sphere-flow model (formulation=highpass_residual) on held-out
+cosmologies and run it through the SAME shared analysis/ diagnostics
+apply_transfer.py uses -- for direct, apples-to-apples comparison against the
+transfer-function baseline's plots.
 
 Why sphereflow, not the other ML candidates (survey done 2026-07-14, see
 [[deepsphere-shell-correction]] memory): of almflow / sphereflow / unet_diff /
@@ -44,10 +44,16 @@ are on/tuned by default (bf16 autocast + torch.compile reduce-overhead + a
 bigger inference batch than training's memory-bound sweet spot) -- see
 sphere_flow.sample_ode's docstring for why this doesn't lose precision.
 
-Only formulation='direct' checkpoints are supported (condition on raw DISCO,
-generate the high-res signal directly) -- a 'residual' checkpoint would need the
-transfer-corrected map as its conditioning input, not the raw low map the
-plotting stages below load.
+Only formulation='highpass_residual' checkpoints are supported (2026-07-21;
+condition on raw DISCO, generate a graph-highpass residual, compose corrected =
+cond + highpass(sample) -- large scales pinned exactly to DISCO, see
+sphere_flow.py's high-pass section). This REPLACES two older, no-longer-supported
+formulations: 'direct' (whole signal generated from noise -- run 3826942 above,
+the 2026-07-14 survey winner; measured to show a several-percent systematic LOW
+bias in kappa Cl at every ell once evaluated more rigorously, see
+[[deepsphere-shell-correction]] memory) and 'residual' (full-band cond +
+resid_scale*sample, which would have needed the transfer-corrected map as its
+conditioning input, not the raw low map the plotting stages below load).
 
   python apply_sphere_flow.py \\
       --model-dir /capstor/scratch/cscs/damrein/outputs/sphereflow/3826942 \\
@@ -126,13 +132,19 @@ def _is_num(v):
 def correct_shell(net, meta, in_map, cosmo_vec, device, steps, patch_batch, amp: bool = False):
     """Flow-corrected physical map for one shell, conditioned on the input map.
 
-    formulation='direct'  : the sample IS the corrected signal.
-    formulation='residual': corrected signal = cond + resid_scale * sample.
+    formulation='highpass_residual' (current, 2026-07-21): corrected = cond +
+        graph_highpass(sample) -- large (graph-smooth) scales pinned exactly to
+        cond, see sphere_flow.py's high-pass section for why.
+    formulation='direct'  (old): the sample IS the corrected signal.
+    formulation='residual' (old): corrected signal = cond + resid_scale * sample.
     """
     order = int(meta["order"])
+    nside = int(meta["nside"])
     scale, soft = float(meta["sig_scale"]), float(meta["softening"])
     rscale = float(meta["resid_scale"])
     formulation = str(meta.get("formulation", "residual"))
+    hp_n_iter = int(meta.get("hp_n_iter", 20))
+    hp_alpha = float(meta.get("hp_alpha", 0.25))
 
     # in_map is RING (the .npy stacks are RING). Reorder RING->NESTED so
     # map_to_patches' contiguous slices are compact superpixels matching the
@@ -150,7 +162,17 @@ def correct_shell(net, meta, in_map, cosmo_vec, device, steps, patch_batch, amp:
         r = sf.sample_ode(net, c, cosmo.expand(c.shape[0], -1), steps=steps, amp=amp)
         out[b:b + patch_batch] = r.cpu().numpy()
 
-    if formulation == "direct":
+    if formulation == "highpass_residual":
+        # sample_ode now starts from x0=cond (see sphere_flow.py's 2026-07-21
+        # informative-start change) and integrates to an estimate of the FULL
+        # target end-state x1=cond+residual, not the residual alone -- so
+        # `out - cond` recovers the effective residual compose_corrected expects
+        # (exactly unet/apply_flow.py's `raw - x0` pattern).
+        cond_t = torch.from_numpy(cond.astype(np.float32)).to(device)
+        out_t = torch.from_numpy(out.astype(np.float32)).to(device)
+        composed = sf.compose_corrected(cond_t, out_t - cond_t, nside, order, hp_n_iter, hp_alpha)
+        sig = sf.patches_to_maps(composed.cpu().numpy(), order, 1)[0]
+    elif formulation == "direct":
         sig = sf.patches_to_maps(out, order, 1)[0]
     else:
         sig = sf.patches_to_maps(cond + rscale * out, order, 1)[0]
@@ -165,7 +187,7 @@ def correct_shell(net, meta, in_map, cosmo_vec, device, steps, patch_batch, amp:
 
 @torch.no_grad()
 def overlap_correct_shell(net, meta, in_map, cosmo_vec, device, steps, patch_batch,
-                          nside_centers, amp: bool = False, taper_power: float = 8.0):
+                          nside_centers, amp: bool = False, taper_power: float = 1.0):
     """Flow-corrected physical map for one shell, OVERLAPPING taper-blended
     patches instead of correct_shell's disjoint, non-overlapping blocks -- for
     checkpoints trained by the 2026-07-20 overlap-capable make_patch_dataset.py
@@ -173,24 +195,27 @@ def overlap_correct_shell(net, meta, in_map, cosmo_vec, device, steps, patch_bat
     geometry" section). Same formulation handling / normalization / RING<->NESTED
     convention as correct_shell -- only the patch extraction + reassembly differ.
 
-    taper_power: sphereflow's ODE draws x0 ~ N(0,I) fresh PER PATCH (unlike
-    unet's deterministic x0=low), so -- exactly like diffusion's own overlap
-    tiling -- overlapping patches predict INDEPENDENT stochastic samples of the
-    same sky region, and a plain (taper_power=1) weighted average shrinks the
-    injected small-scale power (a weighted mean of N_eff independent draws keeps
-    the conditional-mean part but damps the stochastic part by 1/sqrt(N_eff)).
-    Default 8.0 is an UNTUNED starting point reasoned from diffusion's own
-    measured knee (p=32 at ~16x mean overlap, see analysis.patch_tiling and
-    diffusion/apply_diffusion.py's --taper-power docstring) and this scheme's
-    similar ~16x mean overlap (see sphere_flow.auto_overlap_nside_centers) --
-    re-measure the actual Cl-ratio-vs-taper_power knee on a real trained
-    checkpoint before trusting this value, the same way diffusion's was
-    calibrated post-hoc, not assumed."""
+    taper_power: CHANGED 2026-07-21 default 8.0 -> 1.0, following sphere_flow.py's
+    switch to x0=cond (informative start, not noise -- see sample_ode's docstring).
+    The OLD default (8.0, sharpened toward nearest-tile-wins) was reasoned from
+    x0~N(0,I): overlapping patches drew INDEPENDENT noise, so they predicted
+    independent stochastic samples of the same sky region, and plain averaging
+    (taper_power=1) shrunk the injected small-scale power (exactly diffusion's own
+    overlap problem). With x0=cond now, overlapping patches see the SAME
+    deterministic starting point for their shared sky region, so they should
+    largely AGREE the way unet's overlapping (also x0=low) tiles do -- unet uses
+    taper_power=1.0 for exactly this reason (see unet/apply_flow.py's --taper-power
+    docstring). Re-measure the actual Cl-ratio-vs-taper_power knee on a real
+    trained checkpoint before assuming 1.0 is exactly right here too -- the
+    boundary/receptive-field disagreement unet's docstring flags (edge pixels see
+    different local context per tile) could still argue for mild sharpening."""
     order = int(meta["order"])
     nside = int(meta["nside"])
     scale, soft = float(meta["sig_scale"]), float(meta["softening"])
     rscale = float(meta["resid_scale"])
     formulation = str(meta.get("formulation", "residual"))
+    hp_n_iter = int(meta.get("hp_n_iter", 20))
+    hp_alpha = float(meta.get("hp_alpha", 0.25))
 
     idx, _centers = sf.healpix_overlap_index_maps(nside, order, nside_centers)  # (n_centers, npix_patch) NESTED ids
     ring_idx = hp.nest2ring(nside, idx)
@@ -210,8 +235,14 @@ def overlap_correct_shell(net, meta, in_map, cosmo_vec, device, steps, patch_bat
         cond_np = signal_full[batch_ring_idx]                                    # (B, npix_patch)
         c = torch.from_numpy(cond_np.astype(np.float32)).to(device)
         r = sf.sample_ode(net, c, cosmo.expand(c.shape[0], -1), steps=steps, amp=amp)
-        out = r.cpu().numpy().astype(np.float64)                                 # (B, npix_patch)
-        patch_sig = out if formulation == "direct" else cond_np + rscale * out
+        if formulation == "highpass_residual":
+            # r estimates the FULL target end-state (cond+residual) now that
+            # sample_ode starts from x0=cond -- see correct_shell's identical note.
+            composed = sf.compose_corrected(c, r - c, nside, order, hp_n_iter, hp_alpha)
+            patch_sig = composed.cpu().numpy().astype(np.float64)
+        else:
+            out = r.cpu().numpy().astype(np.float64)                             # (B, npix_patch)
+            patch_sig = out if formulation == "direct" else cond_np + rscale * out
         for k in range(batch_ring_idx.shape[0]):
             ring_ids = batch_ring_idx[k]
             np.add.at(accum, ring_ids, patch_sig[k] * taper)
@@ -700,7 +731,12 @@ def main():
                         "2048 default silently looked for the wrong files, job 4221138).")
     p.add_argument("--lmax", type=int, default=3000,
                    help="Capped internally at 3*nside-1 (e.g. 1535 for a 512 model).")
-    p.add_argument("--steps", type=int, default=50, help="ODE integration steps/shell.")
+    p.add_argument("--steps", type=int, default=8,
+                   help="ODE integration steps/shell. 50 -> 8 (2026-07-21): "
+                        "sample_ode now starts from x0=cond (informative start, "
+                        "not noise), so the trajectory is close to straight and "
+                        "needs far fewer steps -- matches unet/flow_model's own "
+                        "default exactly, same underlying reasoning.")
     p.add_argument("--patch-batch", type=int, default=512,
                    help="Patches sampled per forward-batch. 3072 (order=16's "
                         "12*order^2 patch count) divides evenly by 256/512/768/1024/"
@@ -724,12 +760,15 @@ def main():
                         "sphere_flow.auto_overlap_nside_centers (~16x mean overlap, "
                         "matching analysis.patch_tiling's own target density). "
                         "Ignored for pre-2026-07-20 disjoint checkpoints.")
-    p.add_argument("--taper-power", type=float, default=8.0,
+    p.add_argument("--taper-power", type=float, default=1.0,
                    help="OVERLAP checkpoints only: blend-weight sharpening (see "
-                        "overlap_correct_shell's docstring) -- UNTUNED default, "
-                        "reasoned from diffusion's own measured p=32 knee at a "
-                        "similar ~16x overlap; re-measure the Cl-ratio-vs-taper_power "
-                        "knee on a real trained checkpoint before trusting it.")
+                        "overlap_correct_shell's docstring). 8.0 -> 1.0 (2026-07-21): "
+                        "with x0=cond (informative start, not noise) overlapping "
+                        "patches should largely AGREE rather than predict "
+                        "independent stochastic samples, so plain averaging "
+                        "(matching unet's own default) is the reasoned starting "
+                        "point now -- re-measure the Cl-ratio-vs-taper_power knee "
+                        "on a real trained checkpoint before trusting it.")
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--method-label", default=None,
                    help="Defaults to 'sphereflow ({formulation}, {model-dir name})'.")
@@ -827,16 +866,43 @@ def main():
             f"{model_nside} (meta.npz) -- the net can only correct maps at its "
             f"trained resolution. Drop --nside to use the model's value.")
     formulation = str(meta.get("formulation", "residual"))
-    if formulation != "direct":
+    # HARD ERROR, not a default: this script only supports the CURRENT high-pass
+    # residual formulation (2026-07-21, see sphere_flow.py's module docstring).
+    # Both older formulations condition on raw DISCO (so this guard is not about
+    # conditioning input, unlike the old "residual" formulation's tcorr_shells_
+    # nside=*.npy note this replaces) but let the model drift cond's large scales --
+    # 'direct' (whole signal from noise, the checkpoint that showed the kappa Cl
+    # bias below 1.0 at every ell, job 4247908) and the old 'residual' (full-band
+    # cond+resid_scale*sample, same problem, no highpass pinning). Composing either
+    # with compose_corrected would silently corrupt the output (it was never
+    # trained to have its large scales pinned), hence a hard refusal, not a fallback.
+    if formulation != "highpass_residual":
         raise SystemExit(
-            f"this script only supports formulation='direct' checkpoints (condition "
-            f"on raw DISCO) -- {args.model_dir} is '{formulation}'. A residual "
-            f"checkpoint needs the T-corrected map (tcorr_shells_nside=*.npy) as its "
-            f"conditioning input, not the raw low map the plotting stages here load -- "
-            f"not currently supported (no known-good residual checkpoint exists; the "
-            f"only complete, non-crashed sphereflow checkpoint from the 2026-07-14 "
-            f"survey is direct/3826942).")
-    method_label = args.method_label or f"sphereflow ({formulation}, {Path(args.model_dir).name})"
+            f"this script only supports formulation='highpass_residual' checkpoints "
+            f"-- {args.model_dir} is '{formulation}'. Retrain with the current "
+            f"train_sphere_flow.py (produces this formulation by default), or "
+            f"evaluate with an older apply_sphere_flow.py if you specifically need "
+            f"the old 'direct'/'residual' behavior.")
+    # SEPARATE hard guard (2026-07-21): x0=cond (informative start) replaces
+    # x0~N(0,I) -- see sphere_flow.py's sample_ode docstring. A checkpoint can have
+    # formulation="highpass_residual" but predate THIS change (e.g. job 4250188,
+    # trained the same day just before it) -- it was trained expecting xt to start
+    # near NOISE, not near cond, so sampling it via the new default would be
+    # out-of-distribution garbage, not just a different speed/quality tradeoff.
+    x0_mode = str(meta.get("x0_mode", "noise"))
+    if x0_mode != "cond":
+        raise SystemExit(
+            f"this script only supports x0_mode='cond' checkpoints (informative-"
+            f"start ODE, see sphere_flow.py's sample_ode docstring) -- "
+            f"{args.model_dir} is x0_mode='{x0_mode}' (trained expecting the ODE "
+            f"to start from noise). Retrain with the current train_sphere_flow.py.")
+    # SHORT by default (2026-07-21): embedding the full run directory name (e.g.
+    # "x0cond_hpres_ovlp_nside512_o16_n100000_h128_b248_e40") made legend/title
+    # text so long it visibly corrupted plot_cl_ratio_pctile_grid's subplot layout
+    # (panels squeezed/misaligned to make room for the label). unet/diffusion's own
+    # labels are just "flow"/"diffusion" -- match that convention; pass
+    # --method-label explicitly if you need the run name in a specific plot.
+    method_label = args.method_label or "sphereflow"
 
     if args.run_dirs:
         run_dirs = [Path(r) for r in args.run_dirs]

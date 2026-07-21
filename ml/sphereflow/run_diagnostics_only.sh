@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --nodes=1
+#SBATCH --nodes=4
 #SBATCH --job-name=sphereflow-compare
 #SBATCH --partition=normal
 #SBATCH --account=sk037
@@ -43,8 +43,9 @@
 #
 # Single GPU, single cosmology (cosmo_000122 -- the only one this checkpoint was
 # actually held out on). --kappa is the cost driver: on top of the ~20-35 unique
-# shells the patch/full-sky/zbin-grid diagnostics ODE-sample (50 steps each, cached
-# and reused across plot stages), it samples EVERY usable shell in z<=1.05 (dozens).
+# shells the patch/full-sky/zbin-grid diagnostics ODE-sample (8 steps each since
+# the 2026-07-21 x0=cond change, cached and reused across plot stages), it samples
+# EVERY usable shell in z<=1.05 (dozens).
 # Drop --kappa below (and expect a few minutes to ~an hour instead) if you only want
 # the cheaper diagnostics.
 #
@@ -85,8 +86,8 @@ export OMP_NUM_THREADS=$(( ${SLURM_CPUS_PER_TASK:-128} / GPUS_PER_NODE ))
 # cosmos, not 200 grid ones (checked: its patch set nside512_order16_n200000
 # holds exactly the 44 cosmogridv1 cosmos; DATA_ROOT/DATA_TAG defaults won at
 # its submission), so its 7 held-out cosmos only have data under cosmogridv1.
-DATA_ROOT="${DATA_ROOT:-/capstor/scratch/cscs/damrein/grid}"
-MODEL_DIR="${MODEL_DIR:-/capstor/scratch/cscs/damrein/outputs/sphereflow/direct_grid_nside512_o16_n200000_h128_b128_e40}"
+DATA_ROOT="${DATA_ROOT:-/capstor/scratch/cscs/damrein/cosmogridv1}"
+MODEL_DIR="${MODEL_DIR:-/capstor/scratch/cscs/damrein/outputs/sphereflow/x0cond_hpres_ovlp_nside512_o16_n100000_h128_b248_e40}"
 OUT_DIR="${EVAL_OUT_DIR:-${MODEL_DIR}/eval}"
 # NSIDE deliberately UNSET by default: apply_sphere_flow.py now takes the data
 # nside from the model's own meta.npz (a 512 model + this script's old hardcoded
@@ -94,7 +95,10 @@ OUT_DIR="${EVAL_OUT_DIR:-${MODEL_DIR}/eval}"
 # to force a mismatch check.
 NSIDE_FLAG=""; [ -n "${NSIDE}" ] && NSIDE_FLAG="--nside ${NSIDE}"
 LMAX="${LMAX:-3000}"
-STEPS="${STEPS:-10}"
+# 10 -> 8 (2026-07-21): matches apply_sphere_flow.py's own new default now that
+# sample_ode starts from x0=cond (informative start, see sphere_flow.py's
+# docstring) instead of noise -- far fewer steps needed.
+STEPS="${STEPS:-8}"
 MAX_COSMOLOGIES="${MAX_COSMOLOGIES:-10}"
 KAPPA="${KAPPA:-1}"
 KAPPA_FLAG=""; [ "${KAPPA}" = "1" ] && KAPPA_FLAG="--kappa --kappa-nside 1024 --kappa-lmax 2048"
@@ -102,6 +106,7 @@ KAPPA_FLAG=""; [ "${KAPPA}" = "1" ] && KAPPA_FLAG="--kappa --kappa-nside 1024 --
 # ignored for pre-2026-07-20 disjoint checkpoints. Both left UNSET by default so
 # apply_sphere_flow.py's own auto-scaled/UNTUNED defaults apply; override to
 # re-run diagnostics at a different center density / taper sharpness.
+NSIDE_CENTERS="${NSIDE_CENTERS:-32}"
 NSIDE_CENTERS_FLAG=""; [ -n "${NSIDE_CENTERS}" ] && NSIDE_CENTERS_FLAG="--nside-centers ${NSIDE_CENTERS}"
 TAPER_POWER_FLAG=""; [ -n "${TAPER_POWER}" ] && TAPER_POWER_FLAG="--taper-power ${TAPER_POWER}"
 mkdir -p "$OUT_DIR" /capstor/scratch/cscs/damrein/outputs/logs/sphereflow

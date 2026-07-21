@@ -22,8 +22,8 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
 
-from dataset import PatchDataset, split_by_cosmo, raw_to_log1p_delta_pair, cosmo_z_vector
-from flow_model import FlowUNet
+from dataset import PatchDataset, split_by_cosmo, transform_pair, cosmo_z_vector
+from flow_model import FlowUNet, residual_target
 
 
 def is_distributed():
@@ -39,7 +39,8 @@ def reduce_mean(value: float, device) -> float:
 
 
 def run_epoch(model, loader, optimizer, device, train: bool, epoch: int,
-              grad_clip: float, is_main: bool, log_every: int = 100, wandb_run=None):
+              grad_clip: float, is_main: bool, hp_cutoff: float, hp_transition: float,
+              space: str, log_every: int = 100, wandb_run=None):
     model.train(train)
     if isinstance(loader.sampler, DistributedSampler):
         loader.sampler.set_epoch(epoch)
@@ -52,7 +53,11 @@ def run_epoch(model, loader, optimizer, device, train: bool, epoch: int,
         for step, batch in enumerate(loader):
             low_raw = batch["low"].to(device, non_blocking=True)
             high_raw = batch["high"].to(device, non_blocking=True)
-            x0, x1 = raw_to_log1p_delta_pair(low_raw, high_raw)
+            x0, high_f = transform_pair(low_raw, high_raw, space)
+            # HIGH-PASS RESIDUAL target (see flow_model.py's module docstring): x1 is
+            # IDENTICAL to x0 at large scales, so the target velocity x1-x0 is a pure
+            # high-pass field -- the ODE can only ever add small-scale content.
+            x1 = x0 + residual_target(x0, high_f, hp_cutoff, hp_transition)
 
             # built unconditionally -- forward() ignores it when the model was
             # constructed with use_cosmo_cond=False, so no branching needed here.
@@ -110,6 +115,25 @@ def main():
                         "shell redshift, injected at the bottleneck latent (see "
                         "flow_model.FlowUNet). Default: on. Pass --no-use-cosmo-cond to "
                         "train the original, unconditioned model for an A/B comparison.")
+    # High-pass residual formulation (see flow_model.py's module docstring): the flow
+    # target x1 is x0 + highpass(high-x0), so it can only ever ADD small-scale
+    # content, never drift x0's already-correct large scales. Same defaults/semantics
+    # as diffusion/train_diffusion.py's --hp-cutoff/--hp-transition (fractions of
+    # patch Nyquist) -- MUST be saved into the checkpoint (they are, via args.json/
+    # ckpt["args"]) so apply_flow.py composes with the exact cutoff the target used.
+    p.add_argument("--hp-cutoff", type=float, default=0.10,
+                   help="high-pass cutoff as a fraction of patch Nyquist (below this: "
+                        "pinned to the low map, not generated)")
+    p.add_argument("--hp-transition", type=float, default=0.10,
+                   help="width of the raised-cosine hand-over band above --hp-cutoff, "
+                        "as a fraction of patch Nyquist")
+    # 'delta' (linear overdensity) is the space analysis.full_sky.od_cl actually
+    # measures -- see dataset.raw_to_delta_pair for why 'log1p' was a formulation bug
+    # (identical finding to diffusion/train_diffusion.py's --space). 'log1p' kept for
+    # comparison only.
+    p.add_argument("--space", choices=["delta", "log1p"], default="delta",
+                   help="field the residual is modelled in (default: delta, the space "
+                        "od_cl measures)")
     p.add_argument("--grad-clip", type=float, default=1.0)
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
@@ -210,14 +234,17 @@ def main():
     n_params = sum(p.numel() for p in (model.module if distributed else model).parameters())
     if is_main:
         print(f"[train_flow] model has {n_params:,} parameters, device={device}, lr={lr:.2e}, "
-              f"use_cosmo_cond={args.use_cosmo_cond}")
+              f"use_cosmo_cond={args.use_cosmo_cond}, space={args.space}, "
+              f"hp_cutoff={args.hp_cutoff}, hp_transition={args.hp_transition}")
 
     for epoch in range(start_epoch, args.epochs):
         t0 = time.time()
         train_loss = run_epoch(model, train_loader, optimizer, device, True,
-                                epoch, args.grad_clip, is_main, wandb_run=wandb_run)
+                                epoch, args.grad_clip, is_main, args.hp_cutoff,
+                                args.hp_transition, args.space, wandb_run=wandb_run)
         val_loss = run_epoch(model, val_loader, optimizer, device, False,
-                              epoch, args.grad_clip, is_main, wandb_run=wandb_run)
+                              epoch, args.grad_clip, is_main, args.hp_cutoff,
+                              args.hp_transition, args.space, wandb_run=wandb_run)
         scheduler.step()
         dt = time.time() - t0
 
