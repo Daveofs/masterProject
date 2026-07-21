@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --nodes=4
+#SBATCH --nodes=1
 #SBATCH --job-name=diffusion
 #SBATCH --partition=normal
 #SBATCH --account=sk037
@@ -174,10 +174,18 @@ srun --nodes=${SLURM_NNODES} --ntasks-per-node=1 --gres=gpu:4 uenv run pytorch/v
 "
 
 # ---- stage 3: loss/val plot + apply on held-out test patches + full-sky Cl (glue) ----
-srun --nodes=1 --ntasks=1 --gres=gpu:1 uenv run pytorch/v2.9.1:v2 --view=default -- bash -c "
+# EVAL_GPUS: apply_diffusion.py now splits its two dominant-cost sections (the
+# zbin-grid and kappa reconstructions, one held-out cosmology's worth of ODE
+# sampling per rank) across this many GPUs via torch.distributed -- single NODE,
+# multi-GPU only (intra-node NVLink, the same "stay off the fabric" constraint the
+# header note above explains for training). 4 to match this job's own allocation;
+# harmless to drop to 1 (falls back to the original single-process path).
+EVAL_GPUS=${EVAL_GPUS:-4}
+srun --nodes=1 --ntasks=1 --gres=gpu:${EVAL_GPUS} uenv run pytorch/v2.9.1:v2 --view=default -- bash -c "
   source ${VENV}/bin/activate
   python ${DIFFUSION}/plot_diffusion_loss.py --run-dir '${OUT_DIR}'
-  python ${DIFFUSION}/apply_diffusion.py \
+  python -m torch.distributed.run --nnodes=1 --nproc_per_node=${EVAL_GPUS} \
+    ${DIFFUSION}/apply_diffusion.py \
     --patch-dir '${PATCH_DIR}' \
     --model     '${OUT_DIR}/best.pt' \
     --out-dir   '${OUT_DIR}/eval' \

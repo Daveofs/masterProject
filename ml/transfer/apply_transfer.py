@@ -679,8 +679,12 @@ def main():
 
     # --- plot_cl_zbin_grid args (multi-cosmology Cl-ratio-by-redshift-bin pctile
     # grid, mirrors unet/apply_flow.py's cl_ratio_by_zbin_grid.png) ---
-    p.add_argument("--zbin-start", type=int, default=0,
-                   help="Skip the sparsest low shells (see zbin_shell_samples).")
+    p.add_argument("--zbin-start", type=int, default=5,
+                   help="first shell in the Cl-ratio-by-redshift-bin grid. 5 (was 0, "
+                        "changed 2026-07-20): shell 0 shows weird behaviour in the "
+                        "grid's first panel (user-observed, job 4247908) -- excluded. "
+                        "Same default as unet/diffusion/sphereflow so all pipelines' "
+                        "grids keep binning the SAME shells.")
     p.add_argument("--n-zbins", type=int, default=3,
                    help="Redshift/shell bins (grid columns). 0 skips this plot.")
     p.add_argument("--n-shells-per-zbin", type=int, default=5,

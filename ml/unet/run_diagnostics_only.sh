@@ -4,7 +4,7 @@
 #SBATCH --partition=normal
 #SBATCH --account=sk037
 #SBATCH --ntasks-per-node=1
-#SBATCH --gres=gpu:1
+#SBATCH --gres=gpu:4
 #SBATCH --cpus-per-task=128
 #SBATCH --time=10:00:00
 #SBATCH --output=/capstor/scratch/cscs/damrein/outputs/logs/unet/diag-%j.out
@@ -34,20 +34,46 @@ UNET=/users/damrein/masterProject/ml/unet
 # end-to-end 2026-07-15) -- the OLD default (flow_nside2048_patch256_..._cond) was
 # never actually trained (only apply_flow.py's own eval/ dir existed there), so
 # every run_diagnostics_only.sh submission failed loading best.pt from it.
-DATA_ROOT=${DATA_ROOT:-/capstor/scratch/cscs/damrein/grid}
-PATCH_DIR=${PATCH_DIR:-/capstor/scratch/cscs/damrein/outputs/flowpatches/grid_nside512_256_100000}
-OUT_DIR=${OUT_DIR:-/capstor/scratch/cscs/damrein/outputs/flowruns/flow_nside512_patch256_n100000_ch32_b32_e40_cond_cos200}
+DATA_ROOT=${DATA_ROOT:-/capstor/scratch/cscs/damrein/cosmogridv1}
+PATCH_DIR=${PATCH_DIR:-/capstor/scratch/cscs/damrein/outputs/flowpatches/cosmogridv1_nside512_256_100000}
+OUT_DIR=${OUT_DIR:-/capstor/scratch/cscs/damrein/outputs/flowruns/flow_cosmogridv1_nside512_patch256_n100000_ch32_b248_e40}
 
 export PYTHONUNBUFFERED=1
+# EVAL_GPUS defined here (used below by both OMP_NUM_THREADS and the torchrun launch)
+# -- apply_flow.py splits its zbin-grid/kappa sections (dominant cost) across this
+# many GPUs via torch.distributed, single-node intra-NVLink. Drop to 1 to fall back
+# to the original single-process path.
+EVAL_GPUS=${EVAL_GPUS:-4}
 # Pin OpenMP-using CPU work (healpy's Cl/anafast, UFalcon's kappa-map construction)
-# to the cores SLURM actually allocated (--cpus-per-task=128 above) -- unset, these
-# libraries can silently default to 1 thread inside a cgroup, wasting most of the
-# allocation on the CPU-bound diagnostic stages.
-export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK:-128}"
+# to the cores SLURM actually allocated (--cpus-per-task=128 above), DIVIDED across
+# the EVAL_GPUS concurrent rank processes -- the parallel zbin-grid/kappa sections
+# run all ranks' CPU-bound work at once, so giving every rank the full core count
+# would oversubscribe (EVAL_GPUS x 128 threads contending for 128 cores).
+export OMP_NUM_THREADS=$(( ${SLURM_CPUS_PER_TASK:-128} / EVAL_GPUS ))
 # weak-lensing kappa map diagnostic -- off by default, see run_flow.sh's KAPPA note.
 KAPPA=${KAPPA:-1}
 KAPPA_FLAG=""; [ "${KAPPA}" = "1" ] && KAPPA_FLAG="--kappa"
 MAX_COSMOLOGIES=${MAX_COSMOLOGIES:-10}
+# --amp defaults to True in apply_flow.py (added 2026-07-20, UNTESTED at the time) --
+# AMP=0 here lets a diagnostics-only rerun test whether bf16 autocast in
+# flow_model.sample_ode is responsible for a suspected regression (job 4248318's
+# cl_ratio_by_zbin_grid.png: catastrophic percentile-band blowup on faint shells +
+# a systematic below-baseline bias) before assuming it's a tiling/model issue.
+AMP=${AMP:-1}
+AMP_FLAG=""; [ "${AMP}" = "0" ] && AMP_FLAG="--no-amp"
+# --no-amp (tested 2026-07-20, job 4248443) reproduced the SAME cl_ratio_by_zbin_grid.png
+# failure as --amp (job 4248318) -- catastrophic low-ell percentile-band collapse on
+# faint shells + a systematic below-baseline bias -- so AMP is ruled out. Next
+# hypothesis: --taper-power (already a supported flag, default 1.0 -- see
+# apply_flow.py's help, reasoned from unet's ODE being deterministic so overlapping
+# tiles "should" agree). That reasoning may break down on faint/low-count shells,
+# where each tile normalizes by its OWN local mean before integrating -- a boundary
+# landing differently on a sparse shell can make overlapping tiles genuinely
+# disagree (not from stochastic noise, but window-dependent normalization), and a
+# plain average (taper_power=1) blends that disagreement destructively. Test
+# TAPER_POWER=32 (diffusion's tuned value) here before assuming it transfers as-is.
+TAPER_POWER=${TAPER_POWER:-}
+TAPER_POWER_FLAG=""; [ -n "${TAPER_POWER}" ] && TAPER_POWER_FLAG="--taper-power ${TAPER_POWER}"
 
 # SPEED: job 4201387 TIMED OUT at 10h having done only 61 shell reconstructions --
 # full-sky tiling was re-projecting all 12288 gnomonic tiles from scratch for every
@@ -58,10 +84,11 @@ MAX_COSMOLOGIES=${MAX_COSMOLOGIES:-10}
 # the limiter. --kappa-max-cosmologies is therefore the real cost knob now, not the
 # tiling. NOTE: the index cache costs ~3.2GB RAM at nside=2048/patch=256.
 
-srun --nodes=1 --ntasks=1 --gres=gpu:1 uenv run pytorch/v2.9.1:v2 --view=default -- bash -c "
+srun --nodes=1 --ntasks=1 --gres=gpu:${EVAL_GPUS} uenv run pytorch/v2.9.1:v2 --view=default -- bash -c "
   source ${VENV}/bin/activate
   python ${UNET}/plot_flow_loss.py --run-dir '${OUT_DIR}'
-  python ${UNET}/apply_flow.py \
+  python -m torch.distributed.run --nnodes=1 --nproc_per_node=${EVAL_GPUS} \
+    ${UNET}/apply_flow.py \
     --patch-dir '${PATCH_DIR}' \
     --model     '${OUT_DIR}/best.pt' \
     --out-dir   '${OUT_DIR}/eval' \
@@ -69,6 +96,6 @@ srun --nodes=1 --ntasks=1 --gres=gpu:1 uenv run pytorch/v2.9.1:v2 --view=default
     --data-root '${DATA_ROOT}' \
     --shell-indices --example-shells 5 10 15 30 50 \
     --fullsky-patch-size 256 --max-cosmologies ${MAX_COSMOLOGIES} \
-    --kappa-max-cosmologies ${MAX_COSMOLOGIES} ${KAPPA_FLAG}
+    --kappa-max-cosmologies ${MAX_COSMOLOGIES} ${KAPPA_FLAG} ${AMP_FLAG} ${TAPER_POWER_FLAG}
 "
 echo "unet diagnostics-only job \${SLURM_JOB_ID} finished at \$(date) -> ${OUT_DIR}/eval"

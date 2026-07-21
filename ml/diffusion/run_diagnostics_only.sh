@@ -4,7 +4,7 @@
 #SBATCH --partition=normal
 #SBATCH --account=sk037
 #SBATCH --ntasks-per-node=1
-#SBATCH --gres=gpu:1
+#SBATCH --gres=gpu:4
 #SBATCH --cpus-per-task=128
 #SBATCH --time=10:00:00
 #SBATCH --output=/capstor/scratch/cscs/damrein/outputs/logs/diffusion/diag-%j.out
@@ -44,7 +44,7 @@ DIFFUSION=/users/damrein/masterProject/ml/diffusion
 # Defaults point at the DELTA-space nside=512 run (job 4237844) -- the current best
 # checkpoint. (The older diffusion_cosmogridv1_* runs are LOG1P-space and their
 # small-scale numbers are misleading, see dataset.raw_to_delta_pair.)
-DATA_ROOT=${DATA_ROOT:-/capstor/scratch/cscs/damrein/cosmogridv1}
+DATA_ROOT=${DATA_ROOT:-/capstor/scratch/cscs/damrein/grid}
 PATCH_DIR=${PATCH_DIR:-/capstor/scratch/cscs/damrein/outputs/flowpatches/grid_nside512_256_100000}
 OUT_DIR=${OUT_DIR:-/capstor/scratch/cscs/damrein/outputs/diffusionruns/diffusion_delta_grid_nside512_patch256_n100000_ch32_b32_e40}
 
@@ -58,11 +58,17 @@ RHO=${RHO:-7.0}
 TAPER_POWER=${TAPER_POWER:-32}
 
 export PYTHONUNBUFFERED=1
+# EVAL_GPUS defined here (used below by both OMP_NUM_THREADS and the torchrun launch)
+# -- apply_diffusion.py splits its zbin-grid/kappa sections (dominant cost) across
+# this many GPUs via torch.distributed, single-node intra-NVLink. Drop to 1 to fall
+# back to the original single-process path.
+EVAL_GPUS=${EVAL_GPUS:-4}
 # Pin OpenMP-using CPU work (healpy's Cl/anafast, UFalcon's kappa-map construction)
-# to the cores SLURM actually allocated (--cpus-per-task=128 above) -- unset, these
-# libraries can silently default to 1 thread inside a cgroup, wasting most of the
-# allocation on the CPU-bound diagnostic stages.
-export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK:-128}"
+# to the cores SLURM actually allocated (--cpus-per-task=128 above), DIVIDED across
+# the EVAL_GPUS concurrent rank processes -- the parallel zbin-grid/kappa sections
+# run all ranks' CPU-bound work at once, so giving every rank the full core count
+# would oversubscribe (EVAL_GPUS x 128 threads contending for 128 cores).
+export OMP_NUM_THREADS=$(( ${SLURM_CPUS_PER_TASK:-128} / EVAL_GPUS ))
 KAPPA=${KAPPA:-1}
 KAPPA_FLAG=""; [ "${KAPPA}" = "1" ] && KAPPA_FLAG="--kappa"
 # 3 cosmologies: enough for a REAL 16-84th percentile band (1 cosmology = no band at
@@ -78,10 +84,11 @@ mkdir -p /capstor/scratch/cscs/damrein/outputs/logs/diffusion
 # / MAX_COSMOLOGIES are the real cost knobs. Drop STEPS if this needs to fit in less
 # walltime (quality/speed tradeoff, unlike the tiling which is free after the cache).
 
-srun --nodes=1 --ntasks=1 --gres=gpu:1 uenv run pytorch/v2.9.1:v2 --view=default -- bash -c "
+srun --nodes=1 --ntasks=1 --gres=gpu:${EVAL_GPUS} uenv run pytorch/v2.9.1:v2 --view=default -- bash -c "
   source ${VENV}/bin/activate
   python ${DIFFUSION}/plot_diffusion_loss.py --run-dir '${OUT_DIR}'
-  python ${DIFFUSION}/apply_diffusion.py \
+  python -m torch.distributed.run --nnodes=1 --nproc_per_node=${EVAL_GPUS} \
+    ${DIFFUSION}/apply_diffusion.py \
     --patch-dir '${PATCH_DIR}' \
     --model     '${OUT_DIR}/best.pt' \
     --out-dir   '${OUT_DIR}/eval' \

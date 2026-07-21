@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --nodes=4
+#SBATCH --nodes=1
 #SBATCH --job-name=unet-flow
 #SBATCH --partition=normal
 #SBATCH --account=sk037
@@ -37,7 +37,7 @@
 
 export UENV_REPO_PATH=/capstor/scratch/cscs/damrein/.uenv-images
 VENV=/capstor/scratch/cscs/damrein/venvs/sphereflow
-DATA_ROOT="/capstor/scratch/cscs/damrein/grid"
+DATA_ROOT="/capstor/scratch/cscs/damrein/cosmogridv1"
 # CosmoGridV1_metainfo.h5 (the cosmological-parameter catalog make_patch_dataset.py
 # needs) lives ONLY under cosmogridv1/, not replicated under grid/ or any other
 # subset dir -- pass it separately regardless of which DATA_ROOT is active (this is
@@ -144,10 +144,16 @@ srun --nodes=1 --ntasks=1 uenv run pytorch/v2.9.1:v2 --view=default -- bash -c "
 # with cl_ratio_by_zbin_grid.png); --example-shells 5 10 15 30 50 is the SAME shell
 # set transfer/apply_transfer.py and sphereflow/apply_sphere_flow.py use, so the
 # three pipelines' figures compare directly.
-srun --nodes=1 --ntasks=1 --gres=gpu:1 uenv run pytorch/v2.9.1:v2 --view=default -- bash -c "
+# EVAL_GPUS: apply_flow.py splits its two dominant-cost sections (the zbin-grid and
+# --kappa full-sky reconstructions) across this many GPUs via torch.distributed,
+# single-node intra-NVLink. 4 to match this job's own allocation; drop to 1 to fall
+# back to the original single-process path.
+EVAL_GPUS=${EVAL_GPUS:-4}
+srun --nodes=1 --ntasks=1 --gres=gpu:${EVAL_GPUS} uenv run pytorch/v2.9.1:v2 --view=default -- bash -c "
   source ${VENV}/bin/activate
   python ${UNET}/plot_flow_loss.py --run-dir '${OUT_DIR}'
-  python ${UNET}/apply_flow.py \
+  python -m torch.distributed.run --nnodes=1 --nproc_per_node=${EVAL_GPUS} \
+    ${UNET}/apply_flow.py \
     --patch-dir '${PATCH_DIR}' \
     --model     '${OUT_DIR}/best.pt' \
     --out-dir   '${OUT_DIR}/eval' \

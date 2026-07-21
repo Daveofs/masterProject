@@ -65,6 +65,7 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+from datetime import timedelta
 from pathlib import Path
 
 import numpy as np
@@ -437,14 +438,27 @@ def plot_full_sky(args, run_dirs: list[Path], corrected_by_run: dict, method_lab
     print(f"[plot_full_sky] figures -> {out_dir}", flush=True)
 
 
-def plot_cl_zbin_grid(args, run_dirs: list[Path], corrected_by_run: dict, method_label: str):
+def plot_cl_zbin_grid(args, run_dirs: list[Path], corrected_by_run: dict, method_label: str,
+                      rank: int = 0, world_size: int = 1, dist=None):
     """The primary Cl diagnostic, same as apply_transfer.py's stage of the same
     name: one row per held-out cosmology x one column per redshift bin, with a
     percentile band. Cheap PER SHELL here (just od_cl on arrays already in hand)
     but each shell not already touched by plot_patches/plot_full_sky triggers a
     fresh ODE sample via LazyCorrected -- with --max-cosmologies 1 (this
     checkpoint's only real held-out cosmology) and the default 3x5=15 zbin
-    shells, that is at most 15 NEW ODE samples beyond the ones already cached."""
+    shells, that is at most 15 NEW ODE samples beyond the ones already cached.
+
+    DOMINANT cost when --max-cosmologies is large: each cosmology needs
+    len(zbins)*n_shells_per_zbin independent full-sky ODE reconstructions. Splitting
+    whole COSMOLOGIES round-robin across ranks starves ranks whenever
+    world_size > len(grid_runs) -- e.g. 4 GPUs but --max-cosmologies 3 leaves one
+    rank with nothing to do for this entire function (confirmed in production on
+    diffusion's sibling script, job 4247847). Split at SHELL granularity instead:
+    every (cosmology, bin, shell) task is flattened and round-robined across ranks
+    (rank/world_size/dist, set by apply_sphere_flow's main() when launched via
+    torchrun), so work divides evenly no matter how grid_runs compares to
+    world_size. Only the small resulting Cl-ratio arrays (not full sky maps) are
+    gathered."""
     out_dir = Path(args.out_dir)
     nside = args.nside
     lmax = min(args.lmax, 3 * nside - 1)
@@ -465,33 +479,63 @@ def plot_cl_zbin_grid(args, run_dirs: list[Path], corrected_by_run: dict, method
     zbins = zbin_shell_samples(n_shells_total, args.zbin_start, args.n_zbins,
                                args.n_shells_per_zbin)
     grid_runs = run_dirs[:args.max_cosmologies]
-    print(f"[plot_cl_zbin_grid] {len(grid_runs)} held-out cosmologies x "
-          f"{len(zbins)} redshift bins {[b[0] for b in zbins]}", flush=True)
+    if rank == 0:
+        print(f"[plot_cl_zbin_grid] {len(grid_runs)} held-out cosmologies x "
+              f"{len(zbins)} redshift bins {[b[0] for b in zbins]} "
+              f"(split across {world_size} rank(s))", flush=True)
 
-    grid = []
-    for run in grid_runs:
-        low_all = np.load(run / f"low_shells_nside={nside}.npy", mmap_mode="r")
-        high_all = np.load(run / f"high_shells_nside={nside}.npy", mmap_mode="r")
+    tasks = [(ri, bi, si, int(s))
+            for ri, run in enumerate(grid_runs)
+            for bi, (bin_label, shells) in enumerate(zbins)
+            for si, s in enumerate(shells)]
+    shell_cache: dict[int, tuple] = {}   # run_idx -> (low_all, high_all), per rank
+
+    def _shell_arrays(ri):
+        if ri not in shell_cache:
+            run = grid_runs[ri]
+            shell_cache[ri] = (
+                np.load(run / f"low_shells_nside={nside}.npy", mmap_mode="r"),
+                np.load(run / f"high_shells_nside={nside}.npy", mmap_mode="r"))
+        return shell_cache[ri]
+
+    local_grid = []
+    for ri, bi, si, s in tasks[rank::world_size]:
+        run = grid_runs[ri]
+        low_all, high_all = _shell_arrays(ri)
         corrected = corrected_by_run[run]
-        panels = []
-        for bin_label, shells in zbins:
-            lo_stack, co_stack = [], []
-            for s in shells:
-                s = int(s)
-                low_shell = np.asarray(low_all[s], np.float32)
-                corr_shell = np.asarray(corrected[s], np.float32)
-                high_shell = np.asarray(high_all[s], np.float32)
-                cl_lo = od_cl(low_shell, lmax); cl_c = od_cl(corr_shell, lmax)
-                cl_hi = od_cl(high_shell, lmax)
-                with np.errstate(divide="ignore", invalid="ignore"):
-                    lo_stack.append(cl_lo / cl_hi); co_stack.append(cl_c / cl_hi)
-            panels.append((bin_label, shells, ells, np.array(lo_stack), np.array(co_stack)))
-        grid.append((f"{run.parent.name}/{run.name}", panels))
+        low_shell = np.asarray(low_all[s], np.float32)
+        corr_shell = np.asarray(corrected[s], np.float32)
+        high_shell = np.asarray(high_all[s], np.float32)
+        cl_lo = od_cl(low_shell, lmax); cl_c = od_cl(corr_shell, lmax)
+        cl_hi = od_cl(high_shell, lmax)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            lo_ratio = cl_lo / cl_hi; co_ratio = cl_c / cl_hi
+        local_grid.append((ri, bi, si, lo_ratio, co_ratio))
 
-    plot_cl_ratio_pctile_grid(
-        grid, out_dir / "cl_ratio_by_zbin_grid.png",
-        corrected_label=f"corrected ({method_label}) / true (after)",
-        suptitle=f"Full-sky Cl ratio by redshift bin ({method_label})")
+    if dist is not None:
+        gathered = [None] * world_size
+        dist.all_gather_object(gathered, local_grid)
+        flat_grid = [item for part in gathered for item in part]
+    else:
+        flat_grid = local_grid
+
+    if rank == 0:
+        panels_per_run = [[None] * len(zbins) for _ in grid_runs]
+        for ri, bi, si, lo_ratio, co_ratio in flat_grid:
+            bin_label, shells = zbins[bi]
+            if panels_per_run[ri][bi] is None:
+                panels_per_run[ri][bi] = (bin_label, shells, ells,
+                                          [None] * len(shells), [None] * len(shells))
+            panels_per_run[ri][bi][3][si] = lo_ratio
+            panels_per_run[ri][bi][4][si] = co_ratio
+        grid = [(f"{run.parent.name}/{run.name}",
+                [(bl, sh, el, np.array(lo), np.array(co))
+                 for bl, sh, el, lo, co in panels_per_run[ri]])
+               for ri, run in enumerate(grid_runs)]
+        plot_cl_ratio_pctile_grid(
+            grid, out_dir / "cl_ratio_by_zbin_grid.png",
+            corrected_label=f"corrected ({method_label}) / true (after)",
+            suptitle=f"Full-sky Cl ratio by redshift bin ({method_label})")
 
 
 def _nz_tag(nz_path) -> str:
@@ -501,12 +545,24 @@ def _nz_tag(nz_path) -> str:
     return m.group(0) if m else Path(nz_path).stem
 
 
-def plot_kappa(args, run_dirs: list[Path], corrected_by_run: dict, method_label: str):
+def plot_kappa(args, run_dirs: list[Path], corrected_by_run: dict, method_label: str,
+               rank: int = 0, world_size: int = 1, dist=None):
     """Weak-lensing kappa map diagnostic -- EXPENSIVE here: unlike
     apply_transfer.py (corrected is already the full array), every usable shell
     in [--kappa-zi, --kappa-zf] not already cached triggers a fresh ODE sample.
     For the default z range that is typically several dozen shells. Off unless
-    --kappa is passed."""
+    --kappa is passed.
+
+    THE most expensive section of this script. Splitting whole COSMOLOGIES
+    round-robin across ranks starves ranks whenever world_size > len(run_dirs) --
+    confirmed in production on diffusion's sibling script, job 4247847. Split at
+    SHELL granularity instead (see plot_cl_zbin_grid's docstring for the same
+    pattern): every (cosmology, usable shell) reconstruction is flattened into one
+    task list and round-robined across ranks. The reconstructed shells themselves
+    (not just derived Cl/moments) are gathered to rank 0 -- at these nside's that
+    is at most a few GB total, trivial next to the GPU time saved -- because
+    kappa_map integrates ALL of a cosmology's usable shells together, so rank 0
+    needs the complete per-cosmology stack to assemble the final kappa map."""
     out_dir = Path(args.out_dir)
     nside = args.nside
     # One full diagnostic set PER n(z) BIN (2026-07-16; --kappa-nz takes several,
@@ -520,43 +576,79 @@ def plot_kappa(args, run_dirs: list[Path], corrected_by_run: dict, method_label:
                else [args.kappa_zf[0]] * len(nz_list))
     tags = [_nz_tag(nz) for nz in nz_list]
     zf_max = max(zf_list)
-    print(f"[plot_kappa] building kappa maps for ALL {len(run_dirs)} held-out "
-          f"cosmologies | n(z) bins: "
-          + ", ".join(f"{t} (zf={zf:g})" for t, zf in zip(tags, zf_list))
-          + f" | zi={args.kappa_zi}, nside={args.kappa_nside} -- corrects every usable shell, may be slow", flush=True)
+    if rank == 0:
+        print(f"[plot_kappa] building kappa maps for ALL {len(run_dirs)} held-out "
+              f"cosmologies | n(z) bins: "
+              + ", ".join(f"{t} (zf={zf:g})" for t, zf in zip(tags, zf_list))
+              + f" | zi={args.kappa_zi}, nside={args.kappa_nside} -- corrects every "
+              + f"usable shell, may be slow (split across {world_size} rank(s))", flush=True)
 
-    cosmo_labels = []
-    acc = {t: {k: [] for k in ("cl_low", "cl_corr", "cl_high",
-                               "mom_low", "mom_corr", "mom_high")} for t in tags}
+    cosmo_meta = []
     for run in run_dirs:
         cosmo_params = weak_lensing.load_cosmo_yaml(run)
         shell_info = np.load(run / args.info_npz, allow_pickle=True)["shell_info"]
         lower_z_all = shell_info["lower_z"]; upper_z_all = shell_info["upper_z"]
         usable = np.where(weak_lensing.usable_shell_mask(
             lower_z_all, upper_z_all, args.kappa_zi, zf_max))[0]
-        lower_z, upper_z = lower_z_all[usable], upper_z_all[usable]
+        cosmo_meta.append(dict(run=run, cosmo_params=cosmo_params, usable=usable,
+                               lower_z=lower_z_all[usable], upper_z=upper_z_all[usable]))
+    tasks = [(ri, sp, int(s)) for ri, m in enumerate(cosmo_meta)
+            for sp, s in enumerate(m["usable"])]
+    if rank == 0:
+        print(f"[plot_kappa] {len(tasks)} shell-reconstruction tasks across "
+              f"{len(run_dirs)} cosmologies, split across {world_size} rank(s)", flush=True)
+    kappa_shell_cache: dict[int, tuple] = {}
 
-        low_all = np.load(run / f"low_shells_nside={nside}.npy", mmap_mode="r")
-        high_all = np.load(run / f"high_shells_nside={nside}.npy", mmap_mode="r")
+    def _kappa_shell_arrays(ri):
+        if ri not in kappa_shell_cache:
+            run = cosmo_meta[ri]["run"]
+            kappa_shell_cache[ri] = (
+                np.load(run / f"low_shells_nside={nside}.npy", mmap_mode="r"),
+                np.load(run / f"high_shells_nside={nside}.npy", mmap_mode="r"))
+        return kappa_shell_cache[ri]
+
+    local_recon = []
+    for ri, sp, s in tasks[rank::world_size]:
+        run = cosmo_meta[ri]["run"]
         corrected = corrected_by_run[run]
-        low_shells = np.stack([np.asarray(low_all[int(s)], np.float64) for s in usable])
-        high_shells = np.stack([np.asarray(high_all[int(s)], np.float64) for s in usable])
-        corr_shells = np.stack([np.asarray(corrected[int(s)], np.float64) for s in usable])
-        print(f"[plot_kappa] {run.parent.name}: {len(usable)} usable shells "
-              f"(z in [{lower_z.min():.3f},{upper_z.max():.3f}])", flush=True)
+        print(f"[plot_kappa][rank{rank}] {run.parent.name}: reconstructing "
+              f"shell {s}...", flush=True)
+        corr_shell = np.asarray(corrected[s], np.float64)
+        local_recon.append((ri, sp, corr_shell))
 
-        cosmo_labels.append(f"{run.parent.name}/{run.name}")
+    if dist is not None:
+        gathered = [None] * world_size
+        dist.all_gather_object(gathered, local_recon)
+        flat_recon = [item for part in gathered for item in part]
+    else:
+        flat_recon = local_recon
+
+    if rank != 0:
+        return
+    cosmo_labels = [f"{m['run'].parent.name}/{m['run'].name}" for m in cosmo_meta]
+    acc = {t: {k: [] for k in ("cl_low", "cl_corr", "cl_high", "mom_low", "mom_corr", "mom_high")}
+          for t in tags}
+    for ri, m in enumerate(cosmo_meta):
+        n_usable = len(m["usable"])
+        corr_shells = np.empty((n_usable,) + flat_recon[0][2].shape, dtype=np.float64)
+        for ri2, sp, corr_shell in flat_recon:
+            if ri2 == ri:
+                corr_shells[sp] = corr_shell
+        low_all, high_all = _kappa_shell_arrays(ri)
+        low_shells = np.stack([np.asarray(low_all[int(s)], np.float64) for s in m["usable"]])
+        high_shells = np.stack([np.asarray(high_all[int(s)], np.float64) for s in m["usable"]])
         for nz, zf, tag in zip(nz_list, zf_list, tags):
             kw = dict(nside=args.kappa_nside, zi=args.kappa_zi, zf=zf)
-            kappa_low = weak_lensing.kappa_map(low_shells, lower_z, upper_z, cosmo_params, nz, **kw)
-            kappa_corr = weak_lensing.kappa_map(corr_shells, lower_z, upper_z, cosmo_params, nz, **kw)
-            kappa_high = weak_lensing.kappa_map(high_shells, lower_z, upper_z, cosmo_params, nz, **kw)
+            kappa_low = weak_lensing.kappa_map(low_shells, m["lower_z"], m["upper_z"], m["cosmo_params"], nz, **kw)
+            kappa_corr = weak_lensing.kappa_map(corr_shells, m["lower_z"], m["upper_z"], m["cosmo_params"], nz, **kw)
+            kappa_high = weak_lensing.kappa_map(high_shells, m["lower_z"], m["upper_z"], m["cosmo_params"], nz, **kw)
             a = acc[tag]
             a["cl_low"].append(weak_lensing.kappa_cl(kappa_low, args.kappa_lmax))
             a["cl_corr"].append(weak_lensing.kappa_cl(kappa_corr, args.kappa_lmax))
             a["cl_high"].append(weak_lensing.kappa_cl(kappa_high, args.kappa_lmax))
             a["mom_low"].append(moments(kappa_low)); a["mom_corr"].append(moments(kappa_corr))
             a["mom_high"].append(moments(kappa_high))
+        print(f"[plot_kappa] {m['run'].parent.name}: done ({n_usable} shells)", flush=True)
 
     kappa_ells = np.arange(args.kappa_lmax + 1)
     for nz, zf, tag in zip(nz_list, zf_list, tags):
@@ -658,7 +750,12 @@ def main():
                         "skip. Densified 2026-07-16 (was 5 10 15 30 50): with only "
                         "5 shells a spike at one shell is indistinguishable from a trend.")
 
-    p.add_argument("--zbin-start", type=int, default=0)
+    p.add_argument("--zbin-start", type=int, default=5,
+                   help="first shell in the Cl-ratio-by-redshift-bin grid. 5 (was 0, "
+                        "changed 2026-07-20): shell 0 shows weird behaviour in the "
+                        "grid's first panel (user-observed, job 4247908) -- excluded. "
+                        "Same default as transfer/unet/diffusion so all pipelines' "
+                        "grids keep binning the SAME shells.")
     p.add_argument("--n-zbins", type=int, default=3)
     p.add_argument("--n-shells-per-zbin", type=int, default=5)
     p.add_argument("--max-cosmologies", type=int, default=3,
@@ -690,13 +787,40 @@ def main():
     p.add_argument("--out-dir", required=True, help="Where all plots are written.")
     args = p.parse_args()
 
-    dev = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    # Multi-GPU eval: launch with `torchrun --nproc_per_node=N apply_sphere_flow.py
+    # ...` to split the two DOMINANT cost stages (plot_cl_zbin_grid, plot_kappa --
+    # each held-out cosmology needs many independent ODE-sampled shell
+    # reconstructions) across N GPUs, one cosmology's reconstruction work per rank at
+    # a time -- see those functions' docstrings. plot_patches/plot_full_sky stay rank
+    # 0 only (cheap by comparison). Falls back to single-process/single-GPU exactly
+    # as before when launched with plain `python` (world_size defaults to 1). See
+    # diffusion/apply_diffusion.py for the sibling implementation of this pattern.
+    world_size = int(os.environ.get("WORLD_SIZE", "1"))
+    rank = int(os.environ.get("RANK", "0"))
+    local_rank = int(os.environ.get("LOCAL_RANK", "0"))
+    distributed = world_size > 1
+    if distributed:
+        import torch.distributed as dist
+        # Default NCCL collective timeout is 10 minutes -- far too short here: rank 0
+        # does substantial EXTRA serial work (plot_patches/plot_full_sky, both
+        # rank-0-only) before it ever reaches the first dist.all_gather_object() in
+        # plot_cl_zbin_grid, while the other ranks reach it almost immediately and
+        # wait -- see diffusion/apply_diffusion.py's identical fix (production
+        # timeout, job 4247489). 4h comfortably covers a single rank's full eval
+        # workload within this job's 12h walltime.
+        dist.init_process_group("nccl", timeout=timedelta(hours=4))
+        torch.cuda.set_device(local_rank)
+        dev = torch.device(f"cuda:{local_rank}")
+    else:
+        dist = None
+        dev = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     net, meta = load_model(args.model_dir, dev, compile=args.compile)
     model_nside = int(meta["nside"])
     if args.nside is None:
         args.nside = model_nside
-        print(f"[apply_sphere_flow] using the model's own nside={model_nside} "
-              f"(from meta.npz) for the data files", flush=True)
+        if rank == 0:
+            print(f"[apply_sphere_flow] using the model's own nside={model_nside} "
+                  f"(from meta.npz) for the data files", flush=True)
     elif args.nside != model_nside:
         raise SystemExit(
             f"--nside {args.nside} does not match the model's trained nside "
@@ -722,21 +846,26 @@ def main():
         # at --max-cosmologies (ODE sampling is expensive per cosmology).
         held_out = np.asarray(meta["test_cosmos"]).tolist()[:args.max_cosmologies]
         run_dirs = [_resolve_run_dir(args.data_root, c) for c in held_out]
-        print(f"[apply_sphere_flow] --run-dirs not given -- using this checkpoint's "
-              f"own held-out set from meta.npz (capped at --max-cosmologies="
-              f"{args.max_cosmologies} of {np.asarray(meta['test_cosmos']).size}): "
-              f"{held_out}", flush=True)
+        if rank == 0:
+            print(f"[apply_sphere_flow] --run-dirs not given -- using this checkpoint's "
+                  f"own held-out set from meta.npz (capped at --max-cosmologies="
+                  f"{args.max_cosmologies} of {np.asarray(meta['test_cosmos']).size}): "
+                  f"{held_out}", flush=True)
     else:
         # Pre-2026-07-14 checkpoints (e.g. 3826942) predate saving test_cosmos and
         # were trained LOO-style via the old --test-cosmo cosmo_000122 default.
         run_dirs = [Path(args.data_root) / "cosmo_000122" / "run_0"]
-        print("[apply_sphere_flow] --run-dirs not given and this checkpoint has no "
-              "saved test_cosmos -- falling back to cosmo_000122/run_0 (the old "
-              "single-cosmology --test-cosmo default).", flush=True)
+        if rank == 0:
+            print("[apply_sphere_flow] --run-dirs not given and this checkpoint has no "
+                  "saved test_cosmos -- falling back to cosmo_000122/run_0 (the old "
+                  "single-cosmology --test-cosmo default).", flush=True)
     Path(args.out_dir).mkdir(parents=True, exist_ok=True)
 
     # One bad cosmology must not blank every plot -- see apply_transfer.py's own
-    # rationale for the same try/except pattern.
+    # rationale for the same try/except pattern. Every rank builds the SAME
+    # (deterministic) corrected_by_run dict -- these are lazy, so this costs nothing
+    # beyond object construction; the actual ODE sampling only happens for whichever
+    # shells each rank's assigned work touches (see plot_cl_zbin_grid/plot_kappa).
     corrected_by_run = {}
     for run in run_dirs:
         cosmo_label = f"{run.parent.name}/{run.name}"
@@ -749,8 +878,9 @@ def main():
                                                   args.steps, args.patch_batch, amp=args.amp,
                                                   nside_centers=args.nside_centers,
                                                   taper_power=args.taper_power)
-            print(f"=== [apply_sphere_flow] {cosmo_label} ready "
-                  f"(shells corrected on demand) ===", flush=True)
+            if rank == 0:
+                print(f"=== [apply_sphere_flow] {cosmo_label} ready "
+                      f"(shells corrected on demand) ===", flush=True)
         except Exception as e:
             print(f"[apply_sphere_flow] ERROR: {cosmo_label} failed to load "
                   f"({e!r}) -- skipping it, continuing with the rest", flush=True)
@@ -759,22 +889,29 @@ def main():
     if not ok_run_dirs:
         raise SystemExit("[apply_sphere_flow] every cosmology failed -- "
                          "nothing to plot (see ERROR lines above)")
-    if len(ok_run_dirs) < len(run_dirs):
+    if len(ok_run_dirs) < len(run_dirs) and rank == 0:
         failed = [r for r in run_dirs if r not in corrected_by_run]
         print(f"[apply_sphere_flow] WARNING: {len(failed)}/{len(run_dirs)} "
               f"cosmologies failed and are excluded from all plots below: "
               f"{[f'{r.parent.name}/{r.name}' for r in failed]}", flush=True)
 
-    if args.patch_shells:
-        plot_patches(args, ok_run_dirs, corrected_by_run, method_label)
-    if args.fullsky_shells or args.fullsky_shell_indices:
-        plot_full_sky(args, ok_run_dirs, corrected_by_run, method_label)
+    if rank == 0:
+        if args.patch_shells:
+            plot_patches(args, ok_run_dirs, corrected_by_run, method_label)
+        if args.fullsky_shells or args.fullsky_shell_indices:
+            plot_full_sky(args, ok_run_dirs, corrected_by_run, method_label)
     if args.n_zbins > 0:
-        plot_cl_zbin_grid(args, ok_run_dirs, corrected_by_run, method_label)
+        plot_cl_zbin_grid(args, ok_run_dirs, corrected_by_run, method_label,
+                          rank=rank, world_size=world_size, dist=dist)
     if args.kappa:
-        plot_kappa(args, ok_run_dirs, corrected_by_run, method_label)
+        plot_kappa(args, ok_run_dirs, corrected_by_run, method_label,
+                  rank=rank, world_size=world_size, dist=dist)
 
-    print(f"[apply_sphere_flow] done -> {args.out_dir}", flush=True)
+    if rank == 0:
+        print(f"[apply_sphere_flow] done -> {args.out_dir}", flush=True)
+    if distributed:
+        dist.barrier()
+        dist.destroy_process_group()
 
 
 if __name__ == "__main__":

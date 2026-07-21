@@ -60,7 +60,7 @@ VENV=/capstor/scratch/cscs/damrein/venvs/sphereflow
 # grid dir just picks the 198 runnable ones. PATCH_DIR/RUN_NAME fold the data root
 # automatically (DATA_TAG below), so a grid run needs ONLY:
 #   DATA_ROOT=/capstor/scratch/cscs/damrein/grid sbatch sphereflow/run_sphere_flow.sh
-DATA_ROOT="${DATA_ROOT:-/capstor/scratch/cscs/damrein/grid}"
+DATA_ROOT="${DATA_ROOT:-/capstor/scratch/cscs/damrein/cosmogridv1}"
 SPHEREFLOW=/users/damrein/masterProject/ml/sphereflow
 
 NSIDE=${NSIDE:-512}
@@ -81,7 +81,7 @@ EPOCHS=${EPOCHS:-40}
 #                      same compute but adds nothing once the patch is covered).
 #   LR 2e-4 -> 3e-4  : mild (~sqrt) compensation for the 4x batch; the x world_size
 #                      scaling in the trainer still applies on top.
-BATCH=${BATCH:-128}
+BATCH=${BATCH:-248}
 HIDDEN=${HIDDEN:-128}
 N_LAYERS=${N_LAYERS:-8}
 K=${K:-5}

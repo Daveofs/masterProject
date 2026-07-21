@@ -4,12 +4,25 @@
 #SBATCH --partition=normal
 #SBATCH --account=sk037
 #SBATCH --ntasks-per-node=1
-#SBATCH --gres=gpu:1
+#SBATCH --gres=gpu:4
 #SBATCH --cpus-per-task=128
 #SBATCH --time=12:00:00
 #SBATCH --output=/capstor/scratch/cscs/damrein/outputs/logs/sphereflow/compare-%j.out
 #SBATCH --error=/capstor/scratch/cscs/damrein/outputs/logs/sphereflow/compare-%j.err
 #SBATCH --chdir=/users/damrein/masterProject/ml
+
+# MULTI-NODE EVAL (2026-07-20): the --nodes=1 header above is just the sbatch
+# default -- override at submission (`sbatch --nodes=4 sphereflow/run_diagnostics_only.sh`)
+# to scale past one node's 4 GPUs. WORLD_SIZE below is derived from however many
+# nodes SLURM actually gave this job (SLURM_NNODES x GPUS_PER_NODE), via a genuine
+# multi-node torchrun c10d rendezvous (MASTER_ADDR from the node list, srun spans
+# every node). This is a DIFFERENT risk profile from sphereflow TRAINING's multi-node
+# ban (see run_sphere_flow.sh's header): the crashes that forced training to 1 node
+# were from SUSTAINED per-step DDP gradient allreduce over ~13k+ steps hammering the
+# Slingshot fabric; this eval job's own distributed calls are a couple of
+# dist.all_gather_object per diagnostic stage (zbin-grid, kappa) -- a handful of
+# collectives total, not thousands -- so it is a materially lighter cross-node
+# workload. Not proven crash-proof, just a different, lower-frequency usage pattern.
 
 # ============================================================================
 # Run apply_sphere_flow.py's full comparison suite on the sphereflow "direct"
@@ -46,11 +59,20 @@
 export UENV_REPO_PATH=/capstor/scratch/cscs/damrein/.uenv-images
 VENV=/capstor/scratch/cscs/damrein/venvs/sphereflow
 
+# GPUS_PER_NODE x SLURM_NNODES = total ranks -- apply_sphere_flow.py splits its two
+# dominant-cost stages (plot_cl_zbin_grid, plot_kappa) across ALL of them via
+# torch.distributed. SLURM_NNODES reflects whatever --nodes this job was actually
+# submitted with (see the multi-node note above); GPUS_PER_NODE=4 is this cluster's
+# fixed per-node GPU count, not a tunable.
+GPUS_PER_NODE=4
+NNODES=${SLURM_NNODES:-1}
+EVAL_GPUS=$(( GPUS_PER_NODE * NNODES ))
 # Pin OpenMP-using CPU work (healpy's Cl/anafast, UFalcon's kappa-map construction)
-# to the cores SLURM actually allocated (--cpus-per-task=128 above) -- unset, these
-# libraries can silently default to 1 thread inside a cgroup, wasting most of the
-# allocation on the CPU-bound diagnostic stages.
-export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK:-128}"
+# to the cores SLURM actually allocated PER NODE (--cpus-per-task=128 above), DIVIDED
+# across the GPUS_PER_NODE concurrent rank processes THAT NODE RUNS -- the parallel
+# zbin-grid/kappa sections run all ranks' CPU-bound work at once, so giving every
+# rank the full per-node core count would oversubscribe.
+export OMP_NUM_THREADS=$(( ${SLURM_CPUS_PER_TASK:-128} / GPUS_PER_NODE ))
 
 # All env-overridable so run_sphere_flow.sh can submit this as a dependent eval job
 # for whatever model/dataset it just trained. --run-dirs is NOT passed ->
@@ -84,11 +106,19 @@ NSIDE_CENTERS_FLAG=""; [ -n "${NSIDE_CENTERS}" ] && NSIDE_CENTERS_FLAG="--nside-
 TAPER_POWER_FLAG=""; [ -n "${TAPER_POWER}" ] && TAPER_POWER_FLAG="--taper-power ${TAPER_POWER}"
 mkdir -p "$OUT_DIR" /capstor/scratch/cscs/damrein/outputs/logs/sphereflow
 
-echo "==== sphereflow diagnostics | job ${SLURM_JOB_ID} | model ${MODEL_DIR} | data ${DATA_ROOT} ===="
+export MASTER_ADDR=$(scontrol show hostnames "$SLURM_JOB_NODELIST" | head -n1)
+export MASTER_PORT=29500
 
-srun --nodes=1 --ntasks=1 uenv run pytorch/v2.9.1:v2 --view=default -- bash -c "
+echo "==== sphereflow diagnostics | job ${SLURM_JOB_ID} | ${NNODES} node(s) x ${GPUS_PER_NODE} GPU = ${EVAL_GPUS} ranks | model ${MODEL_DIR} | data ${DATA_ROOT} ===="
+
+# srun spans EVERY allocated node (one task/node, torchrun fans out to
+# GPUS_PER_NODE local ranks) -- NOT --nodes=1 like the old single-node version.
+srun --ntasks=${NNODES} --ntasks-per-node=1 --gres=gpu:${GPUS_PER_NODE} uenv run pytorch/v2.9.1:v2 --view=default -- bash -c "
   source ${VENV}/bin/activate
-  python sphereflow/apply_sphere_flow.py \
+  python -m torch.distributed.run \
+    --nnodes=${NNODES} --nproc_per_node=${GPUS_PER_NODE} \
+    --rdzv_id=${SLURM_JOB_ID} --rdzv_backend=c10d --rdzv_endpoint=${MASTER_ADDR}:${MASTER_PORT} \
+    sphereflow/apply_sphere_flow.py \
       --model-dir  '${MODEL_DIR}' \
       --data-root  '${DATA_ROOT}' \
       --max-cosmologies ${MAX_COSMOLOGIES} \
