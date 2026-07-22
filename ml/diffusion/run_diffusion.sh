@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --nodes=1
+#SBATCH --nodes=4
 #SBATCH --job-name=diffusion
 #SBATCH --partition=normal
 #SBATCH --account=sk037
@@ -51,7 +51,7 @@
 
 export UENV_REPO_PATH=/capstor/scratch/cscs/damrein/.uenv-images
 VENV=/capstor/scratch/cscs/damrein/venvs/sphereflow
-DATA_ROOT="/capstor/scratch/cscs/damrein/cosmogridv1"
+DATA_ROOT="/capstor/scratch/cscs/damrein/grid"
 METAINFO_DIR="/capstor/scratch/cscs/damrein/cosmogridv1"
 DIFFUSION=/users/damrein/masterProject/ml/diffusion
 
@@ -63,9 +63,10 @@ DIFFUSION=/users/damrein/masterProject/ml/diffusion
 NSIDE=${NSIDE:-512}
 PATCH_SIZE=${PATCH_SIZE:-256}
 NPATCH=${NPATCH:-100000}
-EPOCHS=${EPOCHS:-40}
+EPOCHS=${EPOCHS:-200}
 BATCH=${BATCH:-32}
 BASE_CH=${BASE_CH:-32}
+LEARNING_RATE=${LEARNING_RATE:-3e-5}
 # EDM sampler: far more steps than the flow pipelines' ~8 -- see model.sample_heun.
 STEPS=${STEPS:-32}
 SIGMA_MIN=${SIGMA_MIN:-0.002}
@@ -101,7 +102,7 @@ if [ "${USE_COSMO_COND}" = "0" ]; then
 fi
 
 DATA_TAG=$(basename "${DATA_ROOT}")
-RUN_NAME=${RUN_NAME:-diffusion_${SPACE}_${DATA_TAG}_nside${NSIDE}_patch${PATCH_SIZE}_n${NPATCH}_ch${BASE_CH}_b${BATCH}_e${EPOCHS}${COSMO_SUFFIX}}
+RUN_NAME=${RUN_NAME:-diffusion_${SPACE}_${DATA_TAG}_nside${NSIDE}_patch${PATCH_SIZE}_n${NPATCH}_ch${BASE_CH}_b${BATCH}_e${EPOCHS}_lr${LEARNING_RATE}_${COSMO_SUFFIX}}
 KAPPA=${KAPPA:-1}
 KAPPA_FLAG=""; [ "${KAPPA}" = "1" ] && KAPPA_FLAG="--kappa"
 # Stage-3 cost knobs. Each full-sky shell reconstruction is one Heun ODE per tile, so
@@ -167,7 +168,7 @@ srun --nodes=${SLURM_NNODES} --ntasks-per-node=1 --gres=gpu:4 uenv run pytorch/v
     train_diffusion.py \
     --patch-dir '${PATCH_DIR}' \
     --out-dir   '${OUT_DIR}' \
-    --epochs ${EPOCHS} --batch-size ${BATCH} --base-channels ${BASE_CH} \
+    --epochs ${EPOCHS} --batch-size ${BATCH} --base-channels ${BASE_CH} --lr ${LEARNING_RATE} \
     --p-mean ${P_MEAN} --p-std ${P_STD} ${SIGMA_DATA_FLAG} \
     --hp-cutoff ${HP_CUTOFF} --hp-transition ${HP_TRANSITION} --space ${SPACE} \
     --num-workers $((SLURM_CPUS_PER_TASK / 4)) ${COSMO_FLAG}

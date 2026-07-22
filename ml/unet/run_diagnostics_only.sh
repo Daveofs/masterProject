@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --nodes=1
+#SBATCH --nodes=4
 #SBATCH --job-name=unet-diag
 #SBATCH --partition=normal
 #SBATCH --account=sk037
@@ -47,9 +47,9 @@ UNET=/users/damrein/masterProject/ml/unet
 # end-to-end 2026-07-15) -- the OLD default (flow_nside2048_patch256_..._cond) was
 # never actually trained (only apply_flow.py's own eval/ dir existed there), so
 # every run_diagnostics_only.sh submission failed loading best.pt from it.
-DATA_ROOT=${DATA_ROOT:-/capstor/scratch/cscs/damrein/cosmogridv1}
-PATCH_DIR=${PATCH_DIR:-/capstor/scratch/cscs/damrein/outputs/flowpatches/cosmogridv1_nside512_256_100000}
-OUT_DIR=${OUT_DIR:-/capstor/scratch/cscs/damrein/outputs/flowruns/flow_cosmogridv1_nside512_patch256_n100000_ch32_b248_e40}
+DATA_ROOT=${DATA_ROOT:-/capstor/scratch/cscs/damrein/grid}
+PATCH_DIR=${PATCH_DIR:-/capstor/scratch/cscs/damrein/outputs/flowpatches/grid_nside512_256_100000}
+OUT_DIR=${OUT_DIR:-/capstor/scratch/cscs/damrein/outputs/flowruns/flow__grid_nside512_patch256_n100000_ch32_b32_e200_lr3e-5__hp_}
 
 export PYTHONUNBUFFERED=1
 # GPUS_PER_NODE x SLURM_NNODES = total ranks -- apply_flow.py splits its two
@@ -69,7 +69,7 @@ export OMP_NUM_THREADS=$(( ${SLURM_CPUS_PER_TASK:-128} / GPUS_PER_NODE ))
 # weak-lensing kappa map diagnostic -- off by default, see run_flow.sh's KAPPA note.
 KAPPA=${KAPPA:-1}
 KAPPA_FLAG=""; [ "${KAPPA}" = "1" ] && KAPPA_FLAG="--kappa"
-MAX_COSMOLOGIES=${MAX_COSMOLOGIES:-10}
+MAX_COSMOLOGIES=${MAX_COSMOLOGIES:-30}
 # --amp defaults to True in apply_flow.py (added 2026-07-20, UNTESTED at the time) --
 # AMP=0 here lets a diagnostics-only rerun test whether bf16 autocast in
 # flow_model.sample_ode is responsible for a suspected regression (job 4248318's

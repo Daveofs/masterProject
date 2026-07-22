@@ -5,7 +5,7 @@
 #SBATCH --account=sk037
 #SBATCH --ntasks-per-node=1
 #SBATCH --gres=gpu:4
-#SBATCH --cpus-per-task=64
+#SBATCH --cpus-per-task=128
 #SBATCH --time=12:00:00
 #SBATCH --output=/capstor/scratch/cscs/damrein/outputs/logs/unet/slurm-%j.out
 #SBATCH --error=/capstor/scratch/cscs/damrein/outputs/logs/unet/slurm-%j.err
@@ -47,7 +47,7 @@
 
 export UENV_REPO_PATH=/capstor/scratch/cscs/damrein/.uenv-images
 VENV=/capstor/scratch/cscs/damrein/venvs/sphereflow
-DATA_ROOT="/capstor/scratch/cscs/damrein/cosmogridv1"
+DATA_ROOT="/capstor/scratch/cscs/damrein/grid"
 # CosmoGridV1_metainfo.h5 (the cosmological-parameter catalog make_patch_dataset.py
 # needs) lives ONLY under cosmogridv1/, not replicated under grid/ or any other
 # subset dir -- pass it separately regardless of which DATA_ROOT is active (this is
@@ -60,6 +60,7 @@ NSIDE=${NSIDE:-512}
 PATCH_SIZE=${PATCH_SIZE:-256}
 NPATCH=${NPATCH:-100000}
 EPOCHS=${EPOCHS:-200}
+LEARNING_RATE=${LEARNING_RATE:-3e-5}
 BATCH=${BATCH:-32}
 BASE_CH=${BASE_CH:-32}
 STEPS=${STEPS:-8}
@@ -85,7 +86,7 @@ DATA_TAG=$(basename "${DATA_ROOT}")
 # highpass-residual delta-space retrain never collides with an old pre-2026-07-21
 # full-field checkpoint at the same name -- apply_flow.py's hp_cutoff guard would
 # reject the old one anyway, but this keeps the two from silently overwriting.
-RUN_NAME=${RUN_NAME:-flow_${SPACE}_${DATA_TAG}_nside${NSIDE}_patch${PATCH_SIZE}_n${NPATCH}_ch${BASE_CH}_b${BATCH}_e${EPOCHS}${COSMO_SUFFIX}_hp${HP_CUTOFF}_${HP_TRANSITION}}
+RUN_NAME=${RUN_NAME:-flow_${SPACE}_${DATA_TAG}_nside${NSIDE}_patch${PATCH_SIZE}_n${NPATCH}_ch${BASE_CH}_b${BATCH}_e${EPOCHS}_lr${LEARNING_RATE}_${COSMO_SUFFIX}_hp${HP_CUTOFF}_${HP_TRANSITION}}
 # weak-lensing kappa map diagnostic (analysis.weak_lensing, apply_flow.py --kappa):
 # ON by default. It reconstructs every usable shell (z<~1.05, ~47/69) via full-sky
 # tiling for --kappa-max-cosmologies held-out cosmologies, which used to be far too
@@ -163,7 +164,7 @@ srun --nodes=${SLURM_NNODES} --ntasks-per-node=1 --gres=gpu:4 uenv run pytorch/v
     train_flow.py \
     --patch-dir '${PATCH_DIR}' \
     --out-dir   '${OUT_DIR}' \
-    --epochs ${EPOCHS} --batch-size ${BATCH} --base-channels ${BASE_CH} \
+    --epochs ${EPOCHS} --batch-size ${BATCH} --base-channels ${BASE_CH} --lr ${LEARNING_RATE} \
     --hp-cutoff ${HP_CUTOFF} --hp-transition ${HP_TRANSITION} --space ${SPACE} \
     --num-workers $((SLURM_CPUS_PER_TASK / 4)) ${COSMO_FLAG}
 "

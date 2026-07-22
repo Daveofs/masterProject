@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --nodes=1
+#SBATCH --nodes=10
 #SBATCH --job-name=transfer-fn
 #SBATCH --partition=normal
 #SBATCH --account=sk037
@@ -150,8 +150,21 @@ export OMP_NUM_THREADS=8         # light default; heavy stages override inline b
 export UENV_REPO_PATH=/capstor/scratch/cscs/damrein/.uenv-images
 SPHEREFLOW_VENV=/capstor/scratch/cscs/damrein/venvs/sphereflow
 
-DATA=/capstor/scratch/cscs/damrein/cosmogridv1
-LMAX=3000
+DATA=/capstor/scratch/cscs/damrein/grid
+# nside=2048 supports SHT up to ell~3*nside-1=6143 -- lmax=3000 (the long-running
+# default) leaves everything above it in every corrected map untouched (apply()
+# adds the correction as a residual on the native nside=2048 map, only touching
+# ell<=lmax -- see apply()'s own comment on this). Raising LMAX lets the
+# correction reach further into small scales -- e.g. LMAX=4096 or the full
+# 6143 -- at the cost of re-running EVERYTHING lmax-dependent: preprocessing
+# (new low/high_alms_lmax<N>.npy, doesn't overwrite the lmax=3000 ones, but
+# costs a full new SHT pass over every shell) and fit/train/apply (T/R/emulator
+# are all shaped by lmax too). SHT cost scales ~linearly with lmax at fixed
+# nside, so LMAX=6143 is roughly 2x the wall-clock of the lmax=3000 default per
+# shell. Override at submission time, e.g. `sbatch --export=LMAX=4096 ...`; NOT
+# yet confirmed to fix the "washed out" patch look (2026-07-21) -- this is the
+# knob to test that hypothesis with, not a validated fix.
+LMAX=${LMAX:-6143}
 # How to build T(ell, shell): "fit" (train-averaged) or "emulate" (MLP emulator).
 METHOD=${METHOD:-emulate}
 # Emulator hyperparameters (METHOD=emulate only).
@@ -166,7 +179,11 @@ FIT_FLAGS=""
 [ -n "$INCLUDE_TEST" ] && FIT_FLAGS="--include-test"
 # Stage 3 (transfer correction) knobs -- see transfer_function.py apply()'s
 # --ell-min-mpc docstring.
+# --hp-transition: raised-cosine hand-over band above ell_min (fraction of lmax),
+# same convention/default as diffusion/run_diffusion.sh's HP_TRANSITION -- see
+# highpass_ell_ramp's docstring. 0 recovers the old hard ell_min step exactly.
 ELL_MIN_MPC=${ELL_MIN_MPC:-5.0}
+HP_TRANSITION=${HP_TRANSITION:-0.10}
 OUT=/capstor/scratch/cscs/damrein/outputs/transfer/${SLURM_JOB_ID}
 mkdir -p "$OUT" /capstor/scratch/cscs/damrein/outputs/logs/transfer
 
@@ -192,7 +209,7 @@ TEST_COSMOS_FLAGS="--test-cosmos ${COSMOS_ARR[@]}"
 
 # Cap how many held-out cosmologies actually go through the EXPENSIVE stage
 # 2b/3 (apply()) -- training above already excludes the FULL set.
-MAX_COSMOLOGIES=${MAX_COSMOLOGIES:-3}
+MAX_COSMOLOGIES=${MAX_COSMOLOGIES:-30}
 EVAL_COSMOS_ARR=("${COSMOS_ARR[@]:0:$MAX_COSMOLOGIES}")
 
 echo "==== transfer-function pipeline | data=$DATA | lmax=$LMAX | method=$METHOD | ell_min_mpc=$ELL_MIN_MPC | nodes=$N_NODES ===="
@@ -317,6 +334,7 @@ if [ "$N_NODES" -gt 1 ]; then
                     --transfer ${BATCH_TRANSFERS[$i]} \
                     --run-dirs ${BATCH_RUN_DIRS[$i]} \
                     --nside 2048 --lmax $LMAX --ell-min-mpc $ELL_MIN_MPC \
+                    --hp-transition $HP_TRANSITION \
                     --no-clip --seed 0 \
                     --out-counts-dir '$OUT/counts' \
                     --patch-shells --fullsky-shells --n-zbins 0 \
@@ -335,13 +353,14 @@ for ((j = 0; j < ${#EVAL_COSMOS_ARR[@]}; j++)); do
     RUN_DIRS="$RUN_DIRS $DATA/${EVAL_COSMOS_ARR[$j]}/run_0"
     TRANSFER_FILES="$TRANSFER_FILES ${TRANSFER_ARR[$j]}"
 done
-echo "[stage 3] apply_transfer.py: correction (--no-clip, ell_min_mpc=$ELL_MIN_MPC) + diagnostics (incl. kappa), ${#EVAL_COSMOS_ARR[@]} held-out cosmologies"
+echo "[stage 3] apply_transfer.py: correction (--no-clip, ell_min_mpc=$ELL_MIN_MPC, hp_transition=$HP_TRANSITION) + diagnostics (incl. kappa), ${#EVAL_COSMOS_ARR[@]} held-out cosmologies"
 uenv run pytorch/v2.9.1:v2 --view=default -- bash -c "
     source ${SPHEREFLOW_VENV}/bin/activate
     OMP_NUM_THREADS=128 python transfer/apply_transfer.py \
         --transfer $TRANSFER_FILES \
         --run-dirs $RUN_DIRS \
         --nside 2048 --lmax $LMAX --ell-min-mpc $ELL_MIN_MPC \
+        --hp-transition $HP_TRANSITION \
         --no-clip --seed 0 \
         $REUSE_FLAG \
         --out-counts-dir '$OUT/counts' \

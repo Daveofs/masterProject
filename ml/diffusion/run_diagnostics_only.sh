@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --nodes=1
+#SBATCH --nodes=4
 #SBATCH --job-name=diffusion-diag
 #SBATCH --partition=normal
 #SBATCH --account=sk037
@@ -58,7 +58,7 @@ DIFFUSION=/users/damrein/masterProject/ml/diffusion
 # small-scale numbers are misleading, see dataset.raw_to_delta_pair.)
 DATA_ROOT=${DATA_ROOT:-/capstor/scratch/cscs/damrein/grid}
 PATCH_DIR=${PATCH_DIR:-/capstor/scratch/cscs/damrein/outputs/flowpatches/grid_nside512_256_100000}
-OUT_DIR=${OUT_DIR:-/capstor/scratch/cscs/damrein/outputs/diffusionruns/diffusion_delta_grid_nside512_patch256_n100000_ch32_b32_e40}
+OUT_DIR=${OUT_DIR:-/capstor/scratch/cscs/damrein/outputs/diffusionruns/diffusion_delta_grid_nside512_patch256_n100000_ch32_b32_e200_lr3e-5_}
 
 # EDM sampler settings -- must match how you want to sample, NOT stored in the
 # checkpoint (unlike hp_cutoff/hp_transition/sigma_data, which apply_diffusion.py
@@ -88,7 +88,7 @@ KAPPA=${KAPPA:-1}
 KAPPA_FLAG=""; [ "${KAPPA}" = "1" ] && KAPPA_FLAG="--kappa"
 # 3 cosmologies: enough for a REAL 16-84th percentile band (1 cosmology = no band at
 # all, which is what the first delta-512 eval shipped with) at ~3x the kappa cost.
-MAX_COSMOLOGIES=${MAX_COSMOLOGIES:-3}
+MAX_COSMOLOGIES=${MAX_COSMOLOGIES:-30}
 mkdir -p /capstor/scratch/cscs/damrein/outputs/logs/diffusion
 
 # COST: the full-sky sections reconstruct the whole sphere per shell, and each tile

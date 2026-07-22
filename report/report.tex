@@ -1,35 +1,46 @@
-\documentclass{article}
+\documentclass{report}
 \usepackage{graphicx} % Required for inserting images
 \usepackage{appendix}
+\usepackage{tikz}
+\usetikzlibrary{shadows, arrows.meta, decorations.pathmorphing, backgrounds}
 \usepackage{algorithm}
-\usepackage{minted}
+\usepackage{float}
+\usepackage{minted} % requires compiling with `-shell-escape` and Pygments installed
+\floatstyle{plain}
+\newfloat{listing}{H}{lol}
+\floatname{listing}{Listing}
 \usepackage{amssymb}
 \usepackage{algpseudocode}
 \usepackage[left=25mm,top=25mm,right=25mm,bottom=45mm]{geometry}
 \usepackage{amsmath}
 \usepackage{biblatex}
 \addbibresource{references.bib}
-\title{AI-Enhanced Fast Cosmological Simulations for Accurate Large-Scale Structure Inference}
-\author{David Amrein, Jozef Bucko, Alexandre Refregier }
-\date{\today}
 \begin{document}
-\maketitle
-\begin{figure}[h!]
+
+\begin{titlepage}
     \centering
-    \includegraphics[width=0.8\linewidth]{plots/background/place_holder.png}
-    \caption{cover picture}
-    \label{fig:placeholder}
-\end{figure}
+    \vspace*{1cm}
+    {\LARGE\bfseries AI-Enhanced Fast Cosmological Simulations for Accurate Large-Scale Structure Inference\\}
+    \vspace{1cm}
+    {\large David Amrein, Jozef Bucko, Alexandre Refregier\\}
+    \vspace{0.5cm}
+    {\large \today\\}
+    \vspace{1.5cm}
+    \includegraphics[width=0.6\linewidth]{plots/background/place_holder.png}
+    \vfill
+    {\large Master Thesis \\ Department of Physics \\ ETH Zurich}  % adjust as needed
+\end{titlepage}
+
 \tableofcontents
-\newpage
-\begin{abstract}
-    
-\end{abstract}
-\section{Introduction}
+
+\chapter*{Abstract} 
+\addcontentsline{toc}{chapter}{Abstract}
+\chapter{Introduction}
 \section{Theoretical Background}
 \subsection{Cosmological Framework}
 \subsubsection{The Cosmic Web}
 \label{sec:cosmic_web}
+
 
 On scales of a few to a few hundred megaparsecs, matter in the Universe is not smoothly distributed but arranged into an interconnected network of dense compact knots, elongated filaments, two-dimensional sheets, and large under-dense voids -- collectively known as the \emph{cosmic web} \cite{bond_how_1996, libeskind_tracing_2018}. The term originates with \citeauthor{bond_how_1996}, who showed that this filament-dominated pattern is already present in embryonic form in the tidal field of the initial density perturbations, with the nonlinear gravitational evolution sharpening rather than creating it \cite{bond_how_1996}. The same gravitational instability that seeds this pattern is responsible for its growth: initially small density fluctuations are amplified by their own self-gravity, so that overdense regions contract while voids expand and come to dominate the volume of the Universe \cite{bond_how_1996}. Large galaxy redshift surveys -- 2dFGRS, SDSS, and the 2MASS redshift survey (2MRS) among them -- as well as cosmological $N$-body simulations both recover this same web-like arrangement of galaxies and dark matter \cite{libeskind_tracing_2018}.
 
@@ -124,8 +135,89 @@ It is precisely this combination of a per-particle tree, per-particle rung state
 
 CosmoGridV1 is a large, publicly released suite of lightcone $N$-body simulations built specifically for map-level (rather than two-point-function-only) cosmological inference from large-scale-structure probes such as weak lensing and galaxy clustering \cite{kacprzak_cosmogridv1_2023}. It samples a six-dimensional flat $w$CDM parameter space ($\Omega_m$, $\sigma_8$, $w_0$, $H_0$, $n_s$, $\Omega_b$, with a fixed total neutrino mass) at 2500 points arranged on a Sobol sequence, running 7 independent realisations at every point, in addition to 200 realisations (with parameter-derivative pairs) at a fixed fiducial cosmology and a smaller set of benchmark runs at higher resolution used to validate the main configuration's choices of box size, particle count, and shell thickness \cite{kacprzak_cosmogridv1_2023}. Every simulation is run with \textsc{PkdGrav3} in a periodic box of $900\,\mathrm{Mpc}/h$ with $832^3$ particles, and stores its lightcone as HEALPix particle-count maps at $N_{\rm side}=2048$ out to $z=3.5$, together with friends-of-friends halo catalogues at each output step \cite{kacprzak_cosmogridv1_2023}. These raw particle-count shells are the basis from which observable maps of weak-lensing convergence, galaxy clustering, and intrinsic alignment are subsequently constructed, and the same dataset has previously been used, together with a shell-based baryon correction model, for a deep-learning cosmological parameter analysis of the KiDS-1000 weak-lensing survey \cite{fluri_full_2022}. It is this suite -- box size, particle count, cosmology, and all -- that Sec.~\ref{sec:pipeline} takes as the accuracy target for the pipeline developed in this thesis.
 
-\section{Methods and implementation}
-\subsection{Pipeline Architecture}
+\section{Super-Resolution Methods (not finished)}
+\label{sec:sr-methods}
+
+The resolution deficit between \textsc{disco}'s particle-mesh force solve and \textsc{PkdGrav3}'s tree-based one (Sec.~\ref{sec:discodj}, Sec.~\ref{sec:pkdgrav}) is what the correction $f$ of Sec.~\ref{sec:pipeline} is built to remove. Before turning to that correction directly, this section reviews the machine-learning background it draws on. A central design question for any model acting on the full-sky lightcone maps of Sec.~\ref{sec:pipeline} is how it can act on an input this large without exceeding the memory available on a single GPU, and the choice of architecture and training paradigm shapes how that question is answered.
+
+\subsection{The Memory Problem on the Sphere}
+\label{subsec:sr-problem}
+
+Cosmological and astrophysical observables are frequently recorded as spherical sky maps: the Cosmic Microwave Background, neutral-hydrogen intensity maps, galaxy clustering, and gravitational lensing have all been used in this form to constrain cosmological and astrophysical models. These maps are traditionally analysed through summary statistics such as the power spectrum or higher-order correlation functions, but convolutional neural networks (CNNs) have more recently been proposed as an alternative analysis tool in cosmology, since they can be trained to design statistics that maximise the precision of parameter estimation while remaining robust to noise \cite{perraudin_deepsphere_2019}.
+
+Applying a CNN directly on the sphere, however, is not a straightforward extension of the flat-image case, and raises two distinct challenges. A square pixel grid has discrete translation symmetries that make convolution -- and the rotation of a filter by one pixel -- well defined; no grid on the sphere shares a perfectly symmetric structure of this kind, so rotating a spherical filter instead requires some form of interpolation. The second challenge is computational efficiency: because the rotation group $SO(3)$ is itself a three-dimensional manifold, a naive implementation of the $SO(3)$ correlation needed for a spherical CNN scales as $\mathcal{O}(n^6)$ \cite{cohen_spherical_2018}, which becomes prohibitively expensive and impractical as the grid density grows.
+
+A related pattern appears in the literature on generating constrained realisations of Gaussian random fields: as the grid density grows and the number of constraints increases beyond a few, iterative solvers of this kind converge so slowly that they become similarly impractical, which motivated a variant that instead expands the random field in a spherical-harmonic basis rather than a plane-wave one \cite{hoffman_constrained_1991}. The same change of basis is attractive here, and is made practical by the fast spherical-harmonic transform (SHT) implemented for the HEALPix pixelisation \cite{gorski_healpix_2005}, which can be used to reduce the full-resolution map to a lower-dimensional problem. Fourier-domain representations have more generally played a role in deep learning: they appear, for instance, in the proof of the universal approximation theorem, have empirically been used to speed up convolutional neural networks, and have motivated network architectures built directly around the Fourier transform or sinusoidal activation functions \cite{li_fourier_2021}.
+
+[Rework] A second, architecture-level route to the same memory constraint is to avoid processing the full map at once. The overlap-tile strategy introduced for image segmentation allows the seamless segmentation of arbitrarily large images by splitting them into patches and extrapolating the missing context at each patch's border by mirroring the input image; this tiling is what makes it possible to apply a network to images whose usable resolution would otherwise be limited directly by GPU memory \cite{ronneberger_u-net_2015}.
+
+\subsection{Architectures}
+\label{subsec:architectures}
+
+\subsubsection{U-Net}
+\label{sssec:unet-arch}
+
+A common assumption at the time was that training a deep network successfully requires many thousands of annotated samples; the U-Net architecture instead targets the opposite regime \cite{ronneberger_u-net_2015}. Structurally, this is achieved with two complementary halves: a contracting path whose role is to capture context, and a symmetric expanding path whose role is to recover precise, pixel-level localization \cite{ronneberger_u-net_2015}.
+
+\begin{tikzpicture}[
+    node/.style={
+        draw, rounded corners, fill=blue!10,
+        drop shadow, minimum width=2.5cm, minimum height=1cm,
+        font=\sffamily
+    },
+    arrow/.style={-{Stealth[length=3mm]}, thick, color=gray!70}
+]
+  \node[node] (A) at (0,0) {placeholder};
+  \node[node] (B) at (4,0) {placeholder};
+  \node[node] (C) at (8,0) {placeholder};
+  \draw[arrow] (A) -- (B);
+  \draw[arrow] (B) -- (C);
+\end{tikzpicture}
+ 
+[Rework] The two paths achieve this division of labour through complementary operations. In the contracting path, each pooling step halves the spatial resolution while the accompanying channel-doubling increases the number of feature maps, so that deeper layers operate on a coarser grid but each unit on that grid summarises information pooled from an increasingly large region of the input -- this is what builds up contextual, semantic information about what is present in a region, at the cost of exactly where within that region. The expanding path is built to recover that lost spatial precision: each upsampling step undoes the resolution loss, and is paired with a concatenation of the corresponding, higher-resolution feature map still held from the contracting path -- a skip connection that lets fine, precisely localized detail flow directly from the contracting side to the expanding side, rather than having to be reconstructed from the coarse, downsampled representation alone. Cropping the skipped feature map before concatenation is needed only because every unpadded convolution in the network shrinks the feature map slightly, so the two feature maps being merged would otherwise not match in size. \cite{ronneberger_u-net_2015}
+
+
+\subsubsection{Chebyshev Graph Convolution}
+\label{sssec:chebconv}
+
+An alternative, spherically-native architecture avoids the flat, patch-based representation entirely and instead operates on a graph built directly from the HEALPix pixelisation. From the HEALPix pixelisation one builds a weighted undirected graph $G=(V,E,W)$, where $V$ is the set of $N_{\mathrm{pix}}=|V|$ vertices, $E$ the set of edges, and $W$ the weighted adjacency matrix; each pixel $i$ is represented by a vertex $v_i\in V$, connected by an edge to the 8 (or 7) vertices $v_j$ representing its neighbouring pixels $j$. Given these edges, the weighted adjacency matrix is defined as
+\begin{equation}
+    W_{ij} = \begin{cases} \exp\!\left(-\dfrac{\lVert x_i - x_j \rVert^2}{2\rho^2}\right) & \text{if pixels } i,j \text{ are neighbours}, \\[4pt] 0 & \text{otherwise}, \end{cases}
+\end{equation}
+where $x_i$ is a vector encoding the three-dimensional coordinates of pixel $i$, and $\rho = |E|^{-1}\sum_{(v_i,v_j)\in E}\lVert x_i - x_j\rVert^2$. Following the normalised graph Laplacian construction $L = I - D^{-1/2}WD^{-1/2}$ (with $D$ the diagonal degree matrix), a graph signal $f\in\mathbb{R}^{N_{\mathrm{pix}}}$ is filtered by a kernel $h:\mathbb{R}_+\to\mathbb{R}$ through
+\begin{equation}
+    h(L)f = U\,h(\Lambda)\,U^\top f,
+\end{equation}
+where $U$ and $\Lambda$ are the eigenvectors and eigenvalues of $L$ \cite{perraudin_deepsphere_2019}. This graph-spectral filtering is what lets a convolution be defined directly on the HEALPix sphere, avoiding the interpolation and $SO(3)$-cost issues raised in Sec.~\ref{subsec:sr-problem} for a full spherical CNN.
+
+\subsection{Generative Paradigms}
+\label{subsec:generative-paradigms}
+
+Beyond deterministic architectures such as the two above, deep generative models -- algorithms that estimate and sample from an unknown data distribution -- offer a different way to frame the correction problem. Diffusion-based models in particular have driven much of the recent progress in generative image modelling, owing to their scalable and relatively stable training; their restriction to comparatively simple diffusion processes, however, confines the space of sampling probability paths that can be used, which leads to long training times and motivates specialised, more efficient sampling methods \cite{lipman_flow_2023}.
+
+\subsubsection{Flow Matching}
+\label{sssec:flow-matching}
+
+Flow Matching (FM) is proposed as an efficient, simulation-free objective for training continuous normalising flow (CNF) models that removes this restriction, allowing the adoption of general probability paths -- rather than only diffusion processes -- to supervise training \cite{lipman_flow_2023}.
+
+Let $x_1$ be a random variable distributed according to an unknown data distribution $q(x_1)$, of which only samples, not the density itself, are assumed available. Let $p_t$ be a probability path with $p_0=p$ a simple distribution, e.g.\ the standard normal $p(x)=\mathcal{N}(x\,|\,0,I)$, and $p_1$ approximately equal in distribution to $q$. Given a target probability path $p_t(x)$ and the corresponding vector field $u_t(x)$ that generates it, the Flow Matching objective regresses a learned vector field $v_t$, with parameters $\theta$, onto $u_t$:
+\begin{equation}
+    \mathcal{L}_{\mathrm{FM}}(\theta) = \mathbb{E}_{t,\,p_t(x)}\big\lVert v_t(x) - u_t(x) \big\rVert^2, \qquad t \sim \mathcal{U}[0,1],\ x\sim p_t(x),
+    \label{eq:flow_matching}
+\end{equation}
+so that, once Eq.~\eqref{eq:flow_matching} reaches zero loss, the learned model generates $p_t(x)$. Used naively, however, this objective is intractable: there is no prior knowledge of which $p_t$ and $u_t$ satisfy $p_1(x)\approx q(x)$, and a closed form for a suitable $u_t$ is generally not available. \citeauthor{lipman_flow_2023} instead construct both $p_t$ and $u_t$ from probability paths and vector fields that are only defined \emph{per sample}, with an appropriate aggregation recovering the desired $p_t$ and $u_t$ and yielding a substantially more tractable training objective \cite{lipman_flow_2023}.
+
+\subsubsection{Diffusion}
+\label{sssec:diffusion-theory}
+
+Diffusion-based generative models have separately emerged as a powerful framework for neural image synthesis, in both unconditional and conditional settings, in some cases matching or surpassing the image quality achieved by GANs; they have also increasingly been applied to other domains, including audio and video generation, image segmentation, and language translation, which continues to motivate work on their image quality, training cost, and generation speed \cite{karras_elucidating_2022}.
+
+Denoting the data distribution $p_{\mathrm{data}}(x)$, with standard deviation $\sigma_{\mathrm{data}}$, one considers the family of mollified distributions $p(x;\sigma)$ obtained by adding i.i.d.\ Gaussian noise of standard deviation $\sigma$ to the data; for $\sigma_{\max}\gg\sigma_{\mathrm{data}}$, $p(x;\sigma_{\max})$ is practically indistinguishable from pure Gaussian noise. A diffusion model samples a noise image $x_0\sim\mathcal{N}(0,\sigma_{\max}^2 I)$ and sequentially denoises it into images $x_i$ at decreasing noise levels $\sigma_0=\sigma_{\max}>\sigma_1>\dots>\sigma_N=0$, with $x_i\sim p(x_i;\sigma_i)$ at each level, so that the endpoint $x_N$ of this process is distributed according to the data \cite{karras_elucidating_2022}. This process can equivalently be described by a probability flow ODE, which continuously increases or reduces the noise level of the image when moving forward or backward in time, respectively; specifying the ODE requires first choosing a schedule $\sigma(t)$ that fixes the desired noise level at time $t$ \cite{karras_elucidating_2022}.
+
+The architectures of Sec.~\ref{subsec:architectures} and the generative paradigms above are the building blocks that Sec.~\ref{sec:correction-pipelines} combines into the concrete correction pipelines used in this thesis.
+
+\chapter{Methods and implementation}
+\section{Pipeline Architecture}
 \label{sec:pipeline}
 
 The reference suite CosmoGridV1 evolves every realisation with \textsc{PkdGrav3} (Sec.~\ref{sec:pkdgrav}), whose FMM force solver and adaptive time-stepping resolve structure accurately down to small scales. That accuracy is expensive: each lightcone costs many node-hours, so the millions of realisations required for map-level, simulation-based inference dominate the total cost of the analysis \cite{kacprzak_cosmogridv1_2023, potter_pkdgrav3_2016}.
@@ -141,9 +233,9 @@ where both maps are generated from the \emph{same} initial conditions and cosmol
 
 \paragraph{Approaches.} Two routes to $f$ were considered. The first is a direct, image-level neural-network correction that maps $\mathrm{Map}_{\textsc{disco}}$ onto $\mathrm{Map}_{\textsc{CosmoGrid}}$ pixel by pixel. This is expressive, but heavy: full-sky HEALPix maps at $N_{\mathrm{side}} = 2048$ ($\sim 5\times 10^{7}$ pixels) are large, live on the sphere rather than on a flat grid, and do not fit on a single GPU without tiling into patches (Sec.~\ref{sec:network}). The second route, adopted here, works in harmonic space and corrects the angular power spectrum $C_\ell$ of the Disco-DJ maps at high multipole $\ell$, where the PM resolution deficit is concentrated. Operating on $C_\ell$ is far cheaper, is naturally defined on the sphere, and targets the deficit exactly where Eq.~\eqref{eq:cl} relates it to $P(k)$; the trade-off is that it corrects a summary statistic rather than the full field.
 
-\subsection{IC generation}
+\section{IC generation}
 \label{sec:ic_generation}
-\subsubsection{Validation against CosmoGridV1}
+\subsection{Validation against CosmoGridV1}
 
 Before using \textsc{disco}'s shell builder (Sec.~\ref{sec:shell_builder_core}) for any downstream analysis, we first validate that a lightcone produced with our \textsc{PkdGrav3} configuration reproduces the reference CosmoGridV1 statistics. To this end we run \textsc{PkdGrav3} with its native lightcone module on the exact box, resolution, and cosmology used by CosmoGridV1, and compare the resulting matter angular power spectrum $C_\ell$ against the corresponding CosmoGridV1 lightcone.
 
@@ -151,8 +243,8 @@ Before using \textsc{disco}'s shell builder (Sec.~\ref{sec:shell_builder_core}) 
 
 As described in Sec.~\ref{sec:power_spectrum}, the initial conditions must be built from a correct transfer function evaluated at the correct neutrino mass, since this directly determines whether the resulting field is consistent with CosmoGridV1. The resulting particle positions and velocities at $a_i = 1/(1+z_i)$ are exported and used, unmodified, as the initial condition for the corresponding \textsc{disco} run: \textsc{disco} evolves this state forward to $a=1$ and accumulates the lightcone with the shell builder of Sec.~\ref{sec:shell_builder_core} over the same redshift range, $z_{\max}=3.5$ down to $z=0$, at the same HEALPix resolution $N_{\mathrm{side}}=2048$.
 
-\subsection{Shell Builder}
-\subsubsection{Core}
+\section{Shell Builder}
+\subsection{Core}
 \label{sec:shell_builder_core}
 
 A lightcone output requires the particle distribution to be resampled at every integration step, since the observable past lightcone shell changes continuously as the universe evolves. The most direct implementation stores the full particle snapshot at each of the $n_{\mathrm{steps}}$ integration steps and performs the shell decomposition after the simulation has finished. This approach is memory-prohibitive: retaining $n_{\mathrm{steps}}$ full-resolution snapshots simultaneously exceeds the available device memory for the particle counts considered here. We therefore interleave the shell decomposition with the time integration, so that at any given time only the particle states immediately before and after the current integration step, together with a set of low-dimensional pixelized count maps, need to be held in memory.
@@ -205,7 +297,7 @@ Because the integration grid is constructed from the shell edges themselves (Eq.
 
 \paragraph{Output.} Once all $J$ steps have been processed, the set of per-shell count maps $\{\mathbf{S}_s\}_{s=1}^{S}$, together with the shell table, is serialized to a single output file. At no point during the procedure are more than $\mathcal{O}(1)$ full particle snapshots and $S$ integer-valued maps of size $N_{\mathrm{pix}}$ held simultaneously; this is what removes the memory bottleneck associated with the naive end-of-run decomposition.
 
-\subsubsection{Crossing Condition}
+\subsection{Crossing Condition}
 \label{sec:crossing}
 
 The condition follows the moving-lightcone formulation of \textsc{PkDgrav3} \cite{noauthor_examplepkdgrav3_lightcone_2022} exactly, rather than the vector-trajectory intersection used in the earlier sketch.
@@ -279,31 +371,23 @@ This procedure reproduces the corner-observer, box-replication scheme of \textsc
     \label{fig:placeholder2}
 \end{figure}
 
-\subsection{Neural Network}
-\label{sec:network}
+\section{Correction Pipelines}
+\label{sec:correction-pipelines}
+% short intro: table crossing architecture x paradigm -> pipeline
 
-The correction $f$ of Eq.~\eqref{eq:correction_goal} is implemented as a neural network operating on the angular power spectra of the Disco-DJ lightcone maps produced by the pipeline above. The remainder of this section works through that network end to end: how the spherical input is made tractable on a single GPU (Sec.~\ref{sec:dim_reduction}), how training pairs are assembled from matched Disco-DJ/CosmoGridV1 realisations (Sec.~\ref{sec:data_prep}), the architecture itself (Sec.~\ref{sec:net_arch}), how it is trained (Sec.~\ref{sec:training}), and how the corrected maps are validated (Sec.~\ref{sec:validation}).
+\subsection{Harmonic-Space Rescaling Pipeline}
+\label{subsec:pipe-harmonic}
+% transfer function fit/emulate, ell_min_mpc, Poisson resampling
 
-\subsubsection{Dimensional Reduction}
-\label{sec:dim_reduction}
+\subsection{U-Net Flow Pipeline}
+\label{subsec:pipe-unet-flow}
+% data prep, conditioning, training, validation
 
-As noted in Sec.~\ref{sec:pipeline}, a full-resolution HEALPix map at $N_{\mathrm{side}}=2048$ does not fit on a single GPU alongside a network of any depth. Two dimensional-reduction strategies address this VRAM constraint: tiling the sphere into flat patches small enough to fit standard convolutional layers, or working directly with a spherical-harmonic (or graph-based spherical-CNN) representation that respects the sphere's topology without an explicit flat projection.
+\subsection{Diffusion Pipeline}
+\label{subsec:pipe-diffusion}
 
-\subsubsection{Data preparation}
-\label{sec:data_prep}
-
-\subsubsection{Network Architecture}
-\label{sec:net_arch}
-
-Spherical convolutional architectures such as DeepSphere \cite{defferrard_deepsphere_2020}, which operate directly on the HEALPix pixelization via a graph representation, are a natural starting point for a network that must respect the spherical geometry motivated in Sec.~\ref{sec:dim_reduction}.
-
-\subsubsection{Training Procedure}
-\label{sec:training}
-
-\subsubsection{Validation Strategy}
-\label{sec:validation}
-
-The corrected maps are validated against the CosmoGridV1 reference in the same summary statistics the correction targets: the (angular) power spectrum $C_\ell$ of Eq.~\eqref{eq:cl}, and convergence ($\kappa$) maps projected with UFALCON, so that the comparison is made on the same observable quantities used to build the training objective in Sec.~\ref{sec:training}.
+\subsection{Sphereflow Pipeline}
+\label{subsec:pipe-sphereflow}
 
 \section{Computational Infrastructure}
 \label{sec:infrastructure}
@@ -312,7 +396,7 @@ The corrected maps are validated against the CosmoGridV1 reference in the same s
  
 Development proceeded through three tiers of increasing scale: a local workstation for prototyping, ETH Zurich's Euler cluster for medium-scale production, and the CSCS Alps system for full-resolution runs. Each tier trades a shorter debugging loop for less computational headroom, and it is the memory footprint of the two codes from Sec.~\ref{sec:discodj} and Sec.~\ref{sec:pkdgrav} -- not their runtime -- that ultimately decides which tier a given job belongs to.
  
-\subsubsection{Local Development}
+\subsection{Local Development}
 \label{sec:local_dev}
  
 \textsc{disco} and \textsc{PkdGrav3} were first set up on a local machine to establish a minimal working configuration and to inspect their output interactively: results can be plotted and checked immediately, without the queueing latency of a batch system, which shortens the debugging loop considerably. In practice this means that a bug in, say, the shell-builder logic of Sec.~\ref{sec:shell_builder_core} or in the initial-condition hand-off of Sec.~\ref{sec:ic_generation} is caught and fixed in seconds on a laptop, rather than only surfacing after a queued job on a cluster has already run to completion. Small tests at a resolution of $16^3 = 4096$ particles complete in under a minute on a single core; a run this size is not meant to be physically meaningful, only to exercise the full pipeline -- initial conditions, time integration, and lightcone accumulation -- end to end before committing to a production-scale configuration.
@@ -325,22 +409,20 @@ The binding constraint once the resolution is scaled up to production size is me
 \end{equation}
 which already exceeds a typical workstation's RAM once any headroom for the rest of the run is included. This number is only a floor, and the two codes exceed it in different ways. For \textsc{PkdGrav3}, Eq.~\eqref{eq:phasespace_mem} covers only the particle positions and velocities themselves; as already noted in Sec.~\ref{sec:pkdgrav}, the code additionally carries a per-particle tree, per-particle rung state, and domain-decomposition buffers alongside this raw data, so its actual memory footprint at a given particle count is correspondingly larger than Eq.~\eqref{eq:phasespace_mem}, by an amount that grows with the depth of the tree and the number of particles active on the shortest rungs at a given step. \textsc{disco}, by contrast, is bounded less by the particle count than by the resolution of its force mesh: because its Poisson solve is a single global FFT over the whole PM grid (Sec.~\ref{sec:discodj}), rather than a spatially local tree walk, the entire mesh -- the density field, its Fourier transform, and the resulting force components -- must reside in memory simultaneously for a single force evaluation, so that (unlike \textsc{PkdGrav3}) its memory demand scales with the chosen mesh resolution rather than directly with the particle count. Production-resolution runs of either code therefore require a cluster.
  
-\subsubsection{Euler (ETH Zurich)}
+\subsection{Euler (ETH Zurich)}
  
 On Euler we built a separate virtual environment for each code, because \textsc{disco} and \textsc{PkdGrav3} have conflicting library dependencies that cannot coexist in a single environment: \textsc{disco} is built on JAX (Sec.~\ref{sec:discodj}) and therefore needs a matched GPU-software stack for its own automatic-differentiation and GPU-acceleration machinery, while \textsc{PkdGrav3} is a compiled tree code with its own domain-decomposition layer (Sec.~\ref{sec:pkdgrav}) built against a separate toolchain; installing both into one environment risks exactly the kind of version conflict that a per-code environment avoids. Euler provides the memory and the GPU partitions needed to run at the full $832^3$ resolution, with substantial speed-ups from the GPU-accelerated builds -- speed-ups that matter specifically for \textsc{disco}, whose entire force solve is GPU-accelerated by construction (Sec.~\ref{sec:discodj}), rather than for \textsc{PkdGrav3}, whose FMM force calculation is CPU-bound (in the used version). Depending on the configuration a single simulation can still be long-running, so jobs are distributed across multiple nodes where the code supports it.
  
-\subsubsection{CSCS (Alps / Piz Daint)}
+\subsection{CSCS (Alps / Piz Daint)}
  
 The largest runs use the CSCS Alps system, whose NVIDIA GH200 nodes provide 120~GB of on-package memory. This large memory pool is well suited to scaling \textsc{disco} up in particular: as argued in Sec.~\ref{sec:local_dev}, \textsc{disco}'s memory demand tracks the resolution of its PM grid rather than the particle count, and the entire grid must be resident in memory for a single force evaluation, so a larger available memory directly translates into a finer mesh -- and hence a smaller-scale force resolution -- that can be run without running out of memory mid-simulation. The same large memory pool also shortens the wall-clock time of each run, whether generating the \textsc{disco}/CosmoGridV1 training pairs of Sec.~\ref{sec:pipeline} or, later, training the correction network of Sec.~\ref{sec:network} itself, since both tasks can be run with larger batches -- of simulations in the first case, of map patches in the second -- without being forced to break the workload into smaller pieces purely to fit within a tighter memory budget.
  
-\subsection{Software Engineering}
-\subsubsection{Code Structure}
+\section{Software Engineering}
+\subsection{Code Structure}
  
 Executables and virtual environments are kept in the cluster's \texttt{HOME} directory, which is persistent and backed up but subject to a strict storage quota. This split is deliberate: the code and its environment are exactly the things that must survive between sessions and be rebuildable on demand, so they belong in the small, safe, backed-up \texttt{HOME}, whereas simulation snapshots, shell maps, per-job logs, and diagnostic plots are bulk, regenerable output that is instead written to \texttt{SCRATCH}, which trades that persistence for effectively unbounded (though periodically purged) capacity -- exactly the trade-off that disposable intermediate output should make. Keeping the full log of every submission proved valuable both for debugging and for later cross-run comparison, since a run's log is often the only remaining record of exactly which configuration produced a given output. The CosmoGridV1 reference dataset ($\sim110$~TB) was transferred to the CSCS entry point with a dedicated Globus transfer job: at this scale, an interactive, single-stream copy would be both too slow and too fragile, since a single dropped connection partway through could force the transfer to restart from scratch, whereas a managed transfer job can run unattended and recover from such interruptions on its own.
  
-\subsubsection{Job Scheduling and Submission}
- 
-\subsubsection{Job Scheduling and Submission}
+\subsection{Job Scheduling and Submission}
  
 Every Python script is paired with a Slurm batch script. The Python entry point is written to run unchanged both locally and on the cluster, while the accompanying batch script requests the resources and captures the output; keeping the two separate means the same driver used for the small local tests of Sec.~\ref{sec:local_dev} is also what eventually runs, unmodified, on a full production allocation, with only the surrounding batch script changing. The same job can then be launched interactively (\texttt{bash}, for fast monitoring directly in the terminal) or submitted to the queue (\texttt{sbatch}, to run detached and log to file) -- interactive launches being the natural continuation of local debugging once a job needs cluster-scale resources, and queued submission being reserved for runs that are expected to actually take long enough to justify running unattended.
  
@@ -362,19 +444,19 @@ The execution body is short, but it is doing three distinct jobs before the driv
 The task count passed to \texttt{srun} is computed, rather than hard-coded, for the same reason. The header itself only reserves \texttt{--ntasks-per-node=1}, so Slurm's own bookkeeping treats the job as one task per node; the actual degree of parallelism -- one process per GPU -- is left to the execution body, which reads the number of nodes Slurm actually granted (\texttt{SLURM\_NNODES}) and multiplies it by the four GPUs requested per node (\texttt{--gres=gpu:4}) to get \texttt{NTASKS=\$((SLURM\_NNODES * 4))}. Passing this computed value explicitly to \texttt{srun --ntasks} is what lets \texttt{--nodes} in the header be the only thing that needs to change to scale the same script from the two-node example shown here to a larger allocation: the task count, and hence the process-per-GPU launch, follows automatically.
  
 Because only the header and these few shell variables change between runs, adapting a job to a new configuration -- more nodes, a different resolution, a longer time limit, or a different output directory -- amounts to editing a handful of lines, while the underlying Python driver invoked by \texttt{simulation\_run} is reused unchanged.
-\subsubsection{Version Control (GitHub)}
+\subsection{Version Control (GitHub)}
  
 The whole project -- the analysis scripts together with the modified \textsc{disco} that includes the shell builder -- is kept in a dedicated Git repository. Beyond the usual protection against machine failure, this gives a reliable way to return to a known-good state when an experimental change breaks the pipeline, and keeps the many configuration variants organised.
-\section{Results}
+\chapter{Results}
 
-\section{Conclusion}
+\chapter{Conclusion}
+
 \printbibliography
 
 % =========== Appendix ===========
 \appendix
-\section{Implementation Details}\label{app:implementation}
-
-\subsection{Job Configuration}\label{app:slurm}
+\chapter{Implementation Details}\label{app:implementation}
+\section{Job Configuration}\label{app:slurm}
 \begin{listing}[H]
 \centering
 \begin{minipage}{0.75\textwidth}

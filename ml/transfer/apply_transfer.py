@@ -54,7 +54,7 @@ import healpy as hp
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from transfer_function import (_alm, ell_of_flat_index, alm_fname, smooth_cl,      # noqa: E402
                                ell_min_from_mpc_h, load_cosmo, shell_redshifts,     # noqa: E402
-                               _debias_mean)                                       # noqa: E402
+                               _debias_mean, highpass_ell_ramp)                     # noqa: E402
 # poisson_resample.py (lognormal+Poisson re-discretization into valid counts) is no
 # longer wired in here (2026-07-16): validated that for kappa specifically, the
 # --no-clip continuous field is BOTH cheaper AND more accurate than the Poisson path
@@ -169,6 +169,24 @@ def apply(args, run: Path, transfer_path, out_path=None):
     else:
         ell_min_per_shell = np.full(n_shells, args.ell_min, dtype=np.int64)
 
+    # HIGH-PASS transition band (2026-07-21, ported from unet/diffusion/sphereflow's
+    # highpass_residual formulation for consistency -- see highpass_ell_ramp's
+    # docstring). --hp-transition in ell = args.hp_transition * lmax, the same
+    # "fraction of Nyquist" convention those pipelines use for their
+    # --hp-transition (lmax plays the role of Nyquist here: it IS the max
+    # resolvable ell, exactly like patch/graph Nyquist there). --hp-transition 0
+    # recovers the ORIGINAL hard ell_min_i step exactly.
+    # NOTE (2026-07-21): an ell_min-relative version of this (transition width =
+    # hp_transition * ell_min_i instead of hp_transition * lmax) was tried and
+    # REVERTED -- it measurably improved the flat-patch power-ratio "washed out"
+    # look but made kappa_cl/cl_ratio_by_zbin_grid WORSE (user-observed, real job
+    # comparison), so it is not a strict improvement. Root cause of "washed out"
+    # is still open -- possibly SHT/pixelization resolution (nside/lmax), not
+    # this transition band at all; do not re-attempt the ell_min-relative
+    # version without re-validating BOTH the patch view and kappa/cl_ratio.
+    ell_arr = np.arange(lmax + 1, dtype=np.float64)
+    hp_transition_ell = args.hp_transition * lmax
+
     for i in range(n_shells):
         Ti = T[min(i, T.shape[0] - 1)].copy()      # per-shell transfer
         Ri = R[min(i, R.shape[0] - 1)].copy() if R is not None else np.ones_like(Ti)
@@ -176,8 +194,12 @@ def apply(args, run: Path, transfer_path, out_path=None):
             Ti = Ti * Ri                             # Wiener/MMSE gain r*T
         ell_min_i = int(ell_min_per_shell[i])
         if ell_min_i > 0:                            # leave large scales untouched
-            Ti[:ell_min_i] = 1.0
-            Ri[:ell_min_i] = 1.0
+            # Smooth raised-cosine hand-over (not a hard truncation, see above):
+            # w=0 (no correction, Ti/Ri->1) below ell_min_i, w=1 (full Ti/Ri)
+            # above ell_min_i+hp_transition_ell.
+            w = highpass_ell_ramp(ell_arr, ell_min_i, hp_transition_ell)
+            Ti = 1.0 + w * (Ti - 1.0)
+            Ri = 1.0 + w * (Ri - 1.0)
         v = low[i].astype(np.float64)
         if args.stochastic:
             gain = Ti * Ri                            # phase-correlated part only
@@ -630,12 +652,25 @@ def main():
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--smooth-window", type=int, default=21)
     p.add_argument("--ell-min", type=int, default=0,
-                   help="Leave ell<ell_min untouched (T=1). Overridden by "
+                   help="Leave ell<ell_min untouched (T=1), smoothly ramped up over "
+                        "--hp-transition above ell_min (see there). Overridden by "
                         "--ell-min-mpc when that is > 0.")
     p.add_argument("--ell-min-mpc", type=float, default=3.0,
                    help="Leave comoving scales LARGER than this (Mpc/h) untouched, "
                         "converted to a PER-SHELL ell_min via each shell's own "
                         "redshift (see ell_min_from_mpc_h). 0 disables.")
+    p.add_argument("--hp-transition", type=float, default=0.10,
+                   help="Width (as a fraction of lmax, same 'fraction of Nyquist' "
+                        "convention as unet/diffusion/sphereflow's --hp-transition) "
+                        "of the raised-cosine hand-over band above ell_min -- "
+                        "smoothly ramps Ti/Ri from 1 (no correction) up to their "
+                        "full values instead of a hard step, avoiding the "
+                        "ringing/Gibbs artifact a step produces in real space (see "
+                        "highpass_ell_ramp's docstring; ported for consistency with "
+                        "the other 3 correction pipelines, which independently "
+                        "converged on the same fix for a kappa Cl bias traced to "
+                        "exactly this kind of hard cutoff). 0 recovers the original "
+                        "hard ell_min step exactly.")
     p.add_argument("--no-clip", action="store_true",
                    help="Emit the raw Cl-optimal overdensity field instead of a "
                         "positivity-clipped one -- KEEPS negative pixels (up to ~49%% "

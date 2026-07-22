@@ -29,6 +29,12 @@
 # they agree with whatever originally produced the counts:
 #   sbatch --export=TRANSFER_JOB=4201972,DATA=/capstor/scratch/cscs/damrein/cosmogridv1,ELL_MIN_MPC=3.0 \
 #       transfer/run_diagnostic_only.sh
+# NOTE job 4215699 (and anything before 2026-07-21) predates --hp-transition --
+# its counts were computed under the OLD hard ell_min step, equivalent to
+# HP_TRANSITION=0. The auto-REUSE_COUNTS fast path below is only an exact match
+# against that job if you ALSO pass HP_TRANSITION=0 (the default here is 0.10,
+# matching the other 3 pipelines -- see the HP_TRANSITION block below):
+#   sbatch --export=TRANSFER_JOB=4215699,HP_TRANSITION=0 transfer/run_diagnostic_only.sh
 # Override the held-out cosmology set explicitly (space-separated) if you want a
 # different/smaller set than what that job evaluated:
 #   sbatch --export=TRANSFER_JOB=4199680,TEST_COSMOS='cosmo_000001 cosmo_000003' \
@@ -58,7 +64,13 @@ export UENV_REPO_PATH=/capstor/scratch/cscs/damrein/.uenv-images
 SPHEREFLOW_VENV=/capstor/scratch/cscs/damrein/venvs/sphereflow
 
 DATA=${DATA:-/capstor/scratch/cscs/damrein/grid}
-LMAX=3000
+# Must match TRANSFER_JOB's own LMAX -- unlike run_transfer.sh (where raising
+# LMAX triggers a full fresh preprocess+fit/train+apply), this script REUSES an
+# EXISTING transfer.npz/emulator.pkl and low/high_alms_lmax<N>.npy built at
+# whatever lmax that prior job used; a mismatched LMAX here will simply fail to
+# find those files (they're named low_alms_lmax<N>.npy) or silently reload the
+# wrong alm set if a coincidentally-matching one exists elsewhere.
+LMAX=${LMAX:-3000}
 N_NODES=${SLURM_JOB_NUM_NODES:-1}
 
 # Defaults currently point at the grid run_transfer.sh job 4215699 (10 held-out
@@ -117,7 +129,13 @@ fi
 # Default here matches job 4215699's actual grid-run config (ELL_MIN_MPC=5.0) --
 # REUSE_COUNTS below is only an EXACT match if this agrees with what originally
 # produced the counts.
+# --hp-transition: raised-cosine hand-over band above ell_min (fraction of lmax),
+# same convention/default as run_transfer.sh / diffusion/run_diffusion.sh's
+# HP_TRANSITION -- see highpass_ell_ramp's docstring. Must match whatever the
+# REUSE_COUNTS source used to be an EXACT reuse (it affects the correction
+# itself, not just plotting).
 ELL_MIN_MPC=${ELL_MIN_MPC:-5.0}
+HP_TRANSITION=${HP_TRANSITION:-0.10}
 KAPPA_NSIDE=${KAPPA_NSIDE:-1024}
 KAPPA_LMAX=${KAPPA_LMAX:-2048}
 # apply_transfer.py's --max-cosmologies caps cl_ratio_by_zbin_grid.png's rows
@@ -148,7 +166,7 @@ fi
 REUSE_FLAG=""
 [ "$N_NODES" -eq 1 ] && [ -n "$REUSE_COUNTS" ] && REUSE_FLAG="--reuse-counts '$REUSE_COUNTS'"
 
-echo "==== transfer diagnostics-only | reusing transfer(s) from job $TRANSFER_JOB | ell_min_mpc=$ELL_MIN_MPC | nodes=$N_NODES ===="
+echo "==== transfer diagnostics-only | reusing transfer(s) from job $TRANSFER_JOB | ell_min_mpc=$ELL_MIN_MPC | hp_transition=$HP_TRANSITION | nodes=$N_NODES ===="
 echo "held-out cosmologies (${#COSMOS_ARR[@]}): ${COSMOS_ARR[@]}"
 echo "kappa: nside=$KAPPA_NSIDE lmax=$KAPPA_LMAX"
 
@@ -171,6 +189,7 @@ if [ "$N_NODES" -gt 1 ]; then
                     --transfer ${BATCH_TRANSFERS[$i]} \
                     --run-dirs ${BATCH_RUN_DIRS[$i]} \
                     --nside 2048 --lmax $LMAX --ell-min-mpc $ELL_MIN_MPC \
+                    --hp-transition $HP_TRANSITION \
                     --no-clip --seed 0 \
                     --out-counts-dir '$OUT/counts' \
                     --patch-shells --fullsky-shells --n-zbins 0 \
@@ -194,6 +213,7 @@ uenv run pytorch/v2.9.1:v2 --view=default -- bash -c "
         --transfer $TRANSFER_FILES \
         --run-dirs $RUN_DIRS \
         --nside 2048 --lmax $LMAX --ell-min-mpc $ELL_MIN_MPC \
+        --hp-transition $HP_TRANSITION \
         --no-clip --seed 0 \
         $REUSE_FLAG \
         --out-counts-dir '$OUT/counts' \

@@ -162,6 +162,35 @@ def ell_min_from_mpc_h(z: np.ndarray, cosmo: np.ndarray, scale_mpc_h: float) -> 
     return np.clip(ell_min, 0, None)
 
 
+def highpass_ell_ramp(ell: np.ndarray, ell_min: int, transition: float) -> np.ndarray:
+    """Raised-cosine ramp w(ell) in [0,1]: 0 below ell_min, smoothly rising to 1
+    over a transition band of width `transition` (in ell), 1 above ell_min+transition.
+
+    Same shape (0.5*(1-cos(pi*t))) as the highpass masks the OTHER three
+    correction pipelines converged on independently after all three showed a
+    systematic kappa Cl bias traced to a HARD large-scale cutoff (see
+    unet/flow_model.py's _highpass_mask, diffusion/model.py's _highpass_mask,
+    sphereflow/sphere_flow.py's graph_highpass -- and the [[deepsphere-shell-
+    correction]] memory) -- ported here, not imported (this project's ml/
+    pipeline dirs never cross-import, see [[feedback-decoupled-pipeline-
+    modules]]; transfer_function.py -> apply_transfer.py is a WITHIN-pipeline
+    import, same as those three already do internally, so this one is fine).
+    Applied here to apply()'s (Ti-1)/(Ri-1) correction deltas directly in ell
+    space -- the EXACT equivalent of those pipelines' 2D-FFT/graph radial
+    highpass on a flat-patch or graph signal, but exact rather than
+    approximate, since T/R are already per-ell scalars with no spatial extent
+    to Fourier-transform.
+
+    transition<=0 reduces to a hard step (0 below ell_min, else 1) -- the
+    ORIGINAL apply() behavior (a step function in harmonic space rings in real
+    space at the cutoff scale, same Gibbs-phenomenon motivation the other three
+    pipelines' docstrings give for smoothing theirs)."""
+    if transition <= 0:
+        return (ell >= ell_min).astype(np.float64)
+    t = np.clip((ell.astype(np.float64) - ell_min) / transition, 0.0, 1.0)
+    return 0.5 * (1.0 - np.cos(np.pi * t))
+
+
 def build_features(ell: np.ndarray, z: float, cosmo: np.ndarray,
                    cl_low: np.ndarray) -> np.ndarray:
     """Rows of [l, z, H0, O_cdm, Ob, Om, ns, s8, Cl_low] for one shell (per ell).
@@ -621,7 +650,7 @@ def _finalize_train(X, y, sum_cross, sum_low, sum_high, r_counts, last_cosmo, la
 
     model = MLPRegressor(hidden_layer_sizes=hidden, activation="relu",
                          solver="adam", alpha=alpha, batch_size=4096,
-                         learning_rate_init=1e-3, verbose=False, random_state=0)
+                         learning_rate_init=1e-4, verbose=False, random_state=0)
     train_loss_hist, val_loss_hist = [], []
     best_val, best_weights, no_improve, patience = np.inf, None, 0, 10
     for it in range(max_iter):
