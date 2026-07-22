@@ -2,19 +2,47 @@
 \usepackage{graphicx} % Required for inserting images
 \usepackage{appendix}
 \usepackage{tikz}
-\usetikzlibrary{shadows, arrows.meta, decorations.pathmorphing, backgrounds}
-\usepackage{algorithm}
+\usetikzlibrary{shadows, arrows.meta, decorations.pathmorphing, backgrounds, positioning, calc, fit}
 \usepackage{float}
+\usepackage{booktabs}
 \usepackage{minted} % requires compiling with `-shell-escape` and Pygments installed
 \floatstyle{plain}
 \newfloat{listing}{H}{lol}
 \floatname{listing}{Listing}
 \usepackage{amssymb}
-\usepackage{algpseudocode}
 \usepackage[left=25mm,top=25mm,right=25mm,bottom=45mm]{geometry}
 \usepackage{amsmath}
 \usepackage{biblatex}
 \addbibresource{references.bib}
+
+% ---------------------------------------------------------------------------
+% Shared visual language for all TikZ diagrams
+% ---------------------------------------------------------------------------
+\definecolor{inkc}{HTML}{161D33}     % primary ink
+\definecolor{mutedc}{HTML}{5C6480}   % secondary labels
+\definecolor{hairc}{HTML}{B9BFD0}    % box borders
+\definecolor{surfc}{HTML}{F5F6FB}    % neutral fill
+\definecolor{accentc}{HTML}{B85F34}  % accent (key stages, arrows)
+\definecolor{accsoftc}{HTML}{F0E0D6} % accent fill
+\definecolor{ctrans}{HTML}{3F63A6}   % transfer-function pipeline
+\definecolor{cunet}{HTML}{28866A}    % U-Net flow pipeline
+\definecolor{cdiff}{HTML}{7A51C6}    % diffusion pipeline
+
+\tikzset{
+  box/.style={draw=hairc, semithick, fill=white, rounded corners=2.5pt,
+              align=center, font=\small, inner sep=5pt, minimum height=8.5mm},
+  databox/.style={box, fill=surfc},
+  keybox/.style={box, draw=accentc, fill=accsoftc!50},
+  transbox/.style={box, draw=ctrans, fill=ctrans!8},
+  unetbox/.style={box, draw=cunet, fill=cunet!8},
+  diffbox/.style={box, draw=cdiff, fill=cdiff!8},
+  flow/.style={-{Stealth[length=2.2mm]}, semithick, color=inkc!70},
+  flowacc/.style={flow, color=accentc},
+  skiparrow/.style={flow, dashed, color=mutedc},
+  note/.style={font=\scriptsize, text=mutedc, align=center},
+  tinylabel/.style={font=\scriptsize\ttfamily, text=mutedc},
+}
+
 \begin{document}
 
 \begin{titlepage}
@@ -33,7 +61,7 @@
 
 \tableofcontents
 
-\chapter*{Abstract} 
+\chapter*{Abstract}
 \addcontentsline{toc}{chapter}{Abstract}
 \chapter{Introduction}
 \section{Theoretical Background}
@@ -41,10 +69,9 @@
 \subsubsection{The Cosmic Web}
 \label{sec:cosmic_web}
 
-
 On scales of a few to a few hundred megaparsecs, matter in the Universe is not smoothly distributed but arranged into an interconnected network of dense compact knots, elongated filaments, two-dimensional sheets, and large under-dense voids -- collectively known as the \emph{cosmic web} \cite{bond_how_1996, libeskind_tracing_2018}. The term originates with \citeauthor{bond_how_1996}, who showed that this filament-dominated pattern is already present in embryonic form in the tidal field of the initial density perturbations, with the nonlinear gravitational evolution sharpening rather than creating it \cite{bond_how_1996}. The same gravitational instability that seeds this pattern is responsible for its growth: initially small density fluctuations are amplified by their own self-gravity, so that overdense regions contract while voids expand and come to dominate the volume of the Universe \cite{bond_how_1996}. Large galaxy redshift surveys -- 2dFGRS, SDSS, and the 2MASS redshift survey (2MRS) among them -- as well as cosmological $N$-body simulations both recover this same web-like arrangement of galaxies and dark matter \cite{libeskind_tracing_2018}.
 
-Gravitational instability drives the emergence of anisotropic structure: because collapse along the direction of a region's strongest tidal compression proceeds fastest, an initially only mildly non-spherical overdensity first flattens into a sheet, then contracts further into a filament, and only finally collapses fully into a compact halo -- the sequence of anisotropic collapse first described by Zel'dovich \cite{libeskind_tracing_2018}. This picture can be made quantitative by looking at the local tidal (or velocity-shear) field: following the tidal-tensor classification reviewed by \cite{libeskind_tracing_2018}, one computes the Hessian of the (rescaled) gravitational potential $\phi$,
+Gravitational instability drives the emergence of anisotropic structure: because collapse along the direction of a region's strongest tidal compression proceeds fastest, an initially only mildly non-spherical overdensity first flattens into a sheet, then contracts further into a filament, and only finally collapses fully into a compact halo -- the sequence of anisotropic collapse first described by Zel'dovich \cite{libeskind_tracing_2018}. This picture can be made quantitative through the local tidal (or velocity-shear) field: following the tidal-tensor classification reviewed by \cite{libeskind_tracing_2018}, one computes the Hessian of the (rescaled) gravitational potential $\phi$,
 \begin{equation}
   T_{\alpha\beta} = \frac{\partial^2 \phi}{\partial x_\alpha \partial x_\beta}, \qquad \nabla^2 \phi = \delta,
   \label{eq:tidal_tensor}
@@ -67,21 +94,21 @@ with $n_s$ the scalar spectral index \cite{eisenstein_baryonic_1998, huterer_gro
 \begin{equation}
     T(k) = 1 - \frac{k}{k_{\mathrm{eq}}} + \dots, \qquad k_{\mathrm{eq}} = H_0\sqrt{\frac{2\Omega_m}{\Omega_r}},
 \end{equation}
-\cite{bardeen_statistics_1986, eisenstein_baryonic_1998}. The transfer function is therefore an essential ingredient of the matter power spectrum, alongside the matter and radiation densities, and it also depends on the neutrino mass, as illustrated in Figure~\ref{fig:transfer_function}.
+\cite{bardeen_statistics_1986, eisenstein_baryonic_1998}. The transfer function is therefore an essential ingredient of the matter power spectrum, alongside the matter and radiation densities, and it also depends on the neutrino mass, as illustrated in Figure~\ref{fig:transfer_function}: massive neutrinos free-stream out of small-scale perturbations and suppress $T(k)$ below their free-streaming scale.
 
 \begin{figure}[h!]
     \centering
     \includegraphics[width=0.8\linewidth]{plots/background/transfer_function.png}
-    \caption{Linear matter transfer function for three neutrino masses (red curves). Reproduced from \cite{lesgourgues_massive_2006}.}
+    \caption{Linear matter transfer function for three neutrino masses, $m_{\nu_1}=0$, $m_{\nu_2}=0.009$ and $m_{\nu_3}=0.05$~eV (red curves). Reproduced from \cite{lesgourgues_massive_2006}.}
     \label{fig:transfer_function}
 \end{figure}
 
-The three red curves correspond to the neutrino masses $m_{\nu_1}=0$, $m_{\nu_2}=0.009$ and $m_{\nu_3}=0.05$~eV \cite{lesgourgues_neutrino_2012, lesgourgues_massive_2006}. This in turn affects $P(k)$, as also the angular power spectrum $C_\ell$, which is defined as
+The suppression propagates from $P(k)$ into every projected statistic, in particular the angular power spectrum $C_\ell$, which is (schematically) a line-of-sight projection of the three-dimensional power,
 \begin{equation}
     C_\ell \approx \int k^2\, P(k)\, \mathrm{d}k,
     \label{eq:cl}
 \end{equation}
-and is essentially the Fourier transform of the $P(k)$ \cite{seljak_line_1996}, illustrated for varying neutrino mass in Figure~\ref{fig:neutrinos_effect}.
+\cite{seljak_line_1996}; Figure~\ref{fig:neutrinos_effect} shows the resulting effect of the neutrino mass on $C_\ell$.
 
 \begin{figure}[h!]
     \centering
@@ -90,19 +117,20 @@ and is essentially the Fourier transform of the $P(k)$ \cite{seljak_line_1996}, 
     \label{fig:neutrinos_effect}
 \end{figure}
 
-The dependence on the neutrino mass is not a side note here: it reappears directly when generating the initial conditions for the simulations in Sec.~\ref{sec:ic_generation}, since matching the transfer function -- neutrinos included -- is a precondition for those initial conditions to be consistent with CosmoGridV1. More generally, obtaining $P(k)$ precisely, including this transfer function, requires solving the coupled linear Einstein--Boltzmann equations for the perturbed Friedmann--Lema\^itre--Robertson--Walker metric and the phase-space distributions of all matter and radiation species -- the same system solved by the differentiable Einstein--Boltzmann module of the Disco-DJ framework used later in this thesis \cite{hahn_disco-dj_2024}.
+The dependence on the neutrino mass is not a side note here: it reappears directly when generating the initial conditions for the simulations in Sec.~\ref{sec:ic_generation}, since matching the transfer function -- neutrinos included -- is a precondition for those initial conditions to be consistent with CosmoGridV1. More generally, obtaining $P(k)$ precisely requires solving the coupled linear Einstein--Boltzmann equations for the perturbed Friedmann--Lema\^itre--Robertson--Walker metric and the phase-space distributions of all matter and radiation species -- the system solved by the \textsc{class} code used in Sec.~\ref{sec:ic_generation} and by the differentiable Einstein--Boltzmann module of the Disco-DJ framework \cite{hahn_disco-dj_2024}.
 
 \subsubsection{Lightcones and Snapshots}
+\label{sec:lightcones}
 
-An $N$-body simulation naturally outputs \emph{snapshots}: the full particle phase-space (positions and velocities) within a periodic box of fixed comoving side length, at a fixed time. Reproducing how we actually observe the Universe, however, requires a \emph{lightcone}: rather than a single time slice, an observer at a fixed spacetime point receives light emitted from progressively more distant (and hence earlier) shells as one looks to higher redshift, so a simulated lightcone must record particles at the (redshift-dependent) comoving distance from which they are being observed, not at a single global time.
+An $N$-body simulation naturally outputs \emph{snapshots}: the full particle phase-space (positions and velocities) within a periodic box of fixed comoving side length, at a fixed time. Reproducing how we actually observe the Universe, however, requires a \emph{lightcone}: an observer at a fixed spacetime point receives light emitted from progressively more distant (and hence earlier) shells as one looks to higher redshift, so a simulated lightcone must record particles at the redshift-dependent comoving distance from which they are being observed, not at a single global time.
 
-Because the depth of the desired lightcone (out to some $z_{\max}$) is typically larger than a single simulation box, the box is periodically replicated around a centrally placed observer: box replication takes advantage of the fact that a simulation with periodic boundary conditions can, in principle, represent an arbitrarily large volume, at the cost of the same structures reappearing at multiple replica images along a given line of sight \cite{kacprzak_cosmogridv1_2023}. This replication strategy, and the trade-off between box size, structure repetition, and the resulting bias or excess variance in the projected lightcone statistics, is discussed in detail by \cite{kacprzak_cosmogridv1_2023}, who additionally introduce a shell-permutation scheme that mitigates the repeated-structure problem by drawing different radial shells of a single lightcone from independent simulations of the same cosmology. The shell builder introduced in Sec.~\ref{sec:shell_builder_core} implements the same replication idea directly inside the time integration, rather than as a post-processing step.
+Because the depth of the desired lightcone (out to some $z_{\max}$) is typically larger than a single simulation box, the box is periodically replicated around a centrally placed observer: replication exploits the fact that a simulation with periodic boundary conditions can, in principle, represent an arbitrarily large volume, at the cost of the same structures reappearing at multiple replica images along a given line of sight \cite{kacprzak_cosmogridv1_2023}. The trade-off between box size, structure repetition, and the resulting bias or excess variance in projected lightcone statistics is discussed in detail by \cite{kacprzak_cosmogridv1_2023}, who additionally introduce a shell-permutation scheme that mitigates the repeated-structure problem by drawing different radial shells of a single lightcone from independent simulations of the same cosmology. The shell builder developed in this thesis (Sec.~\ref{sec:shell_builder}) implements the same replication idea directly inside the time integration, rather than as a post-processing step.
 
 \subsection{Cosmological Simulations}
 
-Cosmological $N$-body simulations have historically tracked, and in some respects driven, the development of high-performance computing: the number of particles that can be evolved in a fixed wall-clock time has grown by many orders of magnitude over the past decades, both because of raw hardware improvements and because of continual gains in the efficiency of the gravity solvers themselves \cite{potter_pkdgrav3_2016}. The scientific payoff of these simulations lies in their ability to model the large-scale structure (LSS) of the Universe to the non-linear precision that photometric surveys require. LSS observables are particularly sensitive to the present-day matter density $\Omega_m$ and the amplitude of matter clustering $\sigma_8$; because a lightcone simulation can be sliced into tomographic redshift bins, it further allows the growth of structure to be tracked over cosmic time, which is what makes such simulations sensitive to the dark-energy equation-of-state parameter $w_0$ (and its possible time evolution) and hence to the physical origin of cosmic acceleration \cite{kacprzak_cosmogridv1_2023}. Two solvers embody opposite ends of the resulting accuracy-versus-cost trade-off, and both are used in this thesis: the tree-based \textsc{PkdGrav3} (Sec.~\ref{sec:pkdgrav}), which anchors the accurate CosmoGridV1 reference simulations, and the particle-mesh Disco-DJ (Sec.~\ref{sec:discodj}), which is fast enough to generate the large volume of training data our approach requires.
+Cosmological $N$-body simulations have historically tracked, and in some respects driven, the development of high-performance computing: the number of particles that can be evolved in a fixed wall-clock time has grown by many orders of magnitude, both through raw hardware improvements and through continual gains in the efficiency of the gravity solvers themselves \cite{potter_pkdgrav3_2016}. The scientific payoff lies in modelling the large-scale structure (LSS) of the Universe to the non-linear precision that photometric surveys require. LSS observables are particularly sensitive to the present-day matter density $\Omega_m$ and the clustering amplitude $\sigma_8$; because a lightcone simulation can be sliced into tomographic redshift bins, it further tracks the growth of structure over cosmic time, which is what makes such simulations sensitive to the dark-energy equation-of-state parameter $w_0$ and hence to the physical origin of cosmic acceleration \cite{kacprzak_cosmogridv1_2023}. Two solvers embody opposite ends of the resulting accuracy-versus-cost trade-off, and both are used in this thesis: the tree-based \textsc{PkdGrav3} (Sec.~\ref{sec:pkdgrav}), which anchors the accurate CosmoGridV1 reference simulations, and the particle-mesh Disco-DJ (Sec.~\ref{sec:discodj}), which is fast enough to generate the large volume of training data our approach requires.
 
-\subsubsection{DISCO-DJ}
+\subsubsection{Disco-DJ}
 \label{sec:discodj}
 
 Disco-DJ (\emph{Differentiable Simulations for Cosmology -- Done with JAX}) is a particle-mesh (PM) code whose entire forward model is GPU-accelerated and differentiable, so that gradients of any output with respect to the input parameters -- or the initial conditions themselves -- are available through automatic differentiation \cite{list_disco-dj_2026}. Like any $N$-body method it approximates the collisionless dynamics of dark matter, i.e.\ a solution of the cosmological Vlasov--Poisson system for the phase-space distribution $f(\mathbf{x},\mathbf{p},t)$,
@@ -113,43 +141,42 @@ Disco-DJ (\emph{Differentiable Simulations for Cosmology -- Done with JAX}) is a
 \end{equation}
 where $\mathbf{x}$ are comoving coordinates, $\mathbf{p} = a^2\dot{\mathbf{x}}$ the conjugate momentum, $a(t)$ the scale factor, and $\phi$ the peculiar gravitational potential sourced by the density contrast $\delta$ through the Poisson equation \cite{list_disco-dj_2026}.
 
-What sets the PM scheme apart from the tree/FMM solver of Sec.~\ref{sec:pkdgrav} is how the potential is obtained: rather than summing particle-by-particle, the particles are deposited onto a regular mesh to give $\delta$, the Poisson equation is solved in Fourier space with a single FFT (where $\nabla^2 \to -k^2$), and the force $-\nabla_{\mathbf{x}}\phi$ is interpolated back to each particle \cite{list_disco-dj_2026}. A force evaluation is thus global and cheap, at the price of a spatial resolution limited by the mesh spacing -- the origin of the small-scale inaccuracy discussed in Sec.~\ref{sec:pipeline}, and, as shown in Sec.~\ref{sec:local_dev}, also the origin of Disco-DJ's memory footprint on a cluster.
+What sets the PM scheme apart from the tree/FMM solver of Sec.~\ref{sec:pkdgrav} is how the potential is obtained: rather than summing particle-by-particle, the particles are deposited onto a regular mesh to give $\delta$, the Poisson equation is solved in Fourier space with a single FFT (where $\nabla^2 \to -k^2$), and the force $-\nabla_{\mathbf{x}}\phi$ is interpolated back to each particle \cite{list_disco-dj_2026}. A force evaluation is thus global and cheap, at the price of a spatial resolution limited by the mesh spacing -- the origin of the small-scale power deficit that the correction pipelines of Sec.~\ref{sec:correction-pipelines} are built to remove, and, as shown in Sec.~\ref{sec:local_dev}, also the origin of Disco-DJ's memory footprint on a cluster.
 
-\subsubsection{Pkdgrav}
+\subsubsection{PkdGrav3}
 \label{sec:pkdgrav}
 
 The gravity solver \textsc{PkdGrav3} takes the opposite approach: rather than a mesh, it computes the gravitational force with a binary-tree Fast Multipole Method (FMM). Rather than only approximating a distant tree cell's effect on individual particles (as in a Barnes--Hut tree code), it also expands the potential \emph{within} a receiving cell sourced by a distant cell, an interaction that lets the cost of a full force evaluation scale as $\mathcal{O}(N)$ instead of $\mathcal{O}(N\log N)$ \cite{potter_pkdgrav3_2016}.
 
-This accuracy is not free: because particles in different regions of a cosmological box span many orders of magnitude in local density, and hence in dynamical time, a single global time step would be highly wasteful. \textsc{PkdGrav3} instead assigns each particle to one of several time-step ``rungs'', advancing only the particles active on a given rung at each sub-step, and additionally builds a second, smaller tree restricted to the small subset of particles on the shortest (``very active'') rungs so that this frequently-rebuilt tree stays cheap; the combination is summarised by the kick-drift-kick ``umbrella'' diagram over one base time step, shown in Figure~\ref{fig:pkd_rungs}. This dual-tree multi-stepping scheme is what keeps the tree-construction cost from dominating the runtime even though the shortest rungs may be walked hundreds of times per base step \cite{potter_pkdgrav3_2016}.
+This accuracy is not free: particles in different regions of a cosmological box span many orders of magnitude in local density, and hence in dynamical time, so a single global time step would be highly wasteful. \textsc{PkdGrav3} instead assigns each particle to one of several time-step ``rungs'', advancing only the particles active on a given rung at each sub-step, and additionally builds a second, smaller tree restricted to the small subset of particles on the shortest (``very active'') rungs so that this frequently-rebuilt tree stays cheap. The combination is summarised by the kick-drift-kick ``umbrella'' diagram over one base time step shown in Figure~\ref{fig:pkd_rungs}; it keeps the tree-construction cost from dominating the runtime even though the shortest rungs may be walked hundreds of times per base step \cite{potter_pkdgrav3_2016}.
 
 \begin{figure}[h!]
     \centering
     \includegraphics[width=0.5\linewidth]{plots/background/pkdgrav_rungs.png}
-    \caption{\cite{potter_pkdgrav3_2016}}
+    \caption{Kick--drift--kick ``umbrella'' diagram of \textsc{PkdGrav3}'s hierarchical multi-stepping over one base time step: each lower rung halves the step size, and only the particles on a given rung are advanced at its sub-steps. Reproduced from \cite{potter_pkdgrav3_2016}.}
     \label{fig:pkd_rungs}
 \end{figure}
 
 It is precisely this combination of a per-particle tree, per-particle rung state, and domain-decomposition buffers that gives \textsc{PkdGrav3} the larger, and rather different, memory footprint discussed quantitatively in Sec.~\ref{sec:local_dev}.
 
 \subsubsection{CosmoGridV1}
+\label{sec:cosmogrid}
 
-CosmoGridV1 is a large, publicly released suite of lightcone $N$-body simulations built specifically for map-level (rather than two-point-function-only) cosmological inference from large-scale-structure probes such as weak lensing and galaxy clustering \cite{kacprzak_cosmogridv1_2023}. It samples a six-dimensional flat $w$CDM parameter space ($\Omega_m$, $\sigma_8$, $w_0$, $H_0$, $n_s$, $\Omega_b$, with a fixed total neutrino mass) at 2500 points arranged on a Sobol sequence, running 7 independent realisations at every point, in addition to 200 realisations (with parameter-derivative pairs) at a fixed fiducial cosmology and a smaller set of benchmark runs at higher resolution used to validate the main configuration's choices of box size, particle count, and shell thickness \cite{kacprzak_cosmogridv1_2023}. Every simulation is run with \textsc{PkdGrav3} in a periodic box of $900\,\mathrm{Mpc}/h$ with $832^3$ particles, and stores its lightcone as HEALPix particle-count maps at $N_{\rm side}=2048$ out to $z=3.5$, together with friends-of-friends halo catalogues at each output step \cite{kacprzak_cosmogridv1_2023}. These raw particle-count shells are the basis from which observable maps of weak-lensing convergence, galaxy clustering, and intrinsic alignment are subsequently constructed, and the same dataset has previously been used, together with a shell-based baryon correction model, for a deep-learning cosmological parameter analysis of the KiDS-1000 weak-lensing survey \cite{fluri_full_2022}. It is this suite -- box size, particle count, cosmology, and all -- that Sec.~\ref{sec:pipeline} takes as the accuracy target for the pipeline developed in this thesis.
+CosmoGridV1 is a large, publicly released suite of lightcone $N$-body simulations built specifically for map-level (rather than two-point-function-only) cosmological inference from large-scale-structure probes such as weak lensing and galaxy clustering \cite{kacprzak_cosmogridv1_2023}. It samples a six-dimensional flat $w$CDM parameter space ($\Omega_m$, $\sigma_8$, $w_0$, $H_0$, $n_s$, $\Omega_b$, with a fixed total neutrino mass) at 2500 points arranged on a Sobol sequence, running 7 independent realisations at every point, in addition to 200 realisations (with parameter-derivative pairs) at a fixed fiducial cosmology and a smaller set of higher-resolution benchmark runs used to validate the main configuration's choices of box size, particle count, and shell thickness \cite{kacprzak_cosmogridv1_2023}. Every simulation is run with \textsc{PkdGrav3} in a periodic box of $900\,\mathrm{Mpc}/h$ with $832^3$ particles, and stores its lightcone as HEALPix particle-count maps at $N_{\rm side}=2048$ out to $z=3.5$, together with friends-of-friends halo catalogues at each output step \cite{kacprzak_cosmogridv1_2023}. These raw particle-count shells are the basis from which observable maps of weak-lensing convergence, galaxy clustering, and intrinsic alignment are subsequently constructed, and the same dataset has previously been used, together with a shell-based baryon correction model, for a deep-learning cosmological parameter analysis of the KiDS-1000 weak-lensing survey \cite{fluri_full_2022}. It is this suite -- box size, particle count, cosmology, and all -- that the pipeline of Sec.~\ref{sec:pipeline} takes as its accuracy target.
 
-\section{Super-Resolution Methods (not finished)}
+\section{Super-Resolution Methods}
 \label{sec:sr-methods}
 
-The resolution deficit between \textsc{disco}'s particle-mesh force solve and \textsc{PkdGrav3}'s tree-based one (Sec.~\ref{sec:discodj}, Sec.~\ref{sec:pkdgrav}) is what the correction $f$ of Sec.~\ref{sec:pipeline} is built to remove. Before turning to that correction directly, this section reviews the machine-learning background it draws on. A central design question for any model acting on the full-sky lightcone maps of Sec.~\ref{sec:pipeline} is how it can act on an input this large without exceeding the memory available on a single GPU, and the choice of architecture and training paradigm shapes how that question is answered.
+The resolution deficit between Disco-DJ's particle-mesh force solve and \textsc{PkdGrav3}'s tree-based one (Secs.~\ref{sec:discodj}, \ref{sec:pkdgrav}) is what the correction $f$ of Sec.~\ref{sec:pipeline} is built to remove. Before turning to that correction directly, this section reviews the machine-learning background it draws on. A central design question for any model acting on the full-sky lightcone maps of Sec.~\ref{sec:pipeline} is how it can process an input of $\sim 5\times10^7$ pixels per shell without exceeding the memory of a single GPU -- and the choice of architecture and training paradigm shapes how that question is answered.
 
 \subsection{The Memory Problem on the Sphere}
 \label{subsec:sr-problem}
 
-Cosmological and astrophysical observables are frequently recorded as spherical sky maps: the Cosmic Microwave Background, neutral-hydrogen intensity maps, galaxy clustering, and gravitational lensing have all been used in this form to constrain cosmological and astrophysical models. These maps are traditionally analysed through summary statistics such as the power spectrum or higher-order correlation functions, but convolutional neural networks (CNNs) have more recently been proposed as an alternative analysis tool in cosmology, since they can be trained to design statistics that maximise the precision of parameter estimation while remaining robust to noise \cite{perraudin_deepsphere_2019}.
+Cosmological and astrophysical observables are frequently recorded as spherical sky maps: the Cosmic Microwave Background, neutral-hydrogen intensity maps, galaxy clustering, and gravitational lensing have all been analysed in this form. These maps are traditionally reduced to summary statistics such as the power spectrum or higher-order correlation functions, but convolutional neural networks (CNNs) have more recently been proposed as an alternative analysis tool in cosmology, since they can be trained to construct statistics that maximise the precision of parameter estimation while remaining robust to noise \cite{perraudin_deepsphere_2019}.
 
-Applying a CNN directly on the sphere, however, is not a straightforward extension of the flat-image case, and raises two distinct challenges. A square pixel grid has discrete translation symmetries that make convolution -- and the rotation of a filter by one pixel -- well defined; no grid on the sphere shares a perfectly symmetric structure of this kind, so rotating a spherical filter instead requires some form of interpolation. The second challenge is computational efficiency: because the rotation group $SO(3)$ is itself a three-dimensional manifold, a naive implementation of the $SO(3)$ correlation needed for a spherical CNN scales as $\mathcal{O}(n^6)$ \cite{cohen_spherical_2018}, which becomes prohibitively expensive and impractical as the grid density grows.
+Applying a CNN directly on the sphere, however, is not a straightforward extension of the flat-image case, and raises two distinct challenges. First, a square pixel grid has discrete translation symmetries that make convolution -- and the shift of a filter by one pixel -- well defined; no grid on the sphere shares a perfectly symmetric structure of this kind, so moving a spherical filter requires some form of interpolation. Second, computational cost: because the rotation group $SO(3)$ is itself a three-dimensional manifold, a naive implementation of the $SO(3)$ correlation needed for a fully rotation-equivariant spherical CNN scales as $\mathcal{O}(n^6)$ \cite{cohen_spherical_2018}, which becomes prohibitive as the grid density grows.
 
-A related pattern appears in the literature on generating constrained realisations of Gaussian random fields: as the grid density grows and the number of constraints increases beyond a few, iterative solvers of this kind converge so slowly that they become similarly impractical, which motivated a variant that instead expands the random field in a spherical-harmonic basis rather than a plane-wave one \cite{hoffman_constrained_1991}. The same change of basis is attractive here, and is made practical by the fast spherical-harmonic transform (SHT) implemented for the HEALPix pixelisation \cite{gorski_healpix_2005}, which can be used to reduce the full-resolution map to a lower-dimensional problem. Fourier-domain representations have more generally played a role in deep learning: they appear, for instance, in the proof of the universal approximation theorem, have empirically been used to speed up convolutional neural networks, and have motivated network architectures built directly around the Fourier transform or sinusoidal activation functions \cite{li_fourier_2021}.
-
-[Rework] A second, architecture-level route to the same memory constraint is to avoid processing the full map at once. The patch-strategy allows the seamless segmentation of arbitrarily large images by splitting them into patches and extrapolating the missing context at each patch's border, what makes it possible to apply a network to images whose usable resolution would otherwise be limited directly by GPU memory \cite{ronneberger_u-net_2015}.
+Two classical tools mitigate the cost of working at full spherical resolution. The first is a change of basis: expanding a field in spherical harmonics rather than pixels -- the same change of basis that made constrained realisations of Gaussian random fields tractable when iterative pixel-space solvers became impractically slow \cite{hoffman_constrained_1991} -- is made fast in practice by the spherical-harmonic transform (SHT) of the HEALPix pixelisation \cite{gorski_healpix_2005}. Harmonic-space representations also have a long history inside deep learning itself, from the universal approximation theorem to Fourier-based network architectures \cite{li_fourier_2021}; the correction pipeline of Sec.~\ref{subsec:pipe-transfer} works entirely in this basis. The second tool is architectural: avoid processing the full map at once. The overlap-tile strategy of \citeauthor{ronneberger_u-net_2015} segments arbitrarily large images by splitting them into patches, so that GPU memory limits the patch size but not the image size \cite{ronneberger_u-net_2015}; the pipelines of Secs.~\ref{subsec:pipe-unet-flow} and \ref{subsec:pipe-diffusion} adopt exactly this strategy on gnomonic projections of the sphere.
 
 \subsection{Architectures}
 \label{subsec:architectures}
@@ -157,281 +184,728 @@ A related pattern appears in the literature on generating constrained realisatio
 \subsubsection{U-Net}
 \label{sssec:unet-arch}
 
-A common assumption at the time was that training a deep network successfully requires many thousands of annotated samples; the U-Net architecture instead targets the opposite regime \cite{ronneberger_u-net_2015}. Structurally, this is achieved with two complementary halves: a contracting path whose role is to capture context, and a symmetric expanding path whose role is to recover precise, pixel-level localization \cite{ronneberger_u-net_2015}.
- 
-[Rework] The two paths achieve this division of labour through complementary operations. In the contracting path, each pooling step halves the spatial resolution while the accompanying channel-doubling increases the number of feature maps, so that deeper layers operate on a coarser grid but each unit on that grid summarises information pooled from an increasingly large region of the input -- this is what builds up contextual, semantic information about what is present in a region, at the cost of exactly where within that region. The expanding path is built to recover that lost spatial precision: each upsampling step undoes the resolution loss, and is paired with a concatenation of the corresponding, higher-resolution feature map still held from the contracting path -- a skip connection that lets fine, precisely localized detail flow directly from the contracting side to the expanding side, rather than having to be reconstructed from the coarse, downsampled representation alone. Cropping the skipped feature map before concatenation is needed only because every unpadded convolution in the network shrinks the feature map slightly, so the two feature maps being merged would otherwise not match in size. \cite{ronneberger_u-net_2015}
+The U-Net architecture was introduced for image segmentation in the regime of few annotated training samples \cite{ronneberger_u-net_2015}. Structurally, it consists of two complementary halves (Figure~\ref{fig:unet_generic}): a contracting path whose role is to capture \emph{context}, and a symmetric expanding path whose role is to recover precise, pixel-level \emph{localization} \cite{ronneberger_u-net_2015}.
 
+The two paths achieve this division of labour through complementary operations. In the contracting path, each pooling step halves the spatial resolution while the number of feature channels is doubled: deeper layers operate on a coarser grid, but each unit there summarises an increasingly large region of the input. This builds up contextual, semantic information about \emph{what} is present in a region, at the cost of exactly \emph{where} within that region it lies. The expanding path recovers the lost spatial precision: each upsampling step doubles the resolution again and is paired with a concatenation of the corresponding feature map from the contracting path -- a \emph{skip connection} that lets fine, precisely localized detail flow directly across the network instead of having to survive the compression through the coarse bottleneck \cite{ronneberger_u-net_2015}. (In the original architecture the skipped feature maps are additionally cropped, only because its unpadded convolutions shrink the feature maps slightly; the padded convolutions used in this thesis make the crop unnecessary.)
+
+\begin{figure}[h!]
+\centering
+\resizebox{\textwidth}{!}{%
+\begin{tikzpicture}[x=1.05cm, y=0.92cm]
+  % encoder blocks
+  \node[unetbox, minimum width=8mm, minimum height=20mm] (e0) at (0,4)   {$C$};
+  \node[unetbox, minimum width=8mm, minimum height=16mm] (e1) at (1.7,3) {$2C$};
+  \node[unetbox, minimum width=8mm, minimum height=12mm] (e2) at (3.4,2) {$4C$};
+  \node[unetbox, minimum width=8mm, minimum height=9mm]  (e3) at (5.1,1) {$8C$};
+  % bottleneck
+  \node[keybox, minimum width=10mm, minimum height=7mm]  (b)  at (6.8,0) {$16C$};
+  % decoder blocks
+  \node[unetbox, minimum width=8mm, minimum height=9mm]  (d3) at (8.5,1)  {$8C$};
+  \node[unetbox, minimum width=8mm, minimum height=12mm] (d2) at (10.2,2) {$4C$};
+  \node[unetbox, minimum width=8mm, minimum height=16mm] (d1) at (11.9,3) {$2C$};
+  \node[unetbox, minimum width=8mm, minimum height=20mm] (d0) at (13.6,4) {$C$};
+  % in/out
+  \node[note, above=1.5mm of e0] {input\\ $H\times H$};
+  \node[note, above=1.5mm of d0] {output\\ $H\times H$};
+  % encoder arrows (down-right)
+  \draw[flow] (e0.south east) -- (e1.north west) node[midway, below left=-1mm, note] {pool $\tfrac12$};
+  \draw[flow] (e1.south east) -- (e2.north west);
+  \draw[flow] (e2.south east) -- (e3.north west);
+  \draw[flow] (e3.south east) -- (b.north west);
+  % decoder arrows (up-right)
+  \draw[flow] (b.north east)  -- (d3.south west) node[midway, below right=-1mm, note] {up $\times 2$};
+  \draw[flow] (d3.north east) -- (d2.south west);
+  \draw[flow] (d2.north east) -- (d1.south west);
+  \draw[flow] (d1.north east) -- (d0.south west);
+  % skip connections
+  \draw[skiparrow] (e0.east) -- (d0.west) node[midway, above, note] {skip (concat)};
+  \draw[skiparrow] (e1.east) -- (d1.west);
+  \draw[skiparrow] (e2.east) -- (d2.west);
+  \draw[skiparrow] (e3.east) -- (d3.west);
+  % side annotations
+  \node[note, rotate=90] at (-1.2,2.2) {context $\longleftarrow$};
+  \node[note, rotate=270] at (14.8,2.2) {$\longrightarrow$ localization};
+\end{tikzpicture}}
+\caption{Generic U-Net topology \cite{ronneberger_u-net_2015}: a contracting path (left) halves the resolution and doubles the channel count $C$ at every level, a bottleneck (centre) holds the coarsest, most contextual representation, and an expanding path (right) mirrors the contraction. Skip connections (dashed) concatenate each encoder level's feature map into the decoder level of equal resolution, so fine spatial detail bypasses the bottleneck. The concrete instantiation used by the correction pipelines ($C=32$, four levels, FiLM conditioning) is described in Sec.~\ref{subsec:pipe-unet-flow}.}
+\label{fig:unet_generic}
+\end{figure}
 
 \subsubsection{Chebyshev Graph Convolution}
 \label{sssec:chebconv}
 
-An alternative, spherically-native architecture avoids the flat, patch-based representation entirely and instead operates on a graph built directly from the HEALPix pixelisation. From the HEALPix pixelisation one builds a weighted undirected graph $G=(V,E,W)$, where $V$ is the set of $N_{\mathrm{pix}}=|V|$ vertices, $E$ the set of edges, and $W$ the weighted adjacency matrix; each pixel $i$ is represented by a vertex $v_i\in V$, connected by an edge to the 8 (or 7) vertices $v_j$ representing its neighbouring pixels $j$. Given these edges, the weighted adjacency matrix is defined as
+A spherically-native alternative avoids the flat, patch-based representation entirely and instead operates on a graph built directly from the HEALPix pixelisation \cite{perraudin_deepsphere_2019}. One builds a weighted undirected graph $G=(V,E,W)$, where each pixel $i$ is a vertex $v_i$, connected by an edge to the 8 (or 7) vertices of its neighbouring pixels, with Gaussian weights
 \begin{equation}
     W_{ij} = \begin{cases} \exp\!\left(-\dfrac{\lVert x_i - x_j \rVert^2}{2\rho^2}\right) & \text{if pixels } i,j \text{ are neighbours}, \\[4pt] 0 & \text{otherwise}, \end{cases}
 \end{equation}
-where $x_i$ is a vector encoding the three-dimensional coordinates of pixel $i$, and $\rho = |E|^{-1}\sum_{(v_i,v_j)\in E}\lVert x_i - x_j\rVert^2$. Following the normalised graph Laplacian construction $L = I - D^{-1/2}WD^{-1/2}$ (with $D$ the diagonal degree matrix), a graph signal $f\in\mathbb{R}^{N_{\mathrm{pix}}}$ is filtered by a kernel $h:\mathbb{R}_+\to\mathbb{R}$ through
+where $x_i$ is the three-dimensional position of pixel $i$ and $\rho$ the mean squared neighbour distance. From the normalised graph Laplacian $L = I - D^{-1/2}WD^{-1/2}$ (with $D$ the diagonal degree matrix), a graph signal $f\in\mathbb{R}^{N_{\mathrm{pix}}}$ is filtered by a kernel $h:\mathbb{R}_+\to\mathbb{R}$ through
 \begin{equation}
     h(L)f = U\,h(\Lambda)\,U^\top f,
 \end{equation}
-where $U$ and $\Lambda$ are the eigenvectors and eigenvalues of $L$ \cite{perraudin_deepsphere_2019}. This graph-spectral filtering is what lets a convolution be defined directly on the HEALPix sphere, avoiding the interpolation and $SO(3)$-cost issues raised in Sec.~\ref{subsec:sr-problem} for a full spherical CNN.
+where $U$ and $\Lambda$ are the eigenvectors and eigenvalues of $L$; choosing $h$ as a low-order Chebyshev polynomial makes the filter local and cheap to evaluate without any eigendecomposition \cite{perraudin_deepsphere_2019}. This graph-spectral filtering defines a convolution directly on the HEALPix sphere, sidestepping the interpolation and $SO(3)$-cost issues of Sec.~\ref{subsec:sr-problem}. The correction pipelines retained in this thesis (Sec.~\ref{sec:correction-pipelines}) instead operate on flat projected patches or in harmonic space, where the mature 2D-CNN and SHT tooling applies directly; the graph-convolutional route remains the natural candidate for a fully sphere-native extension.
 
 \subsection{Generative Paradigms}
 \label{subsec:generative-paradigms}
 
-Beyond deterministic architectures such as the two above, deep generative models -- algorithms that estimate and sample from an unknown data distribution -- offer a different way to frame the correction problem. Diffusion-based models in particular have driven much of the recent progress in generative image modelling, owing to their scalable and relatively stable training; their restriction to comparatively simple diffusion processes, however, confines the space of sampling probability paths that can be used, which leads to long training times and motivates specialised, more efficient sampling methods \cite{lipman_flow_2023}.
+Beyond deterministic architectures, deep generative models -- algorithms that estimate and sample from an unknown data distribution -- offer a different way to frame the correction problem: instead of predicting \emph{the} high-resolution map (a conditional mean, which necessarily averages away small-scale variance), they draw a \emph{sample} that carries the full variance of the target field. This distinction is central to Sec.~\ref{sec:correction-pipelines}, where restoring the small-scale \emph{power} -- not just the mean -- is the entire objective. Two such paradigms are used in this thesis.
 
 \subsubsection{Flow Matching}
 \label{sssec:flow-matching}
 
-Flow Matching (FM) is proposed as an efficient, simulation-free objective for training continuous normalising flow (CNF) models that removes this restriction, allowing the adoption of general probability paths -- rather than only diffusion processes -- to supervise training \cite{lipman_flow_2023}.
-
-Let $x_1$ be a random variable distributed according to an unknown data distribution $q(x_1)$, of which only samples, not the density itself, are assumed available. Let $p_t$ be a probability path with $p_0=p$ a simple distribution, e.g.\ the standard normal $p(x)=\mathcal{N}(x\,|\,0,I)$, and $p_1$ approximately equal in distribution to $q$. Given a target probability path $p_t(x)$ and the corresponding vector field $u_t(x)$ that generates it, the Flow Matching objective regresses a learned vector field $v_t$, with parameters $\theta$, onto $u_t$:
+Flow Matching (FM) is a simulation-free objective for training continuous normalising flow (CNF) models that admits general probability paths -- rather than only diffusion processes -- as supervision \cite{lipman_flow_2023}. Let $x_1$ be distributed according to an unknown data distribution $q(x_1)$, of which only samples are available, and let $p_t$ be a probability path with $p_0$ a simple distribution (e.g.\ the standard normal) and $p_1 \approx q$. Given a target path $p_t(x)$ and the vector field $u_t(x)$ that generates it, the FM objective regresses a learned vector field $v_t$ with parameters $\theta$ onto $u_t$:
 \begin{equation}
     \mathcal{L}_{\mathrm{FM}}(\theta) = \mathbb{E}_{t,\,p_t(x)}\big\lVert v_t(x) - u_t(x) \big\rVert^2, \qquad t \sim \mathcal{U}[0,1],\ x\sim p_t(x),
     \label{eq:flow_matching}
 \end{equation}
-so that, once Eq.~\eqref{eq:flow_matching} reaches zero loss, the learned model generates $p_t(x)$. Used naively, however, this objective is intractable: there is no prior knowledge of which $p_t$ and $u_t$ satisfy $p_1(x)\approx q(x)$, and a closed form for a suitable $u_t$ is generally not available. \citeauthor{lipman_flow_2023} instead construct both $p_t$ and $u_t$ from probability paths and vector fields that are only defined \emph{per sample}, with an appropriate aggregation recovering the desired $p_t$ and $u_t$ and yielding a substantially more tractable training objective \cite{lipman_flow_2023}.
+so that a model reaching zero loss generates $p_t(x)$ by integrating the ODE $\dot{x} = v_t(x)$. Used naively this objective is intractable -- no closed form for a suitable $(p_t, u_t)$ pair is generally available -- but \citeauthor{lipman_flow_2023} construct both from probability paths and vector fields defined only \emph{per sample}, whose aggregation provably recovers the marginal $p_t$ and $u_t$ \cite{lipman_flow_2023}. The simplest such construction, used in Sec.~\ref{subsec:pipe-unet-flow}, is the straight-line (linear) interpolant between a start point $x_0 \sim p_0$ and a data point $x_1$,
+\begin{equation}
+    x_t = (1-t)\,x_0 + t\,x_1, \qquad u_t = x_1 - x_0,
+    \label{eq:linear_interpolant}
+\end{equation}
+sketched in Figure~\ref{fig:flow_interp}: the target velocity is constant along each path, and the straighter the true transport between $p_0$ and $p_1$, the fewer ODE integration steps inference needs.
+
+\begin{figure}[h!]
+\centering
+\begin{tikzpicture}[x=1.15cm, y=1cm]
+  % time axis
+  \draw[flow, color=mutedc] (0,-1.15) -- (8,-1.15) node[right, note] {$t$};
+  \foreach \t/\lab in {0.5/0, 4.0/t, 7.5/1} {\draw[mutedc] (\t,-1.05) -- (\t,-1.25) node[below, note] {$\lab$};}
+  % distributions
+  \node[databox, minimum width=13mm] (x0) at (0.5,0.6) {$x_0 \sim p_0$};
+  \node[unetbox, minimum width=13mm] (x1) at (7.5,1.4) {$x_1 \sim q$};
+  % straight path
+  \draw[flowacc, very thick] (x0.east) -- (x1.west)
+      node[pos=0.5, circle, fill=accentc, inner sep=1.4pt, label={[note]above left:{$x_t=(1-t)x_0 + t\,x_1$}}] (xt) {};
+  % velocity arrows along the path
+  \foreach \p in {0.22, 0.72} {
+    \draw[flowacc] ($(x0.east)!\p!(x1.west)$) -- ++(0.55, 0.0632) ;
+  }
+  \node[note] at (4.0,-0.3) {$u_t = x_1 - x_0$ \; (constant along the path)};
+\end{tikzpicture}
+\caption{The straight-line interpolant of Eq.~\eqref{eq:linear_interpolant} used for conditional flow matching \cite{lipman_flow_2023}: training regresses the network's velocity $v_\theta(x_t, t)$ onto the constant per-sample velocity $u_t = x_1 - x_0$; sampling integrates $\dot{x}=v_\theta$ from $t=0$ to $t=1$. When $x_0$ is chosen close to $x_1$ -- as in Sec.~\ref{subsec:pipe-unet-flow}, where $x_0$ is the low-fidelity map itself rather than noise -- the trajectory is nearly straight and a handful of Euler steps suffice.}
+\label{fig:flow_interp}
+\end{figure}
 
 \subsubsection{Diffusion}
 \label{sssec:diffusion-theory}
 
-Diffusion-based generative models have separately emerged as a powerful framework for neural image synthesis, in both unconditional and conditional settings, in some cases matching or surpassing the image quality achieved by GANs; they have also increasingly been applied to other domains, including audio and video generation, image segmentation, and language translation, which continues to motivate work on their image quality, training cost, and generation speed \cite{karras_elucidating_2022}.
+Diffusion-based generative models have emerged as a powerful framework for neural image synthesis, in both unconditional and conditional settings, in some cases matching or surpassing the image quality achieved by GANs \cite{karras_elucidating_2022}. Denoting the data distribution $p_{\mathrm{data}}(x)$ with standard deviation $\sigma_{\mathrm{data}}$, one considers the family of mollified distributions $p(x;\sigma)$ obtained by adding i.i.d.\ Gaussian noise of standard deviation $\sigma$ to the data; for $\sigma_{\max}\gg\sigma_{\mathrm{data}}$, $p(x;\sigma_{\max})$ is practically indistinguishable from pure Gaussian noise. A diffusion model samples a noise image $x_0\sim\mathcal{N}(0,\sigma_{\max}^2 I)$ and sequentially denoises it through decreasing noise levels $\sigma_{\max}=\sigma_0>\sigma_1>\dots>\sigma_N=0$, so that the endpoint is distributed according to the data \cite{karras_elucidating_2022}. The process can equivalently be described by a probability-flow ODE that continuously raises or lowers the noise level as time runs forward or backward; \citeauthor{karras_elucidating_2022} disentangle the design choices this leaves open -- noise schedule, network preconditioning, loss weighting, and ODE solver -- into the modular ``EDM'' formulation whose concrete instantiation in this thesis is given in Sec.~\ref{subsec:pipe-diffusion} \cite{karras_elucidating_2022}. Compared to the flow bridge above, a diffusion sampler always starts from pure noise, so its trajectory is genuinely curved and needs materially more solver steps -- the price of a fully generative process.
 
-Denoting the data distribution $p_{\mathrm{data}}(x)$, with standard deviation $\sigma_{\mathrm{data}}$, one considers the family of mollified distributions $p(x;\sigma)$ obtained by adding i.i.d.\ Gaussian noise of standard deviation $\sigma$ to the data; for $\sigma_{\max}\gg\sigma_{\mathrm{data}}$, $p(x;\sigma_{\max})$ is practically indistinguishable from pure Gaussian noise. A diffusion model samples a noise image $x_0\sim\mathcal{N}(0,\sigma_{\max}^2 I)$ and sequentially denoises it into images $x_i$ at decreasing noise levels $\sigma_0=\sigma_{\max}>\sigma_1>\dots>\sigma_N=0$, with $x_i\sim p(x_i;\sigma_i)$ at each level, so that the endpoint $x_N$ of this process is distributed according to the data \cite{karras_elucidating_2022}. This process can equivalently be described by a probability flow ODE, which continuously increases or reduces the noise level of the image when moving forward or backward in time, respectively; specifying the ODE requires first choosing a schedule $\sigma(t)$ that fixes the desired noise level at time $t$ \cite{karras_elucidating_2022}.
-
-The architectures of Sec.~\ref{subsec:architectures} and the generative paradigms above are the building blocks that Sec.~\ref{sec:correction-pipelines} combines into the concrete correction pipelines used in this thesis.
+The architectures and generative paradigms of this section are the building blocks that Sec.~\ref{sec:correction-pipelines} combines into the three concrete correction pipelines of this thesis.
 
 \chapter{Methods and implementation}
 \section{Pipeline Architecture}
 \label{sec:pipeline}
 
-The reference suite CosmoGridV1 evolves every realisation with \textsc{PkdGrav3} (Sec.~\ref{sec:pkdgrav}), whose FMM force solver and adaptive time-stepping resolve structure accurately down to small scales. That accuracy is expensive: each lightcone costs many node-hours, so the millions of realisations required for map-level, simulation-based inference dominate the total cost of the analysis \cite{kacprzak_cosmogridv1_2023, potter_pkdgrav3_2016}.
-
-Disco-DJ offers the opposite trade-off. Its particle-mesh solver (Sec.~\ref{sec:discodj}) reproduces the same large-scale clustering in minutes rather than hours, but the force resolution is capped by the PM grid, so power is progressively lost on small scales -- exactly the scales that carry much of the non-Gaussian information exploited by the deep-learning analysis \cite{list_disco-dj_2026}.
+The reference suite CosmoGridV1 evolves every realisation with \textsc{PkdGrav3} (Sec.~\ref{sec:pkdgrav}), whose FMM force solver and adaptive time-stepping resolve structure accurately down to small scales. That accuracy is expensive: each lightcone costs many node-hours, so the large number of realisations required for map-level, simulation-based inference dominates the total cost of the analysis \cite{kacprzak_cosmogridv1_2023, potter_pkdgrav3_2016}. Disco-DJ offers the opposite trade-off: its particle-mesh solver (Sec.~\ref{sec:discodj}) reproduces the same large-scale clustering in minutes rather than hours, but the force resolution is capped by the PM grid, so power is progressively lost on small scales -- exactly the scales that carry much of the non-Gaussian information exploited by map-level analyses \cite{list_disco-dj_2026}.
 
 The aim of this work is therefore to keep Disco-DJ's speed while recovering the small-scale content that \textsc{PkdGrav3} would have produced. Formally, we seek a correction $f$ acting on the cheap lightcone maps such that
 \begin{equation}
   f\!\left(\mathrm{Map}_{\textsc{disco}}\right) \;\approx\; \mathrm{Map}_{\textsc{CosmoGrid}},
   \label{eq:correction_goal}
 \end{equation}
-where both maps are generated from the \emph{same} initial conditions and cosmology, so that $f$ has only to model the resolution-dependent difference between the two solvers, not any change of realisation.
+where both maps are generated from the \emph{same} initial conditions and cosmology, so that $f$ has only to model the resolution-dependent difference between the two solvers, not any change of realisation. This single requirement -- \emph{same initial conditions, same output format} -- dictates the entire architecture of the pipeline (Figure~\ref{fig:pipeline_overview}), which consists of three stages:
 
-\paragraph{Approaches.} Two routes to $f$ were considered. The first is a direct, image-level neural-network correction that maps $\mathrm{Map}_{\textsc{disco}}$ onto $\mathrm{Map}_{\textsc{CosmoGrid}}$ pixel by pixel. This is expressive, but heavy: full-sky HEALPix maps at $N_{\mathrm{side}} = 2048$ ($\sim 5\times 10^{7}$ pixels) are large, live on the sphere rather than on a flat grid, and do not fit on a single GPU without tiling into patches (Sec.~\ref{sec:network}). The second route, adopted here, works in harmonic space and corrects the angular power spectrum $C_\ell$ of the Disco-DJ maps at high multipole $\ell$, where the PM resolution deficit is concentrated. Operating on $C_\ell$ is far cheaper, is naturally defined on the sphere, and targets the deficit exactly where Eq.~\eqref{eq:cl} relates it to $P(k)$; the trade-off is that it corrects a summary statistic rather than the full field.
+\begin{enumerate}
+  \item \textbf{Initial-condition generation} (Sec.~\ref{sec:ic_generation}). CosmoGridV1 publishes its cosmologies and shell tables, but not initial conditions that Disco-DJ could consume directly. For every cosmology we therefore rebuild the exact linear input -- the transfer function including massive neutrinos (Sec.~\ref{sec:power_spectrum}) -- with \textsc{class}, let \textsc{PkdGrav3} generate backscaled initial conditions from it, and hand the identical particle state to both solvers. Any residual difference between the two output maps is then attributable to the force solvers alone, which is precisely the difference $f$ must learn.
+  \item \textbf{Shell building} (Sec.~\ref{sec:shell_builder}). CosmoGridV1 stores its lightcone as 69 HEALPix particle-count shells out to $z=3.5$ at $N_{\mathrm{side}}=2048$ \cite{kacprzak_cosmogridv1_2023}. Disco-DJ, however, ships only a restricted lightcone mode limited to the simulation box volume -- far short of the $z=3.5$ depth, which requires many periodic box replications (Sec.~\ref{sec:lightcones}). We therefore implemented a dedicated \emph{shell builder} inside Disco-DJ's time integration (\texttt{shell\_builder/}) that reproduces \textsc{PkdGrav3}'s moving-lightcone crossing condition and CosmoGridV1's shell binning exactly, so the low- and high-fidelity maps are defined shell-by-shell on identical radial bins.
+  \item \textbf{Correction pipelines} (Sec.~\ref{sec:correction-pipelines}). On the resulting paired shells, three independent corrections $f$ are built and compared: a deterministic \emph{transfer-function} rescaling in harmonic space, a \emph{flow-matching U-Net} that transports each map patch from low to high fidelity, and an \emph{EDM diffusion} model that generates the missing small-scale residual from noise. All three are evaluated with the same shared statistics (per-shell and tomographic $C_\ell$, one-point moments, and weak-lensing convergence maps built from the corrected lightcone).
+\end{enumerate}
 
-\section{IC generation}
+\begin{figure}[h!]
+\centering
+\resizebox{\textwidth}{!}{%
+\begin{tikzpicture}[node distance=4mm and 7mm]
+  % --- stage 1: inputs + IC ---
+  \node[databox] (params) at (0,0) {CosmoGridV1\\ \scriptsize cosmology + shell table};
+  \node[keybox, right=6mm of params] (ic) {IC generation\\ \scriptsize \textsc{class} TF $\to$ backscaled ICs};
+  % --- fork: two solvers (explicit anchors, so they never collide with `pair') ---
+  \node[box, anchor=west] (pkd) at ($(ic.east)+(0.8,1.15)$) {\textsc{PkdGrav3} (FMM)\\ \scriptsize accurate, node-hours};
+  \node[box, anchor=west] (disco) at ($(ic.east)+(0.8,-1.15)$) {Disco-DJ (PM) + shell builder\\ \scriptsize fast, minutes on GPU};
+  % --- shells ---
+  \node[databox, anchor=west] (pair) at ($(ic.east)+(6.6,0)$) {paired lightcones\\ \scriptsize 69 shells, $N_{\mathrm{side}}{=}2048$};
+  % --- correction + output ---
+  \node[keybox, right=6mm of pair] (corr) {correction $f$};
+  \node[databox, right=6mm of corr] (out) {corrected\\ lightcone};
+  % pipeline chips under correction node
+  \node[transbox, below=3mm of corr, font=\scriptsize, minimum height=5mm] (t) {transfer};
+  \node[unetbox,  left=2mm of t, font=\scriptsize, minimum height=5mm] (u) {unet-flow};
+  \node[diffbox,  right=2mm of t, font=\scriptsize, minimum height=5mm] (d) {diffusion};
+  % evaluation
+  \node[box, below=3mm of out, font=\scriptsize, minimum height=5mm] (ev) {$C_\ell$, moments, $\kappa$};
+  % --- arrows ---
+  \draw[flow] (params) -- (ic);
+  \draw[flow] (ic.east) -- (pkd.west) node[midway, above left=-1.5mm, note] {same ICs};
+  \draw[flow] (ic.east) -- (disco.west);
+  \draw[flow] (pkd.east) -- (pair.north west) node[pos=0.35, above right=-1mm, note] {high};
+  \draw[flow] (disco.east) -- (pair.south west) node[pos=0.35, below right=-1mm, note] {low};
+  \draw[flowacc] (pair) -- (corr);
+  \draw[flowacc] (corr) -- (out);
+  \draw[flow] (out) -- (ev);
+\end{tikzpicture}}
+\caption{Overview of the pipeline. A single set of backscaled initial conditions (Sec.~\ref{sec:ic_generation}) is evolved by both solvers; the shell builder (Sec.~\ref{sec:shell_builder}) makes Disco-DJ emit its lightcone on exactly CosmoGridV1's radial shell grid, yielding paired low/high maps that differ only through the force solvers. Three correction pipelines (Sec.~\ref{sec:correction-pipelines}) then map the low-fidelity lightcone toward the reference, and all are scored with the same evaluation statistics.}
+\label{fig:pipeline_overview}
+\end{figure}
+
+Two structurally different routes to $f$ coexist in stage 3, and keeping both is deliberate. The harmonic-space route corrects the angular power spectrum $C_\ell$ mode-amplitude by mode-amplitude: it is cheap, exact on the sphere, and targets the deficit exactly where Eq.~\eqref{eq:cl} relates it to $P(k)$, but it corrects a summary statistic rather than the full field. The image-level route is expressive enough to restore \emph{structure}, not just power, but a full-sky HEALPix map at $N_{\mathrm{side}}=2048$ ($\sim 5\times10^7$ pixels) does not fit through a CNN on a single GPU, so it must be tiled into patches and stitched back (Sec.~\ref{subsec:pipe-patches}) -- the memory problem anticipated in Sec.~\ref{subsec:sr-problem}. The remainder of this chapter follows the pipeline in data order: initial conditions, shell builder, correction pipelines, and finally the computational infrastructure everything runs on.
+
+\section{Initial-Condition Generation}
 \label{sec:ic_generation}
+
+The correction $f$ of Eq.~\eqref{eq:correction_goal} is only well-defined if the low- and high-fidelity simulations start from the \emph{same} realisation of the initial density field, in the \emph{same} linear cosmology as CosmoGridV1 -- otherwise $f$ would have to absorb realisation and cosmology differences on top of the solver difference. This section describes how that common starting point is constructed for every CosmoGridV1 cosmology; the procedure is automated over all grid cosmologies by \texttt{pkdgrav/IC\_preparation.py}, which runs the per-cosmology Boltzmann solves concurrently (48 at a time) instead of serially. Figure~\ref{fig:ic_flow} summarises the flow.
+
+\begin{figure}[h!]
+\centering
+\resizebox{\textwidth}{!}{%
+\begin{tikzpicture}[node distance=4mm and 6mm]
+  \node[databox] (h5) {CosmoGrid run\\ \scriptsize \texttt{params.yml} + $\delta_{cb}(k,a)$};
+  \node[box, right=of h5] (tf) {extract $T_{cb}(k)$ at $a{=}1$\\ \scriptsize \textsc{class} format $-\delta_m/k^2$};
+  \node[box, below=of tf] (class) {\textsc{class} solve\\ \scriptsize $3\times m_\nu{=}0.02$ eV $\Rightarrow \sigma_8,\ \Omega_r$};
+  \node[keybox, right=of tf] (par) {patched \texttt{cosmology.par}\\ \scriptsize \texttt{achTfFile}, $\Omega_0$, $w_0$, $\sigma_8$, $\Omega_r$};
+  \node[box, right=of par] (pkdic) {\textsc{PkdGrav3}\\ IC generation\\ \scriptsize backscaled, $832^3$};
+  \node[databox, right=of pkdic] (tipsy) {\texttt{CosmoML.tipsy}};
+  \node[box, above right=4mm and 5mm of tipsy] (pkdrun) {\textsc{PkdGrav3} run\\ \scriptsize $\to$ high shells};
+  \node[box, below right=4mm and 5mm of tipsy] (discorun) {Disco-DJ run\\ \scriptsize $\to$ low shells};
+  \draw[flow] (h5) -- (tf);
+  \draw[flow] (h5.south) |- (class.west);
+  \draw[flow] (tf) -- (par);
+  \draw[flow] (class.east) -| ($(par.south)+(0,-0.05)$);
+  \draw[flow] (par) -- (pkdic);
+  \draw[flow] (pkdic) -- (tipsy);
+  \draw[flowacc] (tipsy.east) -- (pkdrun.west);
+  \draw[flowacc] (tipsy.east) -- (discorun.west) node[midway, below left=-1mm, note] {unmodified};
+\end{tikzpicture}}
+\caption{Initial-condition hand-off. From each CosmoGridV1 run's stored linear perturbations, the CDM+baryon transfer function at $a=1$ is extracted in \textsc{class} table format (\texttt{pkdgrav/get\_transfer\_function.py}); a matched \textsc{class} solve with three massive neutrino states supplies the derived $\sigma_8$ and $\Omega_r$; \texttt{IC\_preparation.py} patches these into \texttt{cosmology.par}; \textsc{PkdGrav3} generates the backscaled particle load, which both solvers then consume byte-identically.}
+\label{fig:ic_flow}
+\end{figure}
+
+\subsection{Matching the CosmoGridV1 Linear Input}
+\label{subsec:ic_linear}
+
+Each CosmoGridV1 run ships the linear perturbations its own initial conditions were built from, as tabulated CDM+baryon density contrasts $\delta_{cb}(k, a)$. From the $a=1$ slice, the dimensional matter power spectrum is reconstructed as
+\begin{equation}
+  P_{cb}(k) \;=\; \frac{2\pi^2}{k^3}\, P_{\mathrm{prim}}(k)\, \delta_{cb}^2(k)\, h^3,
+  \qquad P_{\mathrm{prim}}(k) = A_s \left(\frac{k}{k_{\mathrm{pivot}}}\right)^{n_s - 1},
+  \label{eq:pk_reconstruct}
+\end{equation}
+with $k_{\mathrm{pivot}} = 0.05\,\mathrm{Mpc}^{-1}$ and $(A_s, n_s, h)$ read from the run's parameter file (\texttt{get\_transfer\_function.py}). The corresponding transfer function is exported in the \textsc{class} table convention $-\delta_m/k^2$ that \textsc{PkdGrav3}'s IC generator reads directly (\texttt{achTfFile}), so the particle load is drawn from \emph{exactly} the linear spectrum CosmoGridV1 used -- massive neutrinos included, as required by Sec.~\ref{sec:power_spectrum}.
+
+Two derived quantities complete the parameter file. The clustering amplitude is obtained from the reconstructed spectrum through the standard top-hat integral
+\begin{equation}
+  \sigma_8^2 \;=\; \int \frac{k^2\,P_{cb}(k)}{2\pi^2}\, W^2(kR)\;\mathrm{d}k,
+  \qquad W(x) = \frac{3\,(\sin x - x\cos x)}{x^{3}},\quad R = 8\,\mathrm{Mpc}/h,
+  \label{eq:sigma8}
+\end{equation}
+and the radiation density $\Omega_r$ is computed by a \textsc{class} solve of the same cosmology with three degenerate massive neutrino states of $m_\nu = 0.02$~eV each, matching the fixed total neutrino mass of the CosmoGridV1 grid (Sec.~\ref{sec:cosmogrid}). \texttt{IC\_preparation.py} patches these values -- together with $\Omega_0 = \Omega_{cdm} + \Omega_\nu + \Omega_b$ and $w_0$ -- into each run's \texttt{cosmology.par}, idempotently, so a re-run only changes what is still inconsistent.
+
+\subsection{Backscaled Initial Conditions and Hand-Off}
+\label{subsec:ic_handoff}
+
+From this patched configuration, \textsc{PkdGrav3} generates \emph{backscaled} initial conditions: the $a=1$ linear spectrum of Eq.~\eqref{eq:pk_reconstruct} is scaled back to the starting redshift with the linear growth factor, and particles are displaced accordingly at the CosmoGridV1 resolution of $832^3$ particles in the $900\,\mathrm{Mpc}/h$ box. The resulting particle positions and velocities are exported in the \texttt{tipsy} format (\texttt{CosmoML.tipsy}) and used, \emph{unmodified}, as the initial state of the corresponding Disco-DJ run: Disco-DJ evolves this state forward to $a=1$ and accumulates the lightcone with the shell builder of Sec.~\ref{sec:shell_builder} over the same redshift range ($z_{\max}=3.5$ down to $z=0$) at the same HEALPix resolution $N_{\mathrm{side}}=2048$. Both solvers thus share one particle realisation down to the byte level, and Eq.~\eqref{eq:correction_goal} isolates the solver difference by construction.
+
 \subsection{Validation against CosmoGridV1}
+\label{subsec:ic_validation}
 
-Before using \textsc{disco}'s shell builder (Sec.~\ref{sec:shell_builder_core}) for any downstream analysis, we first validate that a lightcone produced with our \textsc{PkdGrav3} configuration reproduces the reference CosmoGridV1 statistics. To this end we run \textsc{PkdGrav3} with its native lightcone module on the exact box, resolution, and cosmology used by CosmoGridV1, and compare the resulting matter angular power spectrum $C_\ell$ against the corresponding CosmoGridV1 lightcone.
-
-\subsubsection{Backscaled initial conditions and hand-off to \textsc{disco}}
-
-As described in Sec.~\ref{sec:power_spectrum}, the initial conditions must be built from a correct transfer function evaluated at the correct neutrino mass, since this directly determines whether the resulting field is consistent with CosmoGridV1. The resulting particle positions and velocities at $a_i = 1/(1+z_i)$ are exported and used, unmodified, as the initial condition for the corresponding \textsc{disco} run: \textsc{disco} evolves this state forward to $a=1$ and accumulates the lightcone with the shell builder of Sec.~\ref{sec:shell_builder_core} over the same redshift range, $z_{\max}=3.5$ down to $z=0$, at the same HEALPix resolution $N_{\mathrm{side}}=2048$.
+Before this machinery is trusted for training data, it is validated end-to-end at the high-fidelity side: \textsc{PkdGrav3} is run with its \emph{native} lightcone module on the exact box, resolution, and cosmology used by CosmoGridV1, and the resulting matter angular power spectrum $C_\ell$ is compared shell-by-shell against the corresponding published CosmoGridV1 lightcone. Agreement here confirms that the reconstructed transfer function, the derived parameters of Sec.~\ref{subsec:ic_linear}, and the run configuration together reproduce the reference suite; only then is the same IC handed to Disco-DJ, whose shell output additionally validates the shell builder itself (\texttt{pkdgrav/validate\_shell\_builder.py}).
 
 \section{Shell Builder}
-\subsection{Core}
+\label{sec:shell_builder}
+
+With identical initial conditions in place, the remaining prerequisite for Eq.~\eqref{eq:correction_goal} is that Disco-DJ emit its lightcone in exactly CosmoGridV1's format: particle-count maps on the same 69 radial shells. This section describes the shell builder (\texttt{shell\_builder/Shell\_Builder.py}) that adds this capability to Disco-DJ's time integration.
+
+\subsection{Streaming Shell Accumulation}
 \label{sec:shell_builder_core}
 
-A lightcone output requires the particle distribution to be resampled at every integration step, since the observable past lightcone shell changes continuously as the universe evolves. The most direct implementation stores the full particle snapshot at each of the $n_{\mathrm{steps}}$ integration steps and performs the shell decomposition after the simulation has finished. This approach is memory-prohibitive: retaining $n_{\mathrm{steps}}$ full-resolution snapshots simultaneously exceeds the available device memory for the particle counts considered here. We therefore interleave the shell decomposition with the time integration, so that at any given time only the particle states immediately before and after the current integration step, together with a set of low-dimensional pixelized count maps, need to be held in memory.
+A lightcone output requires the particle distribution to be resampled at every integration step, since the observable past-lightcone shell changes continuously as the universe evolves. The most direct implementation -- store the full particle snapshot at each of the $n_{\mathrm{steps}}$ integration steps and decompose into shells afterwards -- is memory-prohibitive: retaining $n_{\mathrm{steps}}$ full-resolution snapshots simultaneously exceeds the available device memory for the particle counts considered here (cf.\ Sec.~\ref{sec:local_dev}). The shell decomposition is therefore \emph{interleaved} with the time integration, so that at any moment only the particle states immediately before and after the current step, plus the low-dimensional set of pixelised count maps, are held in memory (Figure~\ref{fig:shell_stream}).
 
-\paragraph{Time discretization.} The radial shells are not defined by the integrator itself but are supplied externally, e.g.\ through a CosmoGridV1-format metainfo table. Each shell $s \in \{1,\dots,S\}$ is specified by a redshift interval $[z_s^{\mathrm{lo}}, z_s^{\mathrm{hi}}]$ and the corresponding comoving-distance interval $[r_s^{\mathrm{lo}}, r_s^{\mathrm{hi}}]$. To ensure that no shell boundary is crossed \emph{within} an integration step, we define the set of integration times as the union of all shell edges,
+\paragraph{Time discretization.} The radial shells are not defined by the integrator itself but supplied externally, through a CosmoGridV1-format metainfo table: each shell $s \in \{1,\dots,S\}$ is a redshift interval $[z_s^{\mathrm{lo}}, z_s^{\mathrm{hi}}]$ with corresponding comoving-distance interval $[r_s^{\mathrm{lo}}, r_s^{\mathrm{hi}}]$. To ensure that no shell boundary is crossed \emph{within} an integration step, the integration times are defined as the union of all shell edges,
 \begin{equation}
   \{z_j\}_{j=0}^{S} = \mathrm{unique}\Big(\{z_s^{\mathrm{lo}}\}_{s=1}^{S} \,\cup\, \{z_s^{\mathrm{hi}}\}_{s=1}^{S}\Big), \qquad a_j = \frac{1}{1+z_j},
   \label{eq:step_grid}
 \end{equation}
-sorted in ascending order of $a_j$ (equivalently, descending order of $z_j$). By construction, every shell boundary coincides exactly with an integration-step boundary. The interval $[a_{\mathrm{ini}}, a_0]$, preceding the first shell, is integrated separately with $n_{\mathrm{pre}}$ sub-steps and without shell accumulation, in order to bring the particle state into registry with the shell grid defined in Eq.~\eqref{eq:step_grid}. The remaining $J = S$ intervals $[a_j, a_{j+1}]$, $j = 0,\dots,J-1$, are each advanced with exactly one integration sub-step.
+sorted in ascending order of $a_j$. By construction, every shell boundary coincides exactly with an integration-step boundary. The interval $[a_{\mathrm{ini}}, a_0]$ preceding the first shell is integrated separately with $n_{\mathrm{pre}}$ sub-steps and without shell accumulation, to bring the particle state into registry with the grid of Eq.~\eqref{eq:step_grid}; each of the remaining $S$ intervals $[a_j, a_{j+1}]$ is advanced with exactly one sub-step.
 
-\paragraph{Accumulation procedure.} Algorithm~\ref{alg:shell_accum} summarizes the per-step accumulation. At step $j$, the comoving positions and validity mask of all particles are recorded both before the sub-step, $\{\mathbf{x}_p^{(j)}, m_p^{(j)}\}$, and after it, $\{\mathbf{x}_p^{(j+1)}, m_p^{(j+1)}\}$. The scale-factor edges of the step are converted to comoving distance through the cosmology-dependent map $\chi(a)$,
+\paragraph{Accumulation.} At step $j$, the comoving positions of all particles are recorded before and after the sub-step, $\{\mathbf{x}_p^{(j)}\}$ and $\{\mathbf{x}_p^{(j+1)}\}$, and the step's scale-factor edges are converted to comoving lightcone radii through the cosmology-dependent map $\chi(a)$,
 \begin{equation}
-  R_j = \chi(a_j), \qquad R_{j+1} = \chi(a_{j+1}), \qquad R_j > R_{j+1},
+  R_j = \chi(a_j), \qquad R_{j+1} = \chi(a_{j+1}), \qquad R_j > R_{j+1}.
   \label{eq:step_radii}
 \end{equation}
-where the inequality follows from $\chi$ being strictly decreasing on $a \in (0,1]$. The set of shells that are traversed during step $j$ is
+The shells traversed during the step are those whose radial bin overlaps the swept annulus,
 \begin{equation}
-  \mathcal{A}_j = \big\{\, s \;:\; r_s^{\mathrm{lo}} < R_j \ \wedge\ r_s^{\mathrm{hi}} > R_{j+1} \,\big\},
+  \mathcal{A}_j = \big\{\, s \;:\; r_s^{\mathrm{lo}} < R_j \ \wedge\ r_s^{\mathrm{hi}} > R_{j+1} \,\big\};
   \label{eq:active_shells}
 \end{equation}
-i.e.\ those shells whose radial bin overlaps the annulus $[R_{j+1}, R_j)$ swept out during the step. For each active shell $s \in \mathcal{A}_j$, the pre- and post-step particle states, together with the radial bounds $(r_s^{\mathrm{lo}}, r_s^{\mathrm{hi}})$, are passed to the shell-accumulation routine described in Sec.~\ref{sec:crossing}, which returns a HEALPix pixel count map $\mathbf{M}_s^{(j)} \in \mathbb{N}^{N_{\mathrm{pix}}}$. This map is added to a running total,
+because the step grid is built from the shell edges themselves, $\mathcal{A}_j$ contains a single shell in the generic case (the general form covers degenerate or adjacent bins in the input table). For each active shell, the crossing test of Sec.~\ref{sec:crossing} converts the pre-/post-step states into a HEALPix count map $\mathbf{M}_s^{(j)}$, which is added to the shell's running total,
 \begin{equation}
   \mathbf{S}_s \;\mathrel{+}=\; \mathbf{M}_s^{(j)}, \qquad s \in \mathcal{A}_j.
   \label{eq:shell_update}
 \end{equation}
-Because the integration grid is constructed from the shell edges themselves (Eq.~\ref{eq:step_grid}), $\mathcal{A}_j$ reduces to a single shell in the generic case; the overlap criterion in Eq.~\eqref{eq:active_shells} is retained in its general form to also cover degenerate or adjacent bins in the input shell table.
+The pre-step state is then discarded and the post-step state becomes the next step's pre-step state. Once all steps are processed, the per-shell maps $\{\mathbf{S}_s\}_{s=1}^{S}$ are serialized together with the shell table. At no point are more than two full particle snapshots and $S$ integer maps of size $N_{\mathrm{pix}}$ resident -- this is what removes the memory bottleneck of the naive end-of-run decomposition.
 
-\begin{algorithm}[h!]
-\caption{Streaming shell accumulation}
-\label{alg:shell_accum}
-\begin{algorithmic}[1]
-\State Load shell table $\{(z_s^{\mathrm{lo}}, z_s^{\mathrm{hi}}, r_s^{\mathrm{lo}}, r_s^{\mathrm{hi}})\}_{s=1}^{S}$; build integration grid $\{a_j\}_{j=0}^{J}$ (Eq.~\ref{eq:step_grid})
-\State Initialize $\mathbf{S}_s \gets \mathbf{0}$ for all $s$
-\State Integrate particle state from $a_{\mathrm{ini}}$ to $a_0$ with $n_{\mathrm{pre}}$ sub-steps (no accumulation)
-\For{$j = 0, \dots, J-1$}
-  \State Record pre-step positions and mask, $\{\mathbf{x}_p^{(j)}, m_p^{(j)}\}$
-  \State Integrate one sub-step: $a_j \rightarrow a_{j+1}$
-  \State Record post-step positions and mask, $\{\mathbf{x}_p^{(j+1)}, m_p^{(j+1)}\}$
-  \State Compute $R_j, R_{j+1}$ (Eq.~\ref{eq:step_radii}) and active shells $\mathcal{A}_j$ (Eq.~\ref{eq:active_shells})
-  \For{$s \in \mathcal{A}_j$}
-    \State $\mathbf{M}_s^{(j)} \gets$ crossing map from $\{\mathbf{x}_p^{(j)}, \mathbf{x}_p^{(j+1)}, m_p^{(j)}, m_p^{(j+1)}\}$ restricted to $[r_s^{\mathrm{lo}}, r_s^{\mathrm{hi}})$ (Sec.~\ref{sec:crossing})
-    \State $\mathbf{S}_s \mathrel{+}= \mathbf{M}_s^{(j)}$
-  \EndFor
-  \State Discard pre-step state; retain post-step state as pre-step state for $j+1$
-\EndFor
-\State \Return $\{\mathbf{S}_s\}_{s=1}^{S}$
-\end{algorithmic}
-\end{algorithm}
-
-\paragraph{Output.} Once all $J$ steps have been processed, the set of per-shell count maps $\{\mathbf{S}_s\}_{s=1}^{S}$, together with the shell table, is serialized to a single output file. At no point during the procedure are more than $\mathcal{O}(1)$ full particle snapshots and $S$ integer-valued maps of size $N_{\mathrm{pix}}$ held simultaneously; this is what removes the memory bottleneck associated with the naive end-of-run decomposition.
+\begin{figure}[h!]
+\centering
+\begin{tikzpicture}[x=1cm, y=1cm]
+  % ---- integration axis ----
+  \draw[semithick, color=inkc] (0,0) -- (12.4,0) node[right, note] {$a$};
+  \foreach \x/\lab in {0.4/{a_0}, 3.4/{a_1}, 6.4/{a_2}, 9.4/{a_3}, 12.0/{a_4}} {
+    \draw[inkc] (\x,0.09) -- (\x,-0.09) node[below, font=\scriptsize] {$\lab$};
+  }
+  \node[note] at (2.6,-0.85) {integration grid $=$ shell edges (Eq.~\ref{eq:step_grid})};
+  % ---- highlighted current step ----
+  \fill[accsoftc, opacity=0.55] (6.4,-0.28) rectangle (9.4,0.28);
+  \node[note, text=accentc] at (7.9,0.55) {step $j$: one KDK sub-step};
+  % ---- particle states above ----
+  \node[databox, minimum width=17mm] (pre)  at (6.4,1.9) {$\mathbf{x}_p^{(j)}$};
+  \node[databox, minimum width=17mm] (post) at (9.4,1.9) {$\mathbf{x}_p^{(j+1)}$};
+  \draw[flow] (pre.south) -- (6.4,0.32);
+  \draw[flow] (post.south) -- (9.4,0.32);
+  \node[note] at (7.9,2.6) {only two snapshots in memory};
+  \draw[skiparrow] (3.2,1.9) -- (5.35,1.9) node[midway, above, note] {discard};
+  % ---- shell maps below ----
+  \foreach \x/\i in {1.9/1, 4.9/2, 10.7/4} {
+    \node[databox, minimum width=14mm, minimum height=7mm, font=\scriptsize] (s\i) at (\x,-2.1) {$\mathbf{S}_{\i}$};
+  }
+  \node[keybox, minimum width=14mm, minimum height=7mm, font=\scriptsize] (s3) at (7.9,-2.1) {$\mathbf{S}_{3}$};
+  \node[note] at (6.2,-3.0) {$S$ running HEALPix count maps};
+  \draw[flowacc] (7.9,-0.35) -- (s3.north) node[midway, right=1mm, note] {$\mathbf{S}_s \mathrel{+}= \mathbf{M}_s^{(j)}$ (Eq.~\ref{eq:shell_update})};
+\end{tikzpicture}
+\caption{Streaming shell accumulation. The integration grid is the sorted union of all shell edges, so each sub-step sweeps exactly one radial shell (highlighted). Per step, only the pre- and post-step particle states are alive; their lightcone crossings (Sec.~\ref{sec:crossing}) are pixelised and added to that shell's running count map, after which the pre-step state is discarded. Memory usage is thus $\mathcal{O}(1)$ snapshots $+\;S$ maps, independent of the number of steps.}
+\label{fig:shell_stream}
+\end{figure}
 
 \subsection{Crossing Condition}
 \label{sec:crossing}
 
-The condition follows the moving-lightcone formulation of \textsc{PkDgrav3} \cite{noauthor_examplepkdgrav3_lightcone_2022} exactly, rather than the vector-trajectory intersection used in the earlier sketch.
+Which particles contribute to a shell, and where, is decided by the moving-lightcone formulation of \textsc{PkdGrav3} \cite{noauthor_examplepkdgrav3_lightcone_2022}, which the shell builder reproduces exactly (\texttt{Shell\_Builder.py} implements the same crossing equation as \texttt{lightcone.cxx}); Figure~\ref{fig:crossing} illustrates the two ingredients.
 
-\paragraph{Periodic replicas.} The observer is placed at the box centre, $\mathbf{o} = (L/2, L/2, L/2)$, with $L$ the box side length. Since the requested lightcone depth $\chi_{\max} = \chi\big(1/(1+z_{\max})\big)$ generally exceeds $L$, the simulation volume is periodically replicated: let
+\paragraph{Periodic replicas.} The observer is placed at the box centre, $\mathbf{o} = (L/2, L/2, L/2)$, with $L$ the box side length. Since the requested lightcone depth $\chi_{\max} = \chi\big(1/(1+z_{\max})\big)$ exceeds $L$, the simulation volume is periodically replicated (Sec.~\ref{sec:lightcones}): the finite replica set
 \begin{equation}
   \mathcal{D} = \Big\{\, \mathbf{d} = (n_1, n_2, n_3)\,L \;:\; \mathbf{n}\in\mathbb{Z}^3, \ \; \text{replicated cube intersects the ball of radius } \chi_{\max} \text{ about } \mathbf{o} \,\Big\}
   \label{eq:replica_set}
 \end{equation}
-denote the finite set of replica offsets, precomputed once from $(\chi_{\max}, L)$. For each $\mathbf{d}\in\mathcal{D}$ we also precompute the nearest and farthest possible distance of the replicated cube from the observer,
+is precomputed once from $(\chi_{\max}, L)$. For each $\mathbf{d}\in\mathcal{D}$ the nearest and farthest possible distances of the replicated cube from the observer,
 \begin{equation}
   r_{\min}(\mathbf{d}) = \big\lVert \max(0, |\mathbf{d}| - L/2) \big\rVert, \qquad
   r_{\max}(\mathbf{d}) = \big\lVert |\mathbf{d}| + L/2 \big\rVert,
   \label{eq:replica_bounds}
 \end{equation}
-(componentwise $\max$ and absolute value, followed by the Euclidean norm), which allow a replica to be rejected for a given step without evaluating any particle if its radial range cannot overlap the step's lightcone annulus.
+are also precomputed (componentwise $\max$ and absolute value, then the Euclidean norm), so that a replica whose radial range cannot overlap a step's lightcone annulus is rejected without evaluating a single particle.
 
-\paragraph{Linear crossing formula.} For step $j$ with N-body boundaries $a_j < a_{j+1}$, define, as before, $r_j^{\mathrm{hi}} = \chi(a_j)$ and $r_j^{\mathrm{lo}} = \chi(a_{j+1})$. For a particle with pre-/post-step positions $\mathbf{x}_p(a_j), \mathbf{x}_p(a_{j+1})$ relative to the box centre, and a replica offset $\mathbf{d}\in\mathcal{D}$, define the shifted positions and their radii
+\paragraph{Linear crossing formula.} For step $j$ with boundaries $a_j < a_{j+1}$, write $r_j^{\mathrm{hi}} = \chi(a_j)$ and $r_j^{\mathrm{lo}} = \chi(a_{j+1})$. For a particle with pre-/post-step positions $\mathbf{x}_p(a_j), \mathbf{x}_p(a_{j+1})$ relative to the observer and a replica offset $\mathbf{d}\in\mathcal{D}$, define
 \begin{equation}
   \mathbf{R}_0 = \mathbf{x}_p(a_j) + \mathbf{d}, \qquad \mathbf{R}_1 = \mathbf{x}_p(a_{j+1}) + \mathbf{d}, \qquad
   r_0 = \lVert \mathbf{R}_0 \rVert, \qquad r_1 = \lVert \mathbf{R}_1 \rVert.
   \label{eq:replica_radii}
 \end{equation}
- The implementation follows \textsc{PkDgrav3} and interpolates the particle radius $r_p(v)$ and the lightcone front radius $R(v)$ linearly over the step,
+Following \textsc{PkdGrav3}, both the particle radius $r_p(v)$ and the inward-moving lightcone front $R(v)$ are interpolated linearly over the step,
 \begin{equation}
   r_p(v) = r_0 + v\,(r_1 - r_0), \qquad R(v) = r_j^{\mathrm{hi}} - v\,(r_j^{\mathrm{hi}} - r_j^{\mathrm{lo}}), \qquad v\in[0,1],
   \label{eq:scalar_interp}
 \end{equation}
-and solves $r_p(v^\ast) = R(v^\ast)$ for the crossing parameter,
+and the crossing $r_p(v^\ast) = R(v^\ast)$ is solved in closed form,
 \begin{equation}
   v^\ast = \frac{r_j^{\mathrm{hi}} - r_0}{\big(r_j^{\mathrm{hi}} - r_j^{\mathrm{lo}}\big) + (r_1 - r_0)}.
   \label{eq:vx_formula}
 \end{equation}
-A particle--replica pair is accepted only if $v^\ast \in [0,1)$; since Eq.~\eqref{eq:vx_formula} partitions the step interval, this guarantees that every particle is caught in \emph{at most one} step, for a fixed replica -- evaluating the crossing test against the (generally narrower) metainfo shell bounds instead of the full step bounds $[r_j^{\mathrm{lo}}, r_j^{\mathrm{hi}})$ would break this partition and could double-count particles moving across two adjacent shells within the same step. Pairs with $|r_1 - r_0|$ below a numerical tolerance ($10^{-20}$) are treated as non-moving and rejected, and the denominator of Eq.~\eqref{eq:vx_formula} is floored in magnitude at $10^{-10}$ to avoid division by a near-zero value.
+A particle--replica pair is accepted only if $v^\ast \in [0,1)$. Since the half-open acceptance intervals of consecutive steps partition the time axis, every particle is caught in \emph{at most one} step per replica; evaluating the crossing test against the (generally narrower) metainfo shell bounds instead of the step bounds would break this partition and could double-count particles crossing two adjacent shells within one step. Numerically, pairs with $|r_1 - r_0| \le 10^{-20}$ are treated as non-moving and rejected, and the denominator of Eq.~\eqref{eq:vx_formula} is floored in magnitude at $10^{-10}$.
 
 \paragraph{Shell assignment and pixelization.} The crossing position is obtained by applying $v^\ast$ to the \emph{vector} positions,
 \begin{equation}
   \mathbf{x}_{\mathrm{cross}} = (1-v^\ast)\,\mathbf{R}_0 + v^\ast\,\mathbf{R}_1, \qquad r_{\mathrm{cross}} = \lVert \mathbf{x}_{\mathrm{cross}} \rVert,
   \label{eq:cross_pos}
 \end{equation}
-and the pair is finally kept only if its crossing radius falls inside the metainfo (or, in the absence of an override, the step) shell bounds,
+and the pair is kept only if its crossing radius falls inside the shell bounds,
 \begin{equation}
   r_s^{\mathrm{lo}} \le r_{\mathrm{cross}} < r_s^{\mathrm{hi}}.
   \label{eq:shell_filter}
 \end{equation}
-Surviving crossings are pixelized with the equal-area HEALPix ring scheme at resolution $N_{\mathrm{side}}$ from the unit vector $\hat{\mathbf{x}}_{\mathrm{cross}} = \mathbf{x}_{\mathrm{cross}}/r_{\mathrm{cross}}$, and the corresponding pixel of the shell count map is incremented by one. Algorithm~\ref{alg:crossing} summarizes the full test, which is applied to every particle and every replica $\mathbf{d}\in\mathcal{D}$ surviving the fast reject of Eq.~\eqref{eq:replica_bounds}, for every step $j$ and every active shell $s\in\mathcal{A}_j$.
+Surviving crossings are pixelised with the equal-area HEALPix \textsc{ring} scheme at resolution $N_{\mathrm{side}}$ from the unit vector $\hat{\mathbf{x}}_{\mathrm{cross}} = \mathbf{x}_{\mathrm{cross}}/r_{\mathrm{cross}}$, and the corresponding pixel of $\mathbf{M}_s^{(j)}$ is incremented. In the implementation, the loop over all active replicas runs inside a single JIT-compiled JAX kernel (\texttt{jax.lax.fori\_loop}), so the per-replica work is dispatched to the GPU as one program rather than from Python.
 
-\begin{algorithm}[h!]
-\caption{Lightcone crossing test (per step $j$, per replica $\mathbf{d}$)}
-\label{alg:crossing}
-\begin{algorithmic}[1]
-\Require positions $\mathbf{x}_p(a_j), \mathbf{x}_p(a_{j+1})$; step radii $r_j^{\mathrm{lo}}, r_j^{\mathrm{hi}}$; shell bounds $r_s^{\mathrm{lo}}, r_s^{\mathrm{hi}}$; replica $\mathbf{d}$
-\State $\mathbf{R}_0 \gets \mathbf{x}_p(a_j) + \mathbf{d}$, \quad $\mathbf{R}_1 \gets \mathbf{x}_p(a_{j+1}) + \mathbf{d}$
-\State $r_0 \gets \lVert \mathbf{R}_0 \rVert$, \quad $r_1 \gets \lVert \mathbf{R}_1 \rVert$
-\If{$|r_1 - r_0| \le \epsilon_{\mathrm{move}}$} \State \Return \emph{reject (stationary)} \EndIf
-\State $v^\ast \gets \big(r_j^{\mathrm{hi}} - r_0\big) \,/\, \big[(r_j^{\mathrm{hi}} - r_j^{\mathrm{lo}}) + (r_1 - r_0)\big]$ \text{(Eq.~\ref{eq:vx_formula}, denominator floored at $\epsilon_{\mathrm{den}}$)}
-\If{$v^\ast \notin [0,1)$} \State \Return \emph{reject (not caught this step)} \EndIf
-\State $\mathbf{x}_{\mathrm{cross}} \gets (1-v^\ast)\mathbf{R}_0 + v^\ast \mathbf{R}_1$, \quad $r_{\mathrm{cross}} \gets \lVert \mathbf{x}_{\mathrm{cross}} \rVert$
-\If{$r_{\mathrm{cross}} \notin [r_s^{\mathrm{lo}}, r_s^{\mathrm{hi}})$} \State \Return \emph{reject (wrong shell)} \EndIf
-\State $\mathrm{pix} \gets \textsc{Vec2Pix}\big(N_{\mathrm{side}}, \hat{\mathbf{x}}_{\mathrm{cross}}\big)$
-\State $\mathbf{S}_s[\mathrm{pix}] \mathrel{+}= 1$
-\end{algorithmic}
-\end{algorithm}
-
-This procedure reproduces the corner-observer, box-replication scheme of \textsc{PkDgrav3} \cite{noauthor_examplepkdgrav3_lightcone_2022} almost exactly, with two differences: the observer is placed at the box centre rather than a corner, and the replica set $\mathcal{D}$ (Eq.~\ref{eq:replica_set}) is sized adaptively from the requested depth $\chi_{\max}$ and box length $L$ -- together with a per-step, per-replica radial reject (Eq.~\ref{eq:replica_bounds}) -- rather than fixed a priori to $6^3 = 216$ images.
+This procedure reproduces \textsc{PkdGrav3}'s box-replication lightcone \cite{noauthor_examplepkdgrav3_lightcone_2022} with two deliberate differences: the observer sits at the box centre rather than a corner, and the replica set $\mathcal{D}$ of Eq.~\eqref{eq:replica_set} is sized adaptively from $(\chi_{\max}, L)$ -- with the per-step radial reject of Eq.~\eqref{eq:replica_bounds} -- rather than fixed a priori to $6^3 = 216$ images.
 
 \begin{figure}[h!]
-    \centering
-    \includegraphics[width=0.5\linewidth]{plots/background/crossing_condition.png}
-    \caption{\cite{noauthor_examplepkdgrav3_lightcone_2022}}
-    \label{fig:placeholder2}
+\centering
+\resizebox{\textwidth}{!}{%
+\begin{tikzpicture}[x=1cm, y=1cm]
+  % ================= panel (a): replicas =================
+  \begin{scope}[shift={(0,0)}]
+    % shaded replicas (all but corners)
+    \foreach \i in {-2,-1,0,1,2}{
+      \foreach \j in {-2,-1,0,1,2}{
+        \pgfmathtruncatemacro{\iscorner}{(abs(\i)==2 && abs(\j)==2) ? 1 : 0}
+        \ifnum\iscorner=0
+          \draw[hairc, fill=surfc] (\i*0.82-0.41,\j*0.82-0.41) rectangle ++(0.82,0.82);
+        \else
+          \draw[hairc, dashed] (\i*0.82-0.41,\j*0.82-0.41) rectangle ++(0.82,0.82);
+        \fi
+      }
+    }
+    % central box emphasized
+    \draw[inkc, semithick, fill=accsoftc!60] (-0.41,-0.41) rectangle (0.41,0.41);
+    % lightcone depth circle
+    \draw[accentc, semithick] (0,0) circle (1.72);
+    \fill[inkc] (0,0) circle (1.3pt) node[below right=-1pt, font=\scriptsize] {$\mathbf{o}$};
+    \draw[flowacc] (0,0) -- (50:1.72) node[pos=0.72, above left=-1mm, note] {$\chi_{\max}$};
+    \node[note] at (0,-2.65) {(a) replica set $\mathcal{D}$ (Eq.~\ref{eq:replica_set}):\\ dashed replicas fail the reject of Eq.~\eqref{eq:replica_bounds}};
+  \end{scope}
+  % ================= panel (b): crossing =================
+  \begin{scope}[shift={(7.6,-1.45)}]
+    \fill[inkc] (0,0) circle (1.3pt) node[below left=-1pt, font=\scriptsize] {$\mathbf{o}$};
+    % lightcone fronts (arcs)
+    \draw[accentc, semithick, dashed] (10:3.4) arc (10:70:3.4) node[pos=0.15, right=1mm, note] {$R_j = r_j^{\mathrm{hi}}$};
+    \draw[accentc, semithick, dotted] (10:2.5) arc (10:70:2.5) node[pos=0.12, right=1mm, note] {$R_{j+1} = r_j^{\mathrm{lo}}$};
+    % annulus shading
+    \fill[accsoftc, opacity=0.35] (12:2.5) arc (12:68:2.5) -- (68:3.4) arc (68:12:3.4) -- cycle;
+    % particle trajectory
+    \coordinate (p0) at (18:2.9);
+    \coordinate (p1) at (40:3.25);
+    \draw[flow, color=inkc] (p0) -- (p1);
+    \fill[inkc] (p0) circle (1.2pt) node[below right=-1pt, font=\scriptsize] {$\mathbf{R}_0$};
+    \fill[inkc] (p1) circle (1.2pt) node[above right=-1pt, font=\scriptsize] {$\mathbf{R}_1$};
+    % crossing point
+    \coordinate (pc) at ($(p0)!0.62!(p1)$);
+    \fill[accentc] (pc) circle (1.6pt);
+    \node[note, text=accentc, above left=0.5mm of pc] {$\mathbf{x}_{\mathrm{cross}}$};
+    \draw[skiparrow] (0,0) -- (pc) node[midway, below right=-1mm, note] {$r_{\mathrm{cross}}$};
+    \node[note] at (1.9,-1.2) {(b) front moves inward, particle moves;\\ Eq.~\eqref{eq:vx_formula} gives the meeting point,\\ pixelised via $\hat{\mathbf{x}}_{\mathrm{cross}} \to$ HEALPix};
+  \end{scope}
+\end{tikzpicture}}
+\caption{The two ingredients of the crossing test. (a) The box is replicated around the central observer until the ball of radius $\chi_{\max}$ is covered; replicas that cannot intersect the current step's annulus are rejected wholesale via Eq.~\eqref{eq:replica_bounds}. (b) Within one step, the lightcone front shrinks from $R_j$ to $R_{j+1}$ (shaded annulus) while each particle moves from $\mathbf{R}_0$ to $\mathbf{R}_1$; both radii are interpolated linearly (Eq.~\ref{eq:scalar_interp}) and the closed-form crossing (Eq.~\ref{eq:vx_formula}) is accepted iff $v^\ast \in [0,1)$, guaranteeing each particle is counted at most once per replica.}
+\label{fig:crossing}
 \end{figure}
+
+Together, Secs.~\ref{sec:ic_generation} and \ref{sec:shell_builder} deliver what the learning problem needs: for every cosmology, two lightcones on identical shells that differ \emph{only} through the force solver. The next section builds the corrections that close that difference.
 
 \section{Correction Pipelines}
 \label{sec:correction-pipelines}
-% short intro: table crossing architecture x paradigm -> pipeline
 
-\subsection{Harmonic-Space Rescaling Pipeline}
-\label{subsec:pipe-harmonic}
-% transfer function fit/emulate, ell_min_mpc, Poisson resampling
+Three correction pipelines were implemented, each a self-contained module under \texttt{ml/} (\texttt{transfer/}, \texttt{unet/}, \texttt{diffusion/}) sharing only the neutral analysis library \texttt{ml/analysis/}. They span the two routes identified in Sec.~\ref{sec:pipeline} -- one deterministic harmonic-space rescaling and two generative, patch-based models -- and are deliberately evaluated through the same shared statistics and plotting code, so their outputs are comparable figure-by-figure. Table~\ref{tab:pipelines} summarises the contrast; Figure~\ref{fig:shared_problem} states the shared problem.
 
-\subsection{U-Net Flow Pipeline}
+\begin{figure}[h!]
+\centering
+\begin{tikzpicture}[node distance=4mm and 9mm]
+  \node[databox, minimum width=34mm] (low) {\textbf{low} -- Disco-DJ\\ \scriptsize correct large scales,\\ \scriptsize deficient small-scale power};
+  \node[keybox, right=of low, minimum width=36mm] (corr) {learned / fitted correction\\[1mm]
+    {\scriptsize \textcolor{ctrans}{$\bullet$ transfer} \quad \textcolor{cunet}{$\bullet$ unet-flow} \quad \textcolor{cdiff}{$\bullet$ diffusion}}};
+  \node[databox, right=of corr, minimum width=34mm] (high) {\textbf{high} -- CosmoGrid\\ \scriptsize the expensive reference\\ \scriptsize to be emulated};
+  \draw[flowacc] (low) -- (corr);
+  \draw[flowacc] (corr) -- (high);
+\end{tikzpicture}
+\caption{The shared problem. Every cosmology is a lightcone of 69 shells, each existing twice: a low map from Disco-DJ and a high map from CosmoGridV1, built from the same initial conditions (Sec.~\ref{sec:ic_generation}). The working field throughout is the per-shell overdensity $\delta = n/\bar n - 1$ of the particle counts.}
+\label{fig:shared_problem}
+\end{figure}
+
+One measured property of the data drives every design choice that follows. The per-multipole cross-correlation
+\begin{equation}
+  r(\ell, s) \;=\; \frac{\big\langle C_\ell^{\mathrm{low}\times\mathrm{high}}\big\rangle}{\sqrt{\big\langle C_\ell^{\mathrm{low}}\big\rangle\,\big\langle C_\ell^{\mathrm{high}}\big\rangle}},
+  \label{eq:phase_corr}
+\end{equation}
+computed across the training runs (\texttt{ml/transfer/transfer\_function.py}), shows that on the shells that carry signal, the low and high maps \emph{share phases} ($r \approx 0.9$--$1.0$) well into the small scales: Disco-DJ mostly gets the small-scale \emph{amplitude} wrong, not the positions of structures. This is why a pure amplitude rescaling (Sec.~\ref{subsec:pipe-transfer}) works at all. Only where $r$ decays -- on faint, shot-noise-dominated shells and at the highest multipoles (e.g.\ $r=0.56$ at $\ell=1000$ and $0.06$ at $\ell=2500$ on the faintest shells) -- do the maps genuinely decorrelate, and there the correct behaviour is not to amplify Disco-DJ's own noise but to \emph{generate} statistically fresh small-scale structure, which is precisely the role of the two generative pipelines (Secs.~\ref{subsec:pipe-unet-flow}, \ref{subsec:pipe-diffusion}).
+
+Three further design decisions are shared by all learned components and are motivated by measured failures of their alternatives:
+\begin{itemize}
+  \item \textbf{Work in linear overdensity $\delta$, not $\log(1+\delta)$.} The evaluation statistic (the angular power spectrum of $\delta$, \texttt{analysis/full\_sky.py}) lives in linear space. Training in log space compresses density peaks so strongly that the low/high power ratio there looks nearly correct (0.93--1.05) while the linear-space ratio the analysis actually measures is still deficient (down to 0.62 at high wavenumber) -- a model trained on the log-space residual therefore optimises a statistic that is already right and barely moves the one that matters (\texttt{ml/unet/dataset.py}).
+  \item \textbf{Correct only the small scales; pin the large scales to Disco-DJ.} Disco-DJ's large scales are already correct ($T\approx 1$, $r\approx 1$), so both generative pipelines are formulated as \emph{high-pass residual} models: the learning target is $\mathrm{HP}(\mathrm{high}-\mathrm{low})$, where $\mathrm{HP}$ is a radial Fourier high-pass with a raised-cosine transition (cutoff and transition width both $0.1$ of the patch Nyquist frequency by default), and the corrected patch is composed as $\mathrm{low} + \mathrm{HP}(\mathrm{sample})$. The composition re-applies the filter, so the output's large scales equal the low map's \emph{exactly}, regardless of integration error (\texttt{ml/unet/flow\_model.py}, \texttt{ml/diffusion/model.py}). This formulation is a direct response to two observed failures: a full-field diffusion model drew each tile's large scales from independent noise, so after stitching, the cross-tile phases averaged incoherently and destroyed the low-$\ell$ convergence spectrum; and even the low$\to$high flow drifted the already-correct large scales by a few percent per shell, which compounded coherently across the dozens of shells a convergence map integrates. The harmonic pipeline applies the same principle exactly in $\ell$-space, through a raised-cosine ramp on its correction factors.
+  \item \textbf{Hold out whole cosmologies, not random patches.} The train/validation split is by cosmology (\texttt{dataset.split\_by\_cosmo}): patches from the same run share large-scale structure, so a random per-patch split would leak the validation set into training. All reported evaluations are on cosmologies the models never saw.
+\end{itemize}
+
+\begin{table}[h!]
+\centering
+\small
+\begin{tabular}{@{}lp{3.6cm}p{3.6cm}p{3.6cm}@{}}
+\toprule
+ & \textcolor{ctrans}{\textbf{transfer}} & \textcolor{cunet}{\textbf{unet-flow}} & \textcolor{cdiff}{\textbf{diffusion}} \\
+\midrule
+Mechanism        & per-$\ell$ amplitude rescale & conditional flow matching & EDM denoising diffusion \\
+Domain           & spherical harmonics $a_{\ell m}$ & flat $256^2$ gnomonic patches & flat $256^2$ gnomonic patches \\
+Generator start  & --- (deterministic) & $x_0 = $ low map (bridge) & $x_T \sim \mathcal{N}(0, \sigma_{\max}^2 I)$ \\
+What is produced & rescaled modes ($+$ optional constrained realisation) & high-pass residual, transported from low & high-pass residual, generated from noise \\
+Conditioning     & cosmology $\to$ MLP emulator of $T$ & cosmology$+z$ at bottleneck; $t$ via FiLM & cosmology$+z$ at bottleneck; $\sigma$ via FiLM; low map as input channel \\
+Sampler (steps)  & closed form (0) & Euler ODE (8) & Heun ODE (32) \\
+Cost             & cheap, CPU & moderate, GPU & highest, GPU \\
+\bottomrule
+\end{tabular}
+\caption{The three correction pipelines at a glance. Sampler step counts are the defaults of the respective apply scripts (\texttt{apply\_flow.py}, \texttt{apply\_diffusion.py}).}
+\label{tab:pipelines}
+\end{table}
+
+\subsection{Patch Extraction and Full-Sky Reconstruction}
+\label{subsec:pipe-patches}
+
+The two patch-based pipelines share their data machinery. Training pairs are built by \texttt{make\_patch\_dataset.py}: for each patch, a random (cosmology, run), a random shell, a random centre pixel (uniform on the sphere), and a random orientation angle are drawn, and \emph{both} the low and the high shell map are projected at that same pointing with a gnomonic (flat-sky) projection at the map's native pixel resolution -- a like-for-like $256\times256$ crop with no resampling beyond the projection itself. Each patch stores the metadata needed to recreate it exactly (centre, orientation, shell redshift bounds, comoving distance) together with the run's varied cosmological parameters $(\Omega_m, \Omega_b, n_s, \sigma_8, w_0, h)$ from the CosmoGridV1 metainfo catalogue. From these, the conditioning vector
+\begin{equation}
+  \mathbf{c} = \big(h,\ \Omega_{cdm},\ \Omega_b,\ \Omega_m,\ n_s,\ \sigma_8,\ w_0,\ z_{\mathrm{shell}}\big) \in \mathbb{R}^8
+  \label{eq:cosmo_z}
+\end{equation}
+is assembled in one place (\texttt{dataset.cosmo\_z\_vector}) and consumed identically at train and inference time, so the two can never drift apart.
+
+At inference, a full-sky shell is corrected by the overlap-tile scheme of Figure~\ref{fig:tiling} (\texttt{ml/analysis/patch\_tiling.py}): the sphere is tiled with overlapping gnomonic patches centred on a coarse HEALPix grid (chosen so the patch field of view is at least four times the centre spacing), the model corrects each tile, and the tiles are blended back with a radial cosine taper $w(r) = \tfrac12(1+\cos \pi r)$ that falls to zero at the tile edge, hiding the seams. The tile-to-sphere pixel indices depend only on the geometry, so they are built once and reused for every shell and cosmology -- replacing a per-tile re-projection that would otherwise dominate the entire reconstruction cost.
+
+Two subtleties matter only for the \emph{stochastic} pipeline (diffusion). First, each sky pixel is covered by many overlapping tiles and the blend averages them; if every tile drew independent randomness, the average would suppress the generated small-scale amplitude to $1/\sqrt{N_{\mathrm{eff}}}$ of its true value, with $N_{\mathrm{eff}} = (\sum_i w_i)^2/\sum_i w_i^2$ the effective number of contributing tiles (measured: only $\sim$41\% of the injected amplitude, $\sim$17\% of the power, survives at the default overlap). The fix is to draw one \emph{global} noise field on the sphere and hand each tile the crop matching its own pixels, so overlapping tiles agree by construction. Second, the taper is raised to a power $p$ before normalisation ($p=32$ by default in \texttt{apply\_diffusion.py}): large $p$ makes the nearest tile ``own'' each pixel (a soft Voronoi partition), in the spirit of the original overlap-tile strategy \cite{ronneberger_u-net_2015} -- overlap provides context, but each output pixel comes from essentially one prediction. Deterministic per-tile models are unaffected ($p=1$ is kept for the flow), since their overlapping predictions already agree.
+
+\begin{figure}[h!]
+\centering
+\resizebox{\textwidth}{!}{%
+\begin{tikzpicture}[x=1cm, y=1cm]
+  % sphere with tiles
+  \draw[hairc, semithick, fill=surfc] (0,0) circle (1.5);
+  \begin{scope}
+    \clip (0,0) circle (1.5);
+    \draw[cunet, fill=cunet!12, rotate around={8:(-0.35,0.45)}]  (-0.9,-0.1) rectangle ++(1.1,1.1);
+    \draw[cunet, fill=cunet!12, rotate around={-12:(0.35,0.3)}]  (-0.2,-0.25) rectangle ++(1.1,1.1);
+    \draw[cunet, fill=cunet!12, rotate around={20:(0.05,-0.55)}] (-0.5,-1.1) rectangle ++(1.1,1.1);
+  \end{scope}
+  \node[note] at (0,-2.05) {overlapping gnomonic tiles\\ on a coarse HEALPix centre grid};
+  % model box
+  \node[unetbox, minimum width=26mm] (model) at (4.3,0) {per-tile model\\ \scriptsize flow ODE / diffusion sampler};
+  \draw[flow] (1.7,0) -- (model.west);
+  % blend box
+  \node[box, minimum width=30mm] (blend) at (8.9,0) {taper-weighted blend\\[0.5mm] {\scriptsize $\hat m(p) = \dfrac{\sum_i w_i^{\,p}\, \hat m_i}{\sum_i w_i^{\,p}}$}};
+  \draw[flow] (model.east) -- (blend.west);
+  % output
+  \node[databox, minimum width=20mm] (out) at (12.7,0) {corrected\\ full-sky shell};
+  \draw[flowacc] (blend.east) -- (out.west);
+  % taper profile
+  \begin{scope}[shift={(3.35,-2.35)}]
+    \draw[flow, color=mutedc] (0,0) -- (2.4,0) node[right, note] {$r$};
+    \draw[flow, color=mutedc] (0,0) -- (0,1.0) node[above, note] {$w$};
+    \draw[cunet, semithick] plot[domain=0:2.2, samples=40] (\x, {0.8*0.5*(1+cos(\x/2.2*180))});
+    \draw[cdiff, semithick, dashed] plot[domain=0:2.2, samples=40] (\x, {0.8*(0.5*(1+cos(\x/2.2*180)))^8});
+    \node[note, text=cunet] at (3.6,0.62) {$p=1$: averaging};
+    \node[note, text=cdiff] at (3.7,0.22) {$p\gg1$: soft Voronoi};
+  \end{scope}
+\end{tikzpicture}}
+\caption{Full-sky reconstruction from a patch model (\texttt{ml/analysis/patch\_tiling.py}). Tiles are extracted by cached gnomonic index maps, corrected in batches, and blended with a radial cosine taper $w$ raised to a power $p$. For the deterministic flow, $p=1$ simply averages agreeing predictions; for the stochastic diffusion sampler, a shared global noise field plus a large $p$ prevents the blend from averaging away the generated small-scale power.}
+\label{fig:tiling}
+\end{figure}
+
+\subsection{Harmonic-Space Transfer-Function Pipeline}
+\label{subsec:pipe-transfer}
+
+The first pipeline (\texttt{ml/transfer/}) contains no image-level network at all: it exploits the phase-sharing fact of Eq.~\eqref{eq:phase_corr} and corrects only mode \emph{amplitudes}, in the spherical-harmonic basis anticipated in Sec.~\ref{subsec:sr-problem}. Every shell is transformed to its harmonic coefficients $a_{\ell m}$ (up to $\ell_{\max}=3000$), and each mode is rescaled by a per-shell transfer function
+\begin{equation}
+  a_{\ell m}^{\mathrm{corr}} = a_{\ell m}^{\mathrm{low}} \cdot T(\ell, s),
+  \qquad
+  T(\ell, s) = \sqrt{\frac{\big\langle C_\ell^{\mathrm{high}}(s) \big\rangle}{\big\langle C_\ell^{\mathrm{low}}(s) \big\rangle}},
+  \label{eq:transfer_def}
+\end{equation}
+which by construction matches the target power spectrum while preserving the (correct) phases. Both spectra are smoothed in $\log_{10}$-space with a boxcar filter \emph{before} the ratio is taken: the physical $T(\ell)$ is smooth, whereas a single realisation's $C_\ell$ carries sample-variance and shot-noise scatter that would otherwise be fitted and amplified. Figure~\ref{fig:transfer_flow} shows the apply chain.
+
+\begin{figure}[h!]
+\centering
+\resizebox{\textwidth}{!}{%
+\begin{tikzpicture}[node distance=3.5mm and 5.5mm]
+  \node[databox] (shell) {low shell};
+  \node[transbox, right=of shell] (sht) {SHT\\ \scriptsize \texttt{map2alm}};
+  \node[transbox, right=of sht] (T) {$T(\ell, s)$\\ \scriptsize fit avg.\ or MLP};
+  \node[transbox, right=of T] (ramp) {ramp $w(\ell)$\\ \scriptsize $\ell_{\min}(s)$ from 3 Mpc$/h$};
+  \node[transbox, right=of ramp] (delta) {$\Delta a_{\ell m} = (T{-}1)\,a_{\ell m}$\\ \scriptsize \texttt{alm2map}};
+  \node[keybox, right=of delta] (add) {$+$ native map};
+  \node[databox, below=of add] (out) {corrected shell\\ \scriptsize continuous, \texttt{--no-clip}};
+  \draw[flow] (shell) -- (sht);
+  \draw[flow] (sht) -- (T);
+  \draw[flow] (T) -- (ramp);
+  \draw[flow] (ramp) -- (delta);
+  \draw[flow] (delta) -- (add);
+  \draw[flowacc] (add) -- (out);
+  \draw[flow] (shell.south) to[out=-25, in=180] node[pos=0.6, below, note] {all scales above $\ell_{\max}$ untouched} (out.west);
+\end{tikzpicture}}
+\caption{The harmonic apply chain (\texttt{ml/transfer/apply\_transfer.py}). The correction is applied as a band-limited \emph{residual} $(T-1)\,a_{\ell m}$ on top of the native full-resolution map: reconstructing purely through \texttt{alm2map} would band-limit the output to $\ell \le \ell_{\max}$ and discard genuine structure the $N_{\mathrm{side}}{=}2048$ map holds beyond it (up to $\ell \sim 3N_{\mathrm{side}}{-}1$).}
+\label{fig:transfer_flow}
+\end{figure}
+
+\paragraph{Two estimators of $T$.} The \texttt{fit} mode averages the smoothed spectra over the training runs and treats $T$ as a property of the solver pair, independent of cosmology -- a robust deterministic baseline. The \texttt{emulate} mode instead trains a small MLP emulator (scikit-learn \texttt{MLPRegressor}, hidden layers $256$-$256$-$128$, ReLU, Adam with early stopping on a held-out validation loss) on features $\big(\log_{10}(\ell{+}1),\ z,\ H_0,\ \Omega_{cdm},\ \Omega_b,\ \Omega_m,\ n_s,\ \sigma_8,\ \log_{10} C_\ell^{\mathrm{low}}\big)$, standardised per feature, with target $T$; this interpolates the transfer function to unseen cosmologies of the grid. Both estimators also store the phase correlation $R(\ell, s)$ of Eq.~\eqref{eq:phase_corr}.
+
+\paragraph{Where to correct.} The correction must not touch the already-correct large scales, and ``large'' is a \emph{physical} statement: the PM resolution deficit sets in at a fixed comoving scale (of order the PM grid cell), which maps to a different multipole on every shell. Using the flat-sky relation $\ell \simeq k\,\chi(z)$, a fixed scale $L$ (default $3\,\mathrm{Mpc}/h$) is converted per shell to
+\begin{equation}
+  \ell_{\min}(s) = \left\lceil \frac{2\pi\,\chi(z_s)}{L} \right\rceil,
+  \label{eq:ell_min}
+\end{equation}
+below which $T$ is forced to 1, with a raised-cosine ramp $w(\ell)$ handing over smoothly above it (a hard step in harmonic space rings in real space). This matches the measured behaviour: nearby shells visibly deviate from CosmoGridV1 from $\ell \sim 150$--$300$, while the most distant shells show no deviation out to $\ell = 3000$ -- and correctly receive no correction, because their $\ell_{\min}$ exceeds $\ell_{\max}$.
+
+\paragraph{Stochastic option.} Rescaling \emph{every} mode by the full $T$ matches $C_\ell$ in expectation but amplifies Disco-DJ's own single-realisation noise wherever $r<1$, overshooting the pixel variance of any one map. The \texttt{--stochastic} mode therefore splits the correction into a phase-correlated part, applied with the Wiener-like gain $r\,T$ to Disco-DJ's own modes, and the remaining power, filled with an \emph{independent} Gaussian realisation of spectrum $T^2(1-r^2)\,C_\ell^{\mathrm{low}}$; the two add to the correct total since $(rT)^2 + T^2(1-r^2) = T^2$. Fresh randomness thus enters exactly (and only) where the phases carry no information.
+
+\paragraph{Positivity.} The corrected field is continuous and, on the sparse high-redshift shells, substantially negative (up to $\sim$49\% of pixels), whereas the truth is a non-negative count map. All cheap pixel-wise fixes were measured and rejected: clipping at zero, mean-debiasing after the clip, and a log-density formulation each destroy the small-scale $C_\ell$ that the correction just repaired (band ratios 0.74, 0.61, and 0.41 at $\ell = 800$--$1500$, versus 0.93 for the unclipped field). A statistically consistent re-discretisation was implemented in \texttt{poisson\_resample.py}: it builds a lognormal intensity $\lambda > 0$ carrying the shot-deconvolved target clustering -- mixing Disco-DJ's smoothed phases at low $\ell$ with an independent Gaussian realisation above, weighted by the measured $r(\ell)$ -- and draws $\mathrm{counts} \sim \mathrm{Poisson}(\lambda)$, with a damped fixed-point iteration calibrating the per-$\ell$ spectrum of $\lambda$; this yields integer counts with the correct mean, sparsity, and $C_\ell$ to a few percent. For the weak-lensing observables of this thesis, however, the unclipped continuous field is both cheaper and more accurate (convergence-$C_\ell$ ratios 0.94--1.01 versus 0.81--1.08 for the Poisson path), so \texttt{--no-clip} is the default and the Poisson re-discretisation is reserved for consumers that genuinely need per-pixel count validity.
+
+\subsection{U-Net Flow-Matching Pipeline}
 \label{subsec:pipe-unet-flow}
-% data prep, conditioning, training, validation
 
-\subsection{Diffusion Pipeline}
+The second pipeline (\texttt{ml/unet/}) is the first of the two generative ones: a conditional flow-matching model (Sec.~\ref{sssec:flow-matching}) acting on the gnomonic patches of Sec.~\ref{subsec:pipe-patches}. Its defining choice is the \emph{start point} of the flow: instead of Gaussian noise, the ODE starts at the low-fidelity patch itself,
+\begin{equation}
+  x_0 = \delta_{\mathrm{low}}, \qquad
+  x_1 = x_0 + \mathrm{HP}\!\left(\delta_{\mathrm{high}} - \delta_{\mathrm{low}}\right), \qquad
+  x_t = (1-t)\,x_0 + t\,x_1,
+  \label{eq:flow_bridge}
+\end{equation}
+so the model learns a \emph{bridge} from low to high rather than a full generative map from noise (\texttt{flow\_model.py}). Because $x_0$ already carries the correct large-scale structure, the target velocity $u = x_1 - x_0 = \mathrm{HP}(\delta_{\mathrm{high}} - \delta_{\mathrm{low}})$ is a pure high-pass field -- integrating it can only ever \emph{add} small-scale content -- and the trajectory is nearly straight, so 8 Euler steps suffice at inference (Table~\ref{tab:pipelines}). The training loss is the flow-matching regression of Eq.~\eqref{eq:flow_matching} on this interpolant,
+\begin{equation}
+  \mathcal{L} = \mathbb{E}_{t \sim \mathcal{U}[0,1]}\;
+  \frac{\big\lVert v_\theta(x_t, t, \mathbf{c}) - (x_1 - x_0) \big\rVert^2}{\max\!\big(\mathrm{Var}(x_1{-}x_0)\,/\,\overline{\mathrm{Var}},\ 0.1\big)},
+  \label{eq:flow_loss}
+\end{equation}
+where the denominator is a bounded, batch-relative per-patch variance normalisation: a dense, well-resolved shell's true residual is naturally tiny, so plain MSE gives it far weaker gradients than a sparse shell's large residual, and the network never learns to calibrate the ``correct answer is nearly zero here'' case -- visible as a persistent few-percent bias on the densest shells. Normalising by each patch's own residual variance, relative to the batch mean and clamped to at most a $10\times$ upweighting, removes this imbalance without the gradient blow-ups an unbounded reweighting was observed to cause (\texttt{train\_flow.py}).
+
+\paragraph{Architecture.} The velocity network \texttt{FlowUNet} instantiates the generic U-Net of Figure~\ref{fig:unet_generic} with four levels and base width 32: channels $1\to32\to64\to128\to256\to512$ at spatial resolutions $256^2 \to 16^2$, mirrored by the decoder with skip concatenations, and a $1\times1$ output head (Figure~\ref{fig:film_unet}). Two conditioning paths are threaded through it:
+\begin{itemize}
+  \item \textbf{Flow time $t$, everywhere.} A sinusoidal embedding of $t$ (dimension 128, expanded to 512 by a two-layer MLP) modulates \emph{every} convolution block via FiLM: each block is two $3\times3$ convolutions with GroupNorm(8) and SiLU, and after the first convolution the shared embedding is projected by a per-block linear layer to a channel-wise $(\mathrm{scale}, \mathrm{shift})$ pair applied as $h \mapsto h\,(1+\mathrm{scale}) + \mathrm{shift}$. One network thus represents the whole time-dependent velocity field $v_\theta(x, t)$.
+  \item \textbf{Cosmology and redshift, once.} The 8-vector $\mathbf{c}$ of Eq.~\eqref{eq:cosmo_z} passes through a two-layer MLP and is added, broadcast over space, into the $512$-channel bottleneck latent. The MLP's last layer is zero-initialised, so conditioning starts as an exact no-op and the conditioned model is architecturally identical to the unconditioned one at initialisation -- keeping training stable and the ablation clean.
+\end{itemize}
+The output head is likewise zero-initialised, so the untrained model predicts $v = 0$ (``stay at $x_0$'') -- the correct baseline from which to learn a correction. Training uses Adam (learning rate $3\times10^{-4}$, scaled linearly with the number of data-parallel ranks), cosine-annealed over the epochs, gradient clipping at norm 1, and PyTorch DDP across the four GPUs of a node (\texttt{train\_flow.py}). At inference, \texttt{apply\_flow.py} integrates $\dot x = v_\theta(x, t, \mathbf{c})$ with Euler steps, composes $\mathrm{low} + \mathrm{HP}(x(1) - x_0)$ through the \emph{same} filter code used to build the training target, and reconstructs full skies via Figure~\ref{fig:tiling}.
+
+\begin{figure}[h!]
+\centering
+\resizebox{\textwidth}{!}{%
+\begin{tikzpicture}[node distance=3mm and 4mm]
+  % embedding node
+  \node[databox, minimum width=44mm] (emb) at (5.05,2.15) {sinusoidal emb.\ of $t$ (flow) / $c_{\mathrm{noise}}(\sigma)$ (diffusion) $\to$ MLP $\to$ 512-d};
+  % chain of blocks
+  \node[unetbox] (in) at (0,0) {in\\ \scriptsize 1 / 2 ch};
+  \node[unetbox, right=of in] (b1) {32};
+  \node[unetbox, right=of b1] (b2) {64};
+  \node[unetbox, right=of b2] (b3) {128};
+  \node[unetbox, right=of b3] (b4) {256};
+  \node[keybox, right=of b4] (bot) {512\\ \scriptsize $16^2$};
+  \node[unetbox, right=of bot] (u4) {256};
+  \node[unetbox, right=of u4] (u3) {$\cdots$};
+  \node[unetbox, right=of u3] (u0) {32};
+  \node[unetbox, right=of u0] (head) {$1{\times}1$\\ \scriptsize zero-init};
+  \draw[flow] (in) -- (b1); \draw[flow] (b1) -- (b2); \draw[flow] (b2) -- (b3);
+  \draw[flow] (b3) -- (b4); \draw[flow] (b4) -- (bot); \draw[flow] (bot) -- (u4);
+  \draw[flow] (u4) -- (u3); \draw[flow] (u3) -- (u0); \draw[flow] (u0) -- (head);
+  % FiLM arrows from embedding to blocks
+  \foreach \b in {b1,b2,b3,b4,bot,u4,u0} {\draw[skiparrow] (emb.south) -- (\b.north);}
+  \node[note] at (5.05,1.2) {FiLM $(\mathrm{scale},\mathrm{shift})$ in every double-conv block};
+  % cosmo injection
+  \node[keybox, minimum height=6mm, font=\scriptsize] (cosmo) at (5.6,-1.5) {$\mathbf{c} \in \mathbb{R}^8$ (Eq.~\ref{eq:cosmo_z}) $\to$ MLP, zero-init};
+  \draw[flowacc] (cosmo.north) -- (bot.south) node[midway, right, note] {$+$ at bottleneck};
+\end{tikzpicture}}
+\caption{The conditioned U-Net shared (as a local, independent copy) by both learned pipelines: \texttt{FlowUNet} takes 1 input channel ($x_t$) and embeds the flow time $t$; \texttt{DenoiserUNet} takes 2 (noisy residual $\oplus$ conditioning low map) and embeds the noise level $c_{\mathrm{noise}}(\sigma)$. The scalar embedding FiLM-modulates every block; the cosmology--redshift vector enters once, additively and zero-initialised, at the bottleneck.}
+\label{fig:film_unet}
+\end{figure}
+
+\subsection{Diffusion Pipeline (EDM)}
 \label{subsec:pipe-diffusion}
 
-\subsection{Sphereflow Pipeline}
-\label{subsec:pipe-sphereflow}
+The third pipeline (\texttt{ml/diffusion/}) replaces the low$\to$high bridge with a genuinely generative process in the EDM formulation of \citeauthor{karras_elucidating_2022} (Sec.~\ref{sssec:diffusion-theory}): every sample starts from pure Gaussian noise, and the low map enters only as \emph{conditioning}. What is diffused is again not the full field but the high-pass residual $x_1 = \mathrm{HP}(\delta_{\mathrm{high}} - \delta_{\mathrm{low}})$, for the reasons of Sec.~\ref{sec:correction-pipelines}; the conditioning, by contrast, is the \emph{full} low patch at all scales, channel-concatenated to the noisy input -- the denoiser needs the large-scale context to know which small-scale structure to synthesise, even though its output is band-limited.
+
+\paragraph{Preconditioned denoiser.} The network is the two-channel variant of Figure~\ref{fig:film_unet}, wrapped in the EDM preconditioning (\texttt{model.EDMPrecond}):
+\begin{equation}
+  D_\theta(x, \sigma, \mathrm{cond}) = c_{\mathrm{skip}}(\sigma)\,x
+    + c_{\mathrm{out}}(\sigma)\, F_\theta\!\big(\,[\,c_{\mathrm{in}}(\sigma)\,x \,\oplus\, \mathrm{cond}\,],\ c_{\mathrm{noise}}(\sigma),\ \mathbf{c}\big),
+  \label{eq:edm_precond}
+\end{equation}
+with the standard coefficients
+\begin{equation}
+  c_{\mathrm{skip}} = \frac{\sigma_d^2}{\sigma^2 + \sigma_d^2}, \quad
+  c_{\mathrm{out}} = \frac{\sigma\,\sigma_d}{\sqrt{\sigma^2 + \sigma_d^2}}, \quad
+  c_{\mathrm{in}} = \frac{1}{\sqrt{\sigma^2 + \sigma_d^2}}, \quad
+  c_{\mathrm{noise}} = \tfrac14 \ln \sigma,
+  \label{eq:edm_coeffs}
+\end{equation}
+\cite{karras_elucidating_2022}. The conditioning channel is neither noised nor rescaled by $c_{\mathrm{in}}$ -- it is not part of the diffusion process, it only steers it. One EDM default is deliberately \emph{not} adopted: the data scale $\sigma_d$, tuned to $0.5$ for 8-bit natural images in \cite{karras_elucidating_2022}, is instead \emph{measured} as the standard deviation of the actual training target -- the high-pass residual, whose variance is far smaller than the full field's -- over a few real batches at start-up (\texttt{estimate\_sigma\_data}); using the wrong $\sigma_d$ would mis-scale all four coefficients of Eq.~\eqref{eq:edm_coeffs}.
+
+\paragraph{Training.} Per example, a noise level is drawn as $\ln\sigma \sim \mathcal{N}(-1.2, 1.2^2)$, the target is noised to $x_t = x_1 + \sigma\varepsilon$, and the denoising error is weighted per noise level and normalised per patch:
+\begin{equation}
+  \mathcal{L} = \mathbb{E}\!\left[\, \lambda(\sigma)\,
+      \frac{\big\lVert D_\theta(x_1 + \sigma\varepsilon,\ \sigma,\ \delta_{\mathrm{low}}) - x_1 \big\rVert^2}
+           {\max\!\big(\mathrm{Var}(x_1)/\overline{\mathrm{Var}},\ 0.1\big)} \right],
+  \qquad
+  \lambda(\sigma) = \frac{\sigma^2 + \sigma_d^2}{(\sigma\,\sigma_d)^2},
+  \label{eq:edm_loss}
+\end{equation}
+where $\lambda(\sigma)$ is EDM's weighting that equalises gradient magnitude across noise levels \cite{karras_elucidating_2022}, and the bounded per-patch normalisation is the same device -- and the same measured motivation -- as in Eq.~\eqref{eq:flow_loss}. The bound is essential here: an unbounded $1/\mathrm{Var}$ divisor compounds multiplicatively with $\lambda(\sigma)$'s own dynamic range, and the combination was observed to produce loss spikes that prevented convergence entirely. The optimiser setup mirrors the flow pipeline's.
+
+\paragraph{Sampling.} Inference follows EDM's deterministic Algorithm 1 (\texttt{model.sample\_heun}): the Karras noise schedule
+\begin{equation}
+  \sigma_i = \Big(\sigma_{\max}^{1/\rho} + \tfrac{i}{N-1}\big(\sigma_{\min}^{1/\rho} - \sigma_{\max}^{1/\rho}\big)\Big)^{\rho},
+  \qquad \rho = 7,\ \ \sigma \in [0.002,\ 80],
+  \label{eq:karras_schedule}
+\end{equation}
+integrated with Heun's second-order method over $N = 32$ steps from $x_T \sim \mathcal{N}(0, \sigma_{\max}^2 I)$ (Figure~\ref{fig:edm_sampling}). The step count is not a tuning failure but the point of this pipeline: a trajectory from pure noise is genuinely curved (Sec.~\ref{sssec:diffusion-theory}), and with up to two denoiser calls per Heun step, this is the most expensive of the three corrections per shell. The corrected patch is composed exactly as in the flow pipeline, $\mathrm{low} + \mathrm{HP}(\mathrm{sample})$, and full skies are reconstructed with the shared global noise field and $p=32$ blending of Sec.~\ref{subsec:pipe-patches} -- the sampler is deterministic given (noise, conditioning), which is precisely what makes overlapping tiles consistent.
+
+\begin{figure}[h!]
+\centering
+\resizebox{\textwidth}{!}{%
+\begin{tikzpicture}[node distance=3.5mm and 6mm]
+  \node[diffbox] (xt) {$x_T \sim \mathcal{N}(0, \sigma_{\max}^2 I)$\\ \scriptsize shared sphere noise};
+  \node[diffbox, right=of xt] (heun) {Heun ODE, 32 steps\\ \scriptsize $D_\theta(x, \sigma_i, \delta_{\mathrm{low}}, \mathbf{c})$, Eq.~\eqref{eq:karras_schedule}};
+  \node[diffbox, right=of heun] (res) {sample $=$\\ high-pass residual};
+  \node[keybox, right=of res] (comp) {$\delta_{\mathrm{low}} + \mathrm{HP}(\mathrm{sample})$};
+  \node[databox, right=of comp] (out) {corrected\\ patch};
+  \draw[flow] (xt) -- (heun);
+  \draw[flow] (heun) -- (res);
+  \draw[flow] (res) -- (comp);
+  \draw[flowacc] (comp) -- (out);
+  \node[databox, below=4.5mm of heun, minimum height=6mm, font=\scriptsize] (cond) {conditioning: full low patch (channel-concat) $+$ $\mathbf{c}$};
+  \draw[skiparrow] (cond.north) -- (heun.south);
+  % sigma ladder
+  \node[note] at (2.9,1.35) {$\sigma:\ 80 \;\rightarrow\; \cdots \;\rightarrow\; 0.002 \;\rightarrow\; 0$};
+\end{tikzpicture}}
+\caption{EDM sampling in the diffusion pipeline (\texttt{ml/diffusion/model.py}). The sampler runs from pure noise down the Karras schedule; the low map steers every denoiser call but is never noised itself. Composition re-applies the high-pass filter, so the output's large scales are Disco-DJ's exactly.}
+\label{fig:edm_sampling}
+\end{figure}
+
+In summary, the three pipelines answer the same question at three levels of ambition: \emph{transfer} restores the power spectrum by construction but cannot restore structure; \emph{unet-flow} transports each patch along a short, nearly straight bridge and restores stochastic small-scale power at moderate cost; \emph{diffusion} generates the missing band from noise through a full multi-step sampler, at the highest cost. All three inherit the same guarantees from the shared formulation -- large scales pinned to Disco-DJ, corrections confined to the scales where the deficit lives, and evaluation on held-out cosmologies. Running them at production scale is the subject of the next section.
 
 \section{Computational Infrastructure}
 \label{sec:infrastructure}
- 
-\subsection{Computing Environments}
- 
-Development proceeded through three tiers of increasing scale: a local workstation for prototyping, ETH Zurich's Euler cluster for medium-scale production, and the CSCS Alps system for full-resolution runs. Each tier trades a shorter debugging loop for less computational headroom, and it is the memory footprint of the two codes from Sec.~\ref{sec:discodj} and Sec.~\ref{sec:pkdgrav} -- not their runtime -- that ultimately decides which tier a given job belongs to.
- 
+
+Development proceeded through three tiers of increasing scale -- a local workstation, ETH Zurich's Euler cluster, and the CSCS Alps system -- each trading a shorter debugging loop for more computational headroom (Figure~\ref{fig:infra_tiers}). It is the memory footprint of the two simulation codes, not their runtime, that decides which tier a given job belongs to.
+
+\begin{figure}[h!]
+\centering
+\begin{tikzpicture}[node distance=3mm and 10mm]
+  \node[databox, minimum width=37mm, minimum height=17mm] (local) {\textbf{Workstation}\\ \scriptsize $16^3$ end-to-end tests\\ \scriptsize $<1$ min, instant feedback};
+  \node[box, minimum width=37mm, minimum height=17mm, right=of local] (euler) {\textbf{Euler (ETH)}\\ \scriptsize full $832^3$ runs, GPU builds\\ \scriptsize per-code environments};
+  \node[keybox, minimum width=40mm, minimum height=17mm, right=of euler] (alps) {\textbf{Alps (CSCS)}\\ \scriptsize GH200, 120 GB/node\\ \scriptsize production sims $+$ training};
+  \draw[flowacc] (local) -- (euler) node[midway, above, note] {memory-\\bound};
+  \draw[flowacc] (euler) -- (alps) node[midway, above, note] {finer PM mesh,\\ larger batches};
+  \node[note] at (7.0,-1.7) {debugging loop: seconds \quad $\longleftrightarrow$ \quad headroom: Eq.~\eqref{eq:phasespace_mem} $\times$ code-specific overheads};
+\end{tikzpicture}
+\caption{The three computing tiers. Each move to the right is forced by memory, not speed: the phase-space floor of Eq.~\eqref{eq:phasespace_mem} already exceeds a workstation, and Disco-DJ's PM mesh grows the demand further with resolution.}
+\label{fig:infra_tiers}
+\end{figure}
+
 \subsection{Local Development}
 \label{sec:local_dev}
- 
-\textsc{disco} and \textsc{PkdGrav3} were first set up on a local machine to establish a minimal working configuration and to inspect their output interactively: results can be plotted and checked immediately, without the queueing latency of a batch system, which shortens the debugging loop considerably. In practice this means that a bug in, say, the shell-builder logic of Sec.~\ref{sec:shell_builder_core} or in the initial-condition hand-off of Sec.~\ref{sec:ic_generation} is caught and fixed in seconds on a laptop, rather than only surfacing after a queued job on a cluster has already run to completion. Small tests at a resolution of $16^3 = 4096$ particles complete in under a minute on a single core; a run this size is not meant to be physically meaningful, only to exercise the full pipeline -- initial conditions, time integration, and lightcone accumulation -- end to end before committing to a production-scale configuration.
- 
-The binding constraint once the resolution is scaled up to production size is memory, and the two codes hit that limit for structurally different reasons. Storing only the raw phase-space state of a particle -- three position and three velocity components, each a single-precision (4-byte) float, i.e.\ $6\times4=24$ bytes per particle -- for a CosmoGridV1-sized run gives
+
+Both codes were first set up on a local machine to establish a minimal working configuration with an interactive debugging loop: a bug in the shell-builder logic of Sec.~\ref{sec:shell_builder} or the IC hand-off of Sec.~\ref{sec:ic_generation} is caught in seconds, rather than after a queued cluster job has run to completion. Tests at $16^3 = 4096$ particles complete in under a minute on a single core; such a run is not physically meaningful, it exercises the full pipeline -- initial conditions, integration, lightcone accumulation -- end to end before committing to a production configuration.
+
+The binding constraint at production size is memory. Storing only the raw phase-space state -- six single-precision components per particle -- for a CosmoGridV1-sized run gives
 \begin{equation}
-    N_p = 832^3 \approx 5.8\times10^{8}\ \text{particles}, \qquad
+    N_p = 832^3 \approx 5.8\times10^{8}, \qquad
     N_p \times 24\ \text{bytes} \approx 14\ \text{GB},
     \label{eq:phasespace_mem}
 \end{equation}
-which already exceeds a typical workstation's RAM once any headroom for the rest of the run is included. This number is only a floor, and the two codes exceed it in different ways. For \textsc{PkdGrav3}, Eq.~\eqref{eq:phasespace_mem} covers only the particle positions and velocities themselves; as already noted in Sec.~\ref{sec:pkdgrav}, the code additionally carries a per-particle tree, per-particle rung state, and domain-decomposition buffers alongside this raw data, so its actual memory footprint at a given particle count is correspondingly larger than Eq.~\eqref{eq:phasespace_mem}, by an amount that grows with the depth of the tree and the number of particles active on the shortest rungs at a given step. \textsc{disco}, by contrast, is bounded less by the particle count than by the resolution of its force mesh: because its Poisson solve is a single global FFT over the whole PM grid (Sec.~\ref{sec:discodj}), rather than a spatially local tree walk, the entire mesh -- the density field, its Fourier transform, and the resulting force components -- must reside in memory simultaneously for a single force evaluation, so that (unlike \textsc{PkdGrav3}) its memory demand scales with the chosen mesh resolution rather than directly with the particle count. Production-resolution runs of either code therefore require a cluster.
- 
+already beyond a typical workstation's RAM once any working headroom is included -- and this floor is exceeded differently by the two codes. \textsc{PkdGrav3} carries, on top of Eq.~\eqref{eq:phasespace_mem}, its per-particle tree, per-particle rung state, and domain-decomposition buffers (Sec.~\ref{sec:pkdgrav}), so its footprint grows with tree depth and rung occupancy. Disco-DJ is instead bounded by its force mesh: the Poisson solve is one global FFT (Sec.~\ref{sec:discodj}), so the whole PM grid -- density, its Fourier transform, and force components -- must be resident simultaneously, and the demand scales with the chosen mesh resolution rather than the particle count. Production runs of either code therefore require a cluster.
+
 \subsection{Euler (ETH Zurich)}
- 
-On Euler we built a separate virtual environment for each code, because \textsc{disco} and \textsc{PkdGrav3} have conflicting library dependencies that cannot coexist in a single environment: \textsc{disco} is built on JAX (Sec.~\ref{sec:discodj}) and therefore needs a matched GPU-software stack for its own automatic-differentiation and GPU-acceleration machinery, while \textsc{PkdGrav3} is a compiled tree code with its own domain-decomposition layer (Sec.~\ref{sec:pkdgrav}) built against a separate toolchain; installing both into one environment risks exactly the kind of version conflict that a per-code environment avoids. Euler provides the memory and the GPU partitions needed to run at the full $832^3$ resolution, with substantial speed-ups from the GPU-accelerated builds -- speed-ups that matter specifically for \textsc{disco}, whose entire force solve is GPU-accelerated by construction (Sec.~\ref{sec:discodj}), rather than for \textsc{PkdGrav3}, whose FMM force calculation is CPU-bound (in the used version). Depending on the configuration a single simulation can still be long-running, so jobs are distributed across multiple nodes where the code supports it.
- 
-\subsection{CSCS (Alps / Piz Daint)}
- 
-The largest runs use the CSCS Alps system, whose NVIDIA GH200 nodes provide 120~GB of on-package memory. This large memory pool is well suited to scaling \textsc{disco} up in particular: as argued in Sec.~\ref{sec:local_dev}, \textsc{disco}'s memory demand tracks the resolution of its PM grid rather than the particle count, and the entire grid must be resident in memory for a single force evaluation, so a larger available memory directly translates into a finer mesh -- and hence a smaller-scale force resolution -- that can be run without running out of memory mid-simulation. The same large memory pool also shortens the wall-clock time of each run, whether generating the \textsc{disco}/CosmoGridV1 training pairs of Sec.~\ref{sec:pipeline} or, later, training the correction network of Sec.~\ref{sec:network} itself, since both tasks can be run with larger batches -- of simulations in the first case, of map patches in the second -- without being forced to break the workload into smaller pieces purely to fit within a tighter memory budget.
- 
+
+On Euler, each code gets its own virtual environment: Disco-DJ is built on JAX and needs a matched GPU software stack, while \textsc{PkdGrav3} is a compiled tree code with its own toolchain -- a per-code split that avoids the version conflicts a shared environment invites. Euler provides the memory and GPU partitions for the full $832^3$ resolution; the GPU acceleration specifically benefits Disco-DJ, whose entire force solve is GPU-native, whereas the \textsc{PkdGrav3} build used here is CPU-bound. Long-running jobs are distributed across multiple nodes where the code supports it.
+
+\subsection{CSCS (Alps)}
+
+The largest runs use the CSCS Alps system, whose NVIDIA GH200 nodes provide 120~GB of on-package memory each. This directly addresses Disco-DJ's binding constraint: since its memory demand tracks the PM mesh (Sec.~\ref{sec:local_dev}), a larger memory pool translates into a finer force mesh -- and hence better small-scale force resolution -- per node. Production runs use \texttt{RES\_PM} $= 1664 = 2\times832$ mesh cells per dimension at the CosmoGridV1 box and particle count (Appendix~\ref{app:slurm}). The same nodes also host the correction-pipeline training of Sec.~\ref{sec:correction-pipelines}, where the memory allows large per-GPU batches of $256^2$ patches, and DDP training spans the four GPUs of a node.
+
 \section{Software Engineering}
-\subsection{Code Structure}
- 
-Executables and virtual environments are kept in the cluster's \texttt{HOME} directory, which is persistent and backed up but subject to a strict storage quota. This split is deliberate: the code and its environment are exactly the things that must survive between sessions and be rebuildable on demand, so they belong in the small, safe, backed-up \texttt{HOME}, whereas simulation snapshots, shell maps, per-job logs, and diagnostic plots are bulk, regenerable output that is instead written to \texttt{SCRATCH}, which trades that persistence for effectively unbounded (though periodically purged) capacity -- exactly the trade-off that disposable intermediate output should make. Keeping the full log of every submission proved valuable both for debugging and for later cross-run comparison, since a run's log is often the only remaining record of exactly which configuration produced a given output. The CosmoGridV1 reference dataset ($\sim110$~TB) was transferred to the CSCS entry point with a dedicated Globus transfer job: at this scale, an interactive, single-stream copy would be both too slow and too fragile, since a single dropped connection partway through could force the transfer to restart from scratch, whereas a managed transfer job can run unattended and recover from such interruptions on its own.
- 
+\subsection{Code and Data Layout}
+
+Executables and virtual environments live in the cluster's backed-up but quota-limited \texttt{HOME}; simulation snapshots, shell maps, per-job logs, and diagnostic plots -- bulk, regenerable output -- go to \texttt{SCRATCH}, which trades persistence for effectively unbounded (periodically purged) capacity. Keeping every submission's full log proved valuable for debugging and cross-run comparison alike: a run's log is often the only remaining record of exactly which configuration produced a given output. The CosmoGridV1 reference dataset ($\sim110$~TB) was transferred to CSCS with a managed Globus transfer job, which runs unattended and recovers from dropped connections -- an interactive single-stream copy at this scale would be both too slow and too fragile.
+
 \subsection{Job Scheduling and Submission}
- 
-Every Python script is paired with a Slurm batch script. The Python entry point is written to run unchanged both locally and on the cluster, while the accompanying batch script requests the resources and captures the output; keeping the two separate means the same driver used for the small local tests of Sec.~\ref{sec:local_dev} is also what eventually runs, unmodified, on a full production allocation, with only the surrounding batch script changing. The same job can then be launched interactively (\texttt{bash}, for fast monitoring directly in the terminal) or submitted to the queue (\texttt{sbatch}, to run detached and log to file) -- interactive launches being the natural continuation of local debugging once a job needs cluster-scale resources, and queued submission being reserved for runs that are expected to actually take long enough to justify running unattended.
- 
-Each batch script follows the same two-part layout. The first part is a header of \texttt{\#SBATCH} directives that declares the resource request to the scheduler, and the second is a short execution body that prepares the environment and launches the driver. The header groups naturally into three concerns:
-\begin{itemize}
-  \item \textbf{Resources} -- how much hardware to reserve: the number of \texttt{nodes}, the GPUs per node (\texttt{gres=gpu}), the task layout (\texttt{ntasks-per-node}), \texttt{exclusive} node access, and a wall-clock \texttt{time} limit after which the job is killed.
-  \item \textbf{Accounting} -- where the allocation is charged and queued: the \texttt{account} and the \texttt{partition}.
-  \item \textbf{Bookkeeping} -- where results and diagnostics go: a human-readable \texttt{job-name}, the working directory (\texttt{chdir}), and the \texttt{output}/\texttt{error} log paths, where \texttt{\%j} expands to the unique job ID so that concurrent runs never overwrite one another.
-\end{itemize}
-The \textbf{Resources} block also fixes what the job costs against the allocation: requesting $n_{\mathrm{nodes}}$ nodes for a wall-clock time $t$ is billed as
+
+Every Python driver is paired with a Slurm batch script: the driver runs unchanged from the local tests of Sec.~\ref{sec:local_dev} up to a production allocation, while only the surrounding batch script changes. Jobs are launched interactively (\texttt{bash}) for fast-turnaround debugging or queued (\texttt{sbatch}) for long unattended runs. Each batch script follows the same two-part layout (Appendix~\ref{app:slurm}): a header of \texttt{\#SBATCH} directives declaring \emph{resources} (nodes, GPUs, task layout, exclusivity, wall-clock limit), \emph{accounting} (account, partition), and \emph{bookkeeping} (job name, working directory, \texttt{\%j}-tagged log paths so concurrent runs never overwrite each other) -- followed by a short execution body that activates the code-specific environment, fixes input paths (e.g.\ the \texttt{CosmoML.tipsy} IC of Sec.~\ref{sec:ic_generation}), and sets the physical parameters as shell variables (\texttt{RES=832}, \texttt{RES\_PM=1664}, \texttt{BOXSIZE=900.0}).
+
+The resource header also fixes the job's cost against the allocation,
 \begin{equation}
     C = n_{\mathrm{nodes}} \times t \quad [\text{node-hours}],
     \label{eq:node_hours}
 \end{equation}
-regardless of how much of that time is actually spent computing rather than sitting idle, which is exactly why the interactive/queued distinction above matters in practice: short, single-node interactive sessions are used for debugging, where the actual compute is brief and the goal is a fast turnaround rather than efficient use of Eq.~\eqref{eq:node_hours}, while \texttt{exclusive}, multi-node allocations with a generous \texttt{time} limit are reserved for production runs, where the requested resources are what the run is actually expected to use. A representative submission script is shown below.
+billed regardless of how much of $t$ is spent computing -- which is exactly why short single-node interactive sessions are used for debugging and exclusive multi-node allocations are reserved for production. One detail keeps the scripts scalable: the header reserves one task per node, and the execution body computes the real degree of parallelism as one process per GPU, \texttt{NTASKS=\$((SLURM\_NNODES * 4))}, passed explicitly to \texttt{srun}. Scaling a job up therefore means editing a single \texttt{--nodes} line; the process-per-GPU launch follows automatically.
 
-The execution body is short, but it is doing three distinct jobs before the driver ever starts. Giving here an concrete example of the \textsc{Disco} run. First, it activates the \textsc{disco}-specific environment (\texttt{miniforge}/\texttt{conda activate vir\_env}) -- the per-code environment split motivated in Sec.~\ref{sec:local_dev}, made concrete here as the very first thing the job does. Second, it fixes the paths the driver needs: \texttt{IC\_FILE} points to \texttt{CosmoML.tipsy}, the backscaled \textsc{PkdGrav3} initial condition of Sec.~\ref{sec:ic_generation}, handed to \textsc{disco} in the \texttt{tipsy} format, and \texttt{PARAM\_FILE} points to the run's configuration. Third, it sets the physical run parameters as ordinary shell variables rather than burying them in the driver itself, so that the same script is reused for different configurations. \texttt{RES=832} and \texttt{BOXSIZE=900.0} are exactly the CosmoGridV1 particle count and box size already fixed in Sec.~\ref{sec:local_dev}, while \texttt{RES\_PM=1664} sets \textsc{disco}'s particle-mesh grid to exactly twice that resolution per dimension ($1664 = 2\times832$) -- the finer force mesh whose memory cost is exactly what the estimate in Sec.~\ref{sec:local_dev} is built around.
- 
-The task count passed to \texttt{srun} is computed, rather than hard-coded, for the same reason. The header itself only reserves \texttt{--ntasks-per-node=1}, so Slurm's own bookkeeping treats the job as one task per node; the actual degree of parallelism -- one process per GPU -- is left to the execution body, which reads the number of nodes Slurm actually granted (\texttt{SLURM\_NNODES}) and multiplies it by the four GPUs requested per node (\texttt{--gres=gpu:4}) to get \texttt{NTASKS=\$((SLURM\_NNODES * 4))}. Passing this computed value explicitly to \texttt{srun --ntasks} is what lets \texttt{--nodes} in the header be the only thing that needs to change to scale the same script from the two-node example shown here to a larger allocation: the task count, and hence the process-per-GPU launch, follows automatically.
- 
-Because only the header and these few shell variables change between runs, adapting a job to a new configuration -- more nodes, a different resolution, a longer time limit, or a different output directory -- amounts to editing a handful of lines, while the underlying Python driver invoked by \texttt{simulation\_run} is reused unchanged.
-\subsection{Version Control (GitHub)}
- 
-The whole project -- the analysis scripts together with the modified \textsc{disco} that includes the shell builder -- is kept in a dedicated Git repository. Beyond the usual protection against machine failure, this gives a reliable way to return to a known-good state when an experimental change breaks the pipeline, and keeps the many configuration variants organised.
+\subsection{Version Control}
+
+The whole project -- the analysis and ML pipelines together with the modified Disco-DJ containing the shell builder -- is kept in a dedicated Git repository. Beyond protection against machine failure, this gives a reliable way back to a known-good state when an experimental change breaks the pipeline, and keeps the many configuration variants organised.
+
 \chapter{Results}
 
 \chapter{Conclusion}
@@ -452,45 +926,45 @@ The whole project -- the analysis scripts together with the modified \textsc{dis
   linenos=false,
 ]{bash}
 #!/bin/bash
- 
+
 # =========== Job settings ===========
- 
+
 # --- Resources ---
 #SBATCH --nodes=2
 #SBATCH --exclusive
 #SBATCH --ntasks-per-node=1
 #SBATCH --gres=gpu:4
 #SBATCH --time=01:00:00
- 
+
 # --- Accounting ---
 #SBATCH --account=sk037
 #SBATCH --partition=normal
- 
+
 # --- Bookkeeping ---
 #SBATCH --job-name=run_disco
 #SBATCH --output=../run_disco-%j.out
 #SBATCH --error=../run_disco-%j.err
- 
+
 # =========== Execution body ===========
- 
+
 # 1. Activate the code-specific virtual environment
 source miniforge/bin/activate
 conda activate vir_env
- 
+
 # 2. Paths to input files
 IC_FILE=../CosmoML.tipsy
 PARAM_FILE=../params.yml
 # ... additional paths as needed
- 
+
 # 3. Simulation parameters
 RES=832
 RES_PM=1664
 BOXSIZE=900.0
 # ... additional parameters as needed
- 
+
 # 4. Run the simulation
 NTASKS=$((SLURM_NNODES * 4))
- 
+
 srun --ntasks="${NTASKS}" \
     simulation_run \
     --ics-file "${IC_FILE}" \
@@ -499,12 +973,10 @@ srun --ntasks="${NTASKS}" \
     --res-pm "${RES_PM}" \
     --boxsize "${BOXSIZE}" \
     # ... additional flags
- 
+
 \end{minted}
 \end{minipage}
-\caption{SLURM job script for a \textsc{disco} run.}
+\caption{SLURM job script for a Disco-DJ run.}
 \end{listing}
-
-
 
 \end{document}
