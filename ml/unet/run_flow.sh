@@ -47,7 +47,7 @@
 
 export UENV_REPO_PATH=/capstor/scratch/cscs/damrein/.uenv-images
 VENV=/capstor/scratch/cscs/damrein/venvs/sphereflow
-DATA_ROOT="/capstor/scratch/cscs/damrein/grid"
+DATA_ROOT="${DATA_ROOT:-/capstor/scratch/cscs/damrein/grid}"
 # CosmoGridV1_metainfo.h5 (the cosmological-parameter catalog make_patch_dataset.py
 # needs) lives ONLY under cosmogridv1/, not replicated under grid/ or any other
 # subset dir -- pass it separately regardless of which DATA_ROOT is active (this is
@@ -59,8 +59,16 @@ UNET=/users/damrein/masterProject/ml/unet
 NSIDE=${NSIDE:-512}
 PATCH_SIZE=${PATCH_SIZE:-256}
 NPATCH=${NPATCH:-100000}
-EPOCHS=${EPOCHS:-200}
+EPOCHS=${EPOCHS:-100}
 LEARNING_RATE=${LEARNING_RATE:-3e-5}
+# NO_LR_SCALING=1 drops train_flow.py's world_size multiplier (16 GPUs -> the
+# configured LEARNING_RATE is used AS-IS, not x16 = 4.8e-4). Recurring pattern
+# across pipelines (sphereflow job 4251268, diffusion job 4256969): scaled LR with
+# no warmup caused a large early-training instability spike. Default ON (0) here
+# means scaling is STILL applied by default -- set NO_LR_SCALING=1 to test the
+# unscaled LR directly.
+NO_LR_SCALING=${NO_LR_SCALING:-1}
+NO_LR_SCALING_FLAG=""; [ "${NO_LR_SCALING}" = "1" ] && NO_LR_SCALING_FLAG="--no-lr-scaling"
 BATCH=${BATCH:-32}
 BASE_CH=${BASE_CH:-32}
 STEPS=${STEPS:-8}
@@ -95,12 +103,16 @@ RUN_NAME=${RUN_NAME:-flow_${SPACE}_${DATA_TAG}_nside${NSIDE}_patch${PATCH_SIZE}_
 # faster per shell), so it fits comfortably. KAPPA=0 skips it.
 KAPPA=${KAPPA:-1}
 KAPPA_FLAG=""; [ "${KAPPA}" = "1" ] && KAPPA_FLAG="--kappa"
+# held-out cosmologies used by BOTH the zbin-grid diagnostic (--max-cosmologies)
+# and the kappa diagnostic (--kappa-max-cosmologies) -- apply_flow.py defaults
+# each to 3 independently; one knob here keeps them in sync unless overridden.
+MAX_COSMO=${MAX_COSMO:-30}
 # High-pass residual formulation (2026-07-21, ported from diffusion/run_diffusion.sh
 # after comparing all three pipelines' cl_ratio_by_zbin_grid/kappa_cl_pctile_band --
 # see flow_model.py's module docstring): the flow target now only adds small-scale
 # content, large scales pinned to the low map. Passed to BOTH train (builds the
 # target) and, via the checkpoint, apply (composes the corrected map).
-HP_CUTOFF=${HP_CUTOFF:-0.10}
+HP_CUTOFF=${HP_CUTOFF:-0.05}
 HP_TRANSITION=${HP_TRANSITION:-0.20}
 # 'delta' (linear overdensity) is the space analysis.full_sky.od_cl actually
 # measures -- same fix diffusion made 2026-07-18 (see dataset.raw_to_delta_pair).
@@ -166,7 +178,7 @@ srun --nodes=${SLURM_NNODES} --ntasks-per-node=1 --gres=gpu:4 uenv run pytorch/v
     --out-dir   '${OUT_DIR}' \
     --epochs ${EPOCHS} --batch-size ${BATCH} --base-channels ${BASE_CH} --lr ${LEARNING_RATE} \
     --hp-cutoff ${HP_CUTOFF} --hp-transition ${HP_TRANSITION} --space ${SPACE} \
-    --num-workers $((SLURM_CPUS_PER_TASK / 4)) ${COSMO_FLAG}
+    --num-workers $((SLURM_CPUS_PER_TASK / 4)) ${COSMO_FLAG} ${NO_LR_SCALING_FLAG}
 "
 
 # ---- stage 3: loss/val plot + apply on held-out test patches + full-sky Cl (glue) ----
@@ -208,6 +220,7 @@ srun --ntasks=${NNODES} --ntasks-per-node=1 --gres=gpu:${GPUS_PER_NODE} uenv run
     --steps ${STEPS} \
     --data-root '${DATA_ROOT}' \
     --shell-indices --example-shells 5 10 15 30 50 \
-    --fullsky-patch-size ${PATCH_SIZE} ${KAPPA_FLAG}
+    --fullsky-patch-size ${PATCH_SIZE} ${KAPPA_FLAG} \
+    --max-cosmologies ${MAX_COSMO} --kappa-max-cosmologies ${MAX_COSMO}
 "
 echo "unet-flow job ${SLURM_JOB_ID} finished at $(date) -> ${OUT_DIR}/eval"

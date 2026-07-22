@@ -301,7 +301,31 @@ def edm_loss(precond: EDMPrecond, x1: torch.Tensor, cond: torch.Tensor, sigma_da
     `precond.sigma_data` because the caller may pass a DDP-wrapped precond -- DDP
     only forwards `.forward()`, not arbitrary attributes, so `precond.sigma_data`
     raises AttributeError under `torch.nn.parallel.DistributedDataParallel`. The
-    caller already knows sigma_data (it's what EDMPrecond was constructed with)."""
+    caller already knows sigma_data (it's what EDMPrecond was constructed with).
+
+    PER-PATCH VARIANCE NORMALIZATION (2026-07-21, on top of EDM's own sigma-level
+    `weight` above -- the two address different sources of scale variation): a
+    dense/well-resolved shell's TRUE high-pass residual (x1) is naturally tiny, so
+    without this, plain per-noise-level-weighted MSE still gives such patches far
+    weaker gradient signal than a sparse shell's large residual -- the denoiser
+    never gets pushed to calibrate "the right answer is near-zero here" precisely,
+    showing up as a persistent few-percent under/overshoot in the densest-shell
+    Cl-ratio panel that cutoff/transition tuning and more epochs both failed to fix
+    (see [[deepsphere-shell-correction]] memory). Dividing by each patch's own x1
+    variance makes every patch contribute comparably in RELATIVE terms regardless
+    of how much correction that shell actually needs.
+
+    BOUNDED, BATCH-RELATIVE (2026-07-21, fixed same day after job 4256969 showed
+    the loss oscillating 40-70 for all 200 epochs with no convergence trend): a
+    raw `1/(patch_var + eps)` divisor is UNBOUNDED for any patch whose true
+    residual variance happens to be near-zero, and that compounds MULTIPLICATIVELY
+    with EDM's own `weight` (which already has real dynamic range by design) --
+    together they occasionally produce huge, noisy loss/gradient spikes that
+    prevented convergence. Normalizing patch_var by the BATCH's own mean (so a
+    "typical" patch gets a reweighting factor of 1) and clamping the result to
+    >=0.1 (so no patch can be upweighted by more than 10x) keeps the SAME
+    direction of correction -- low-variance patches still get relatively more
+    weight -- without the unbounded blowup."""
     bs = x1.shape[0]
     rnd = torch.randn(bs, device=x1.device, dtype=torch.float32)
     sigma = torch.exp(p_mean + p_std * rnd).to(x1.dtype).reshape(-1, 1, 1, 1)
@@ -311,7 +335,9 @@ def edm_loss(precond: EDMPrecond, x1: torch.Tensor, cond: torch.Tensor, sigma_da
     noise = torch.randn_like(x1) * sigma
     x_t = x1 + noise
     d_x = precond(x_t, sigma.flatten(), cond, cosmo_z=cosmo_z)
-    return (weight * (d_x - x1) ** 2).mean()
+    patch_var = x1.var(dim=(1, 2, 3), keepdim=True)
+    rel_var = torch.clamp(patch_var / (patch_var.mean() + 1e-8), min=0.1)
+    return (weight * (d_x - x1) ** 2 / rel_var).mean()
 
 
 @torch.no_grad()

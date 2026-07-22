@@ -39,7 +39,7 @@ def main():
     out = Path(args.out or (Path(args.run_dir) / "loss_curve.png"))
     plot_train_val_loss(
         ep, tr, va, out, xlabel="epoch", ylabel="flow-matching MSE loss",
-        val_label="validation (held-out cosmologies)",
+        val_label="validation (held-out cosmologies)", skip_first=1,
         formula="Conditional flow matching (low->high): train vs validation\n"
                 r"loss $=\langle\,\|v_\theta(x_t,t)-(x_1-x_0)\|^2\,\rangle$, "
                 r"$x_0$=low, $x_1$=high, $x_t=(1-t)x_0+t x_1$")

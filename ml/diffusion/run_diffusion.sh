@@ -51,7 +51,7 @@
 
 export UENV_REPO_PATH=/capstor/scratch/cscs/damrein/.uenv-images
 VENV=/capstor/scratch/cscs/damrein/venvs/sphereflow
-DATA_ROOT="/capstor/scratch/cscs/damrein/grid"
+DATA_ROOT="${DATA_ROOT:-/capstor/scratch/cscs/damrein/grid}"
 METAINFO_DIR="/capstor/scratch/cscs/damrein/cosmogridv1"
 DIFFUSION=/users/damrein/masterProject/ml/diffusion
 
@@ -67,6 +67,15 @@ EPOCHS=${EPOCHS:-200}
 BATCH=${BATCH:-32}
 BASE_CH=${BASE_CH:-32}
 LEARNING_RATE=${LEARNING_RATE:-3e-5}
+# NO_LR_SCALING=1 drops train_diffusion.py's world_size multiplier (16 GPUs -> the
+# configured LEARNING_RATE is used AS-IS, not x16 = 4.8e-4). Recurring pattern
+# across pipelines (sphereflow job 4251268, this pipeline's own job 4256969):
+# scaled LR with no warmup caused a large early-training instability spike (and,
+# for 4256969, a loss that oscillated without converging for all 200 epochs).
+# Default ON (0) here means scaling is STILL applied by default -- set
+# NO_LR_SCALING=1 to test the unscaled LR directly.
+NO_LR_SCALING=${NO_LR_SCALING:-1}
+NO_LR_SCALING_FLAG=""; [ "${NO_LR_SCALING}" = "1" ] && NO_LR_SCALING_FLAG="--no-lr-scaling"
 # EDM sampler: far more steps than the flow pipelines' ~8 -- see model.sample_heun.
 STEPS=${STEPS:-32}
 SIGMA_MIN=${SIGMA_MIN:-0.002}
@@ -171,7 +180,7 @@ srun --nodes=${SLURM_NNODES} --ntasks-per-node=1 --gres=gpu:4 uenv run pytorch/v
     --epochs ${EPOCHS} --batch-size ${BATCH} --base-channels ${BASE_CH} --lr ${LEARNING_RATE} \
     --p-mean ${P_MEAN} --p-std ${P_STD} ${SIGMA_DATA_FLAG} \
     --hp-cutoff ${HP_CUTOFF} --hp-transition ${HP_TRANSITION} --space ${SPACE} \
-    --num-workers $((SLURM_CPUS_PER_TASK / 4)) ${COSMO_FLAG}
+    --num-workers $((SLURM_CPUS_PER_TASK / 4)) ${COSMO_FLAG} ${NO_LR_SCALING_FLAG}
 "
 
 # ---- stage 3: loss/val plot + apply on held-out test patches + full-sky Cl (glue) ----

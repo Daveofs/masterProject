@@ -58,7 +58,7 @@ DIFFUSION=/users/damrein/masterProject/ml/diffusion
 # small-scale numbers are misleading, see dataset.raw_to_delta_pair.)
 DATA_ROOT=${DATA_ROOT:-/capstor/scratch/cscs/damrein/grid}
 PATCH_DIR=${PATCH_DIR:-/capstor/scratch/cscs/damrein/outputs/flowpatches/grid_nside512_256_100000}
-OUT_DIR=${OUT_DIR:-/capstor/scratch/cscs/damrein/outputs/diffusionruns/diffusion_delta_grid_nside512_patch256_n100000_ch32_b32_e200_lr3e-5_}
+OUT_DIR=${OUT_DIR:-/capstor/scratch/cscs/damrein/outputs/flowruns/flow_delta_grid_nside512_patch256_n100000_ch32_b32_e200_lr3e-5_hp0.10_0.20_lossw}
 
 # EDM sampler settings -- must match how you want to sample, NOT stored in the
 # checkpoint (unlike hp_cutoff/hp_transition/sigma_data, which apply_diffusion.py

@@ -165,6 +165,18 @@ DATA=/capstor/scratch/cscs/damrein/grid
 # yet confirmed to fix the "washed out" patch look (2026-07-21) -- this is the
 # knob to test that hypothesis with, not a validated fix.
 LMAX=${LMAX:-6143}
+# Stage 1's per-node SHT worker count. 20 was sized for lmax=3000; each worker's
+# map2alm/alm2map memory footprint grows with lmax (roughly linearly, at fixed
+# nside=2048), so running 20 of them CONCURRENTLY at a much higher lmax can
+# exceed a node's memory -- confirmed 2026-07-21 (job 4255910, lmax=6143):
+# stage 1 OOM-killed after 14m37s with 0/198 shells done (sacct: 710GB peak RSS
+# on the unwrapped main-script step), which then cascaded through every later
+# stage as "file not found" (nothing to gather/merge/emulate). Scale down
+# automatically above lmax=3000 (proportionally, floor of 4); override
+# explicitly if this still isn't right for your node's actual memory.
+NUM_WORKERS_DEFAULT=$(( LMAX > 3000 ? 20 * 3000 / LMAX : 20 ))
+[ "$NUM_WORKERS_DEFAULT" -lt 4 ] && NUM_WORKERS_DEFAULT=4
+NUM_WORKERS=${NUM_WORKERS:-$NUM_WORKERS_DEFAULT}
 # How to build T(ell, shell): "fit" (train-averaged) or "emulate" (MLP emulator).
 METHOD=${METHOD:-emulate}
 # Emulator hyperparameters (METHOD=emulate only).
@@ -216,13 +228,43 @@ echo "==== transfer-function pipeline | data=$DATA | lmax=$LMAX | method=$METHOD
 echo "held out from training (${#COSMOS_ARR[@]}): ${COSMOS_ARR[@]}"
 echo "evaluated in stages 2b/3 (${#EVAL_COSMOS_ARR[@]} of them, MAX_COSMOLOGIES=$MAX_COSMOLOGIES): ${EVAL_COSMOS_ARR[@]}"
 
-# ---- 1. Preprocess alms (skips runs already done). More workers -- full node. ----
-echo "[stage 1] preprocessing alms"
-OMP_NUM_THREADS=14 python preprocess/preprocess_alms.py \
-    --data-dir "$DATA" \
-    --low-glob "disco_sim/*/disco_shells_nside=2048.npz" \
-    --high-npz compressed_shells.npz \
-    --lmax $LMAX --num-workers 20
+# ---- 1. Preprocess alms (skips runs already done). Embarrassingly parallel
+# across cosmologies (process_single_run's own skip-if-done check means
+# concurrent shards never touch the same output file) -- sharded across every
+# allocated node when N_NODES>1, same srun-background+wait pattern as stages
+# 2/3, instead of the whole dataset landing on one node. OMP_NUM_THREADS is
+# sized so NUM_WORKERS*OMP_NUM_THREADS doesn't oversubscribe a node's 128 cpus.
+OMP_NUM_THREADS_PP=$(( 128 / NUM_WORKERS ))
+[ "$OMP_NUM_THREADS_PP" -lt 1 ] && OMP_NUM_THREADS_PP=1
+if [ "$N_NODES" -gt 1 ]; then
+    echo "[stage 1] preprocessing alms across $N_NODES nodes (sharded, $NUM_WORKERS workers/node)"
+    for ((i = 0; i < N_NODES; i++)); do
+        srun --nodes=1 --ntasks=1 --exclusive bash -c "
+            OMP_NUM_THREADS=$OMP_NUM_THREADS_PP python preprocess/preprocess_alms.py \
+                --data-dir '$DATA' \
+                --low-glob 'disco_sim/*/disco_shells_nside=2048.npz' \
+                --high-npz compressed_shells.npz \
+                --lmax $LMAX --num-workers $NUM_WORKERS \
+                --shard-index $i --num-shards $N_NODES
+        " &
+    done
+    wait
+else
+    echo "[stage 1] preprocessing alms ($NUM_WORKERS workers)"
+    OMP_NUM_THREADS=$OMP_NUM_THREADS_PP python preprocess/preprocess_alms.py \
+        --data-dir "$DATA" \
+        --low-glob "disco_sim/*/disco_shells_nside=2048.npz" \
+        --high-npz compressed_shells.npz \
+        --lmax $LMAX --num-workers $NUM_WORKERS
+fi
+N_ALM_FILES=$(find "$DATA" -maxdepth 3 -name "low_alms_lmax${LMAX}.npy" 2>/dev/null | wc -l)
+if [ "$N_ALM_FILES" -eq 0 ]; then
+    echo "ERROR: stage 1 produced no low_alms_lmax${LMAX}.npy anywhere under $DATA -- "
+    echo "aborting before stage 2 (see slurm-${SLURM_JOB_ID}.err for the real traceback, "
+    echo "e.g. a BrokenProcessPool from an OOM'd worker -- try a smaller NUM_WORKERS)."
+    exit 1
+fi
+echo "[stage 1] done -- $N_ALM_FILES low_alms_lmax${LMAX}.npy files present"
 
 # ---- 2. Build T(ell, shell) via the chosen method (held-out cosmologies left out) ----
 # OMP_NUM_THREADS=128 here (not the file-wide default of 8): the gather loop in
@@ -247,16 +289,23 @@ if [ "$N_NODES" -gt 1 ]; then
     done
     wait
     SHARD_FILES=""
-    for ((i = 0; i < N_NODES; i++)); do SHARD_FILES="$SHARD_FILES $OUT/shard_${i}.pkl"; done
+    for ((i = 0; i < N_NODES; i++)); do
+        [ -f "$OUT/shard_${i}.pkl" ] || {
+            echo "ERROR: $OUT/shard_${i}.pkl missing -- that node's gather-shard failed (see slurm-${SLURM_JOB_ID}.err), aborting before gather-merge."
+            exit 1
+        }
+        SHARD_FILES="$SHARD_FILES $OUT/shard_${i}.pkl"
+    done
     if [ "$METHOD" = "emulate" ]; then
         echo "[stage 2 merge] training MLP emulator from $N_NODES shards"
         OMP_NUM_THREADS=128 python transfer/transfer_function.py gather-merge \
             --shards $SHARD_FILES --hidden "$HIDDEN" --max-iter $MAX_ITER \
-            --out "$OUT/emulator.pkl"
+            --out "$OUT/emulator.pkl" || { echo "ERROR: gather-merge failed, aborting before stage 2b/3."; exit 1; }
     else
         echo "[stage 2 merge] fitting T(ell,shell) from $N_NODES shards"
         python transfer/transfer_function.py gather-merge \
-            --shards $SHARD_FILES --out "$OUT/transfer.npz"
+            --shards $SHARD_FILES --out "$OUT/transfer.npz" \
+            || { echo "ERROR: gather-merge failed, aborting before stage 2b/3."; exit 1; }
     fi
 elif [ "$METHOD" = "emulate" ]; then
     echo "[stage 2] training MLP emulator (hidden=$HIDDEN, max_iter=$MAX_ITER, sample_frac=$SAMPLE_FRAC)"

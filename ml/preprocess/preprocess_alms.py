@@ -93,6 +93,15 @@ def main():
                         help="Write low_log_alms_lmax*.npy/high_log_alms_lmax*.npy "
                              "(map2alm of log1p(rho) instead of raw rho) alongside "
                              "-- doesn't touch/require the raw-density alm files.")
+    parser.add_argument("--shard-index", type=int, default=0,
+                        help="Multi-node: process only leaf_dirs[shard_index::"
+                             "num_shards] -- each shard writes to its OWN "
+                             "cosmology's output files (process_single_run's "
+                             "existing skip-if-done check means no two shards "
+                             "ever touch the same file), so N shards can run "
+                             "concurrently on N nodes with no coordination "
+                             "needed beyond a disjoint index split.")
+    parser.add_argument("--num-shards", type=int, default=1)
     args = parser.parse_args()
 
     data_dir = Path(args.data_dir)
@@ -109,6 +118,11 @@ def main():
             leaf_dirs.extend(run_dirs)
         else:
             leaf_dirs.append(sd)
+
+    if args.num_shards > 1:
+        leaf_dirs = leaf_dirs[args.shard_index::args.num_shards]
+        print(f"[shard {args.shard_index}/{args.num_shards}] {len(leaf_dirs)} leaf dirs "
+              f"assigned to this shard", flush=True)
 
     tasks = []
     for ld in leaf_dirs:

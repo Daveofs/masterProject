@@ -72,7 +72,28 @@ def run_epoch(model, loader, optimizer, device, train: bool, epoch: int,
             target_v = x1 - x0
 
             pred_v = model(xt, t, cosmo_z=cosmo_z)
-            loss = torch.nn.functional.mse_loss(pred_v, target_v)
+            # Per-patch variance normalization (2026-07-21): a dense/well-resolved
+            # shell's TRUE residual is naturally tiny, so plain MSE gives it far
+            # weaker gradient signal than a sparse shell's large residual -- the
+            # network learns sparse-shell corrections well but never gets pushed to
+            # calibrate the "correct answer is near-zero here" case precisely,
+            # showing up as a persistent few-percent over/undershoot in the
+            # densest-shell Cl-ratio panel that cutoff/transition tuning and more
+            # epochs both failed to fix (see [[deepsphere-shell-correction]] memory).
+            #
+            # BOUNDED, BATCH-RELATIVE (2026-07-21, fixed same day -- diffusion's own
+            # version of this raw-epsilon-floored divisor caused a non-converging,
+            # oscillating loss when it compounded with EDM's own per-noise-level
+            # weight; unet has no such second weight to compound with, but a raw
+            # divisor is still fragile and the loss barely moved epoch-to-epoch,
+            # 0.97->0.89 over 200 epochs -- suspiciously flat, consistent with an
+            # unbounded reweighting washing out useful gradient signal). Normalizing
+            # by the BATCH's own mean variance (a "typical" patch gets weight 1) and
+            # clamping to >=0.1 (at most 10x upweighting) keeps the same direction
+            # of correction without the unbounded blowup.
+            patch_var = target_v.var(dim=(1, 2, 3), keepdim=True)
+            rel_var = torch.clamp(patch_var / (patch_var.mean() + 1e-8), min=0.1)
+            loss = (((pred_v - target_v) ** 2) / rel_var).mean()
 
             if train:
                 optimizer.zero_grad(set_to_none=True)

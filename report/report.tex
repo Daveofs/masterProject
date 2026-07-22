@@ -149,7 +149,7 @@ Applying a CNN directly on the sphere, however, is not a straightforward extensi
 
 A related pattern appears in the literature on generating constrained realisations of Gaussian random fields: as the grid density grows and the number of constraints increases beyond a few, iterative solvers of this kind converge so slowly that they become similarly impractical, which motivated a variant that instead expands the random field in a spherical-harmonic basis rather than a plane-wave one \cite{hoffman_constrained_1991}. The same change of basis is attractive here, and is made practical by the fast spherical-harmonic transform (SHT) implemented for the HEALPix pixelisation \cite{gorski_healpix_2005}, which can be used to reduce the full-resolution map to a lower-dimensional problem. Fourier-domain representations have more generally played a role in deep learning: they appear, for instance, in the proof of the universal approximation theorem, have empirically been used to speed up convolutional neural networks, and have motivated network architectures built directly around the Fourier transform or sinusoidal activation functions \cite{li_fourier_2021}.
 
-[Rework] A second, architecture-level route to the same memory constraint is to avoid processing the full map at once. The overlap-tile strategy introduced for image segmentation allows the seamless segmentation of arbitrarily large images by splitting them into patches and extrapolating the missing context at each patch's border by mirroring the input image; this tiling is what makes it possible to apply a network to images whose usable resolution would otherwise be limited directly by GPU memory \cite{ronneberger_u-net_2015}.
+[Rework] A second, architecture-level route to the same memory constraint is to avoid processing the full map at once. The patch-strategy allows the seamless segmentation of arbitrarily large images by splitting them into patches and extrapolating the missing context at each patch's border, what makes it possible to apply a network to images whose usable resolution would otherwise be limited directly by GPU memory \cite{ronneberger_u-net_2015}.
 
 \subsection{Architectures}
 \label{subsec:architectures}
@@ -158,21 +158,6 @@ A related pattern appears in the literature on generating constrained realisatio
 \label{sssec:unet-arch}
 
 A common assumption at the time was that training a deep network successfully requires many thousands of annotated samples; the U-Net architecture instead targets the opposite regime \cite{ronneberger_u-net_2015}. Structurally, this is achieved with two complementary halves: a contracting path whose role is to capture context, and a symmetric expanding path whose role is to recover precise, pixel-level localization \cite{ronneberger_u-net_2015}.
-
-\begin{tikzpicture}[
-    node/.style={
-        draw, rounded corners, fill=blue!10,
-        drop shadow, minimum width=2.5cm, minimum height=1cm,
-        font=\sffamily
-    },
-    arrow/.style={-{Stealth[length=3mm]}, thick, color=gray!70}
-]
-  \node[node] (A) at (0,0) {placeholder};
-  \node[node] (B) at (4,0) {placeholder};
-  \node[node] (C) at (8,0) {placeholder};
-  \draw[arrow] (A) -- (B);
-  \draw[arrow] (B) -- (C);
-\end{tikzpicture}
  
 [Rework] The two paths achieve this division of labour through complementary operations. In the contracting path, each pooling step halves the spatial resolution while the accompanying channel-doubling increases the number of feature maps, so that deeper layers operate on a coarser grid but each unit on that grid summarises information pooled from an increasingly large region of the input -- this is what builds up contextual, semantic information about what is present in a region, at the cost of exactly where within that region. The expanding path is built to recover that lost spatial precision: each upsampling step undoes the resolution loss, and is paired with a concatenation of the corresponding, higher-resolution feature map still held from the contracting path -- a skip connection that lets fine, precisely localized detail flow directly from the contracting side to the expanding side, rather than having to be reconstructed from the coarse, downsampled representation alone. Cropping the skipped feature map before concatenation is needed only because every unpadded convolution in the network shrinks the feature map slightly, so the two feature maps being merged would otherwise not match in size. \cite{ronneberger_u-net_2015}
 
