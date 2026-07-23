@@ -50,6 +50,11 @@ UNET=/users/damrein/masterProject/ml/unet
 DATA_ROOT=${DATA_ROOT:-/capstor/scratch/cscs/damrein/grid}
 PATCH_DIR=${PATCH_DIR:-/capstor/scratch/cscs/damrein/outputs/flowpatches/grid_nside512_256_100000}
 OUT_DIR=${OUT_DIR:-/capstor/scratch/cscs/damrein/outputs/flowruns/flow_delta_grid_nside512_patch256_n100000_ch32_b32_e200_lr3e-5_hp0.10_0.20_lossw}
+# Where the figures go (default: the run's own eval/). Override for an A/B rerun
+# against a checkpoint whose eval/ already holds the baseline you want to KEEP --
+# e.g. EVAL_DIR=${OUT_DIR}/eval_taper32 for the taper_power A/B, so the existing
+# taper=1 figures survive for side-by-side comparison instead of being overwritten.
+EVAL_DIR=${EVAL_DIR:-${OUT_DIR}/eval}
 
 export PYTHONUNBUFFERED=1
 # GPUS_PER_NODE x SLURM_NNODES = total ranks -- apply_flow.py splits its two
@@ -116,11 +121,11 @@ srun --ntasks=${NNODES} --ntasks-per-node=1 --gres=gpu:${GPUS_PER_NODE} uenv run
     ${UNET}/apply_flow.py \
     --patch-dir '${PATCH_DIR}' \
     --model     '${OUT_DIR}/best.pt' \
-    --out-dir   '${OUT_DIR}/eval' \
+    --out-dir   '${EVAL_DIR}' \
     --steps 8 \
     --data-root '${DATA_ROOT}' \
     --shell-indices --example-shells 5 10 15 30 50 \
     --fullsky-patch-size 256 --max-cosmologies ${MAX_COSMOLOGIES} \
     --kappa-max-cosmologies ${MAX_COSMOLOGIES} ${KAPPA_FLAG} ${AMP_FLAG} ${TAPER_POWER_FLAG}
 "
-echo "unet diagnostics-only job \${SLURM_JOB_ID} finished at \$(date) -> ${OUT_DIR}/eval"
+echo "unet diagnostics-only job \${SLURM_JOB_ID} finished at \$(date) -> ${EVAL_DIR}"

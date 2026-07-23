@@ -153,14 +153,26 @@ class PatchDataset(Dataset):
 
 def split_by_cosmo(patch_dir: str | Path, val_frac: float = 0.15, seed: int = 0):
     """Returns (train_indices, val_indices) into low.npy/high.npy, splitting whole
-    cosmologies between train and val so no cosmology appears in both."""
+    cosmologies between train and val so no cosmology appears in both.
+
+    The LAST lightcone shell is excluded from BOTH splits (2026-07-22): DISCO's low
+    map there carries only 16-65% of CosmoGrid's true counts (a truncated shell at
+    the lightcone/box edge -- the same data-quality finding that already excludes it
+    from the full-sky eval, see apply_*'s n_shells_total -= 1). Trained on anyway,
+    those pairs teach "subtract high-ell power at z~3.4" (the count deficit reads as
+    excess shot noise in delta space), and the z-conditioning cannot separate shell
+    68 (z 3.37-3.50) from shell 67 (z 3.24-3.46) -- measured result: corrected/true
+    Cl ~ 0.41-0.53 at shell 67 for ALL 30 held-out cosmologies (the panel-3
+    percentile lobe in the unet hpc0.05_hpt0.12 e200 run), on a shell whose input
+    was fine (low/true ~ 0.998)."""
     meta = np.load(Path(patch_dir) / "metadata.npy")
+    keep = meta["shell_idx"] < meta["shell_idx"].max()
     cosmos = np.unique(meta["cosmo"])
     rng = np.random.default_rng(seed)
     rng.shuffle(cosmos)
     n_val = max(1, int(round(len(cosmos) * val_frac)))
     val_cosmos = set(cosmos[:n_val])
     is_val = np.isin(meta["cosmo"], list(val_cosmos))
-    val_idx = np.where(is_val)[0]
-    train_idx = np.where(~is_val)[0]
+    val_idx = np.where(is_val & keep)[0]
+    train_idx = np.where(~is_val & keep)[0]
     return train_idx, val_idx, sorted(val_cosmos)

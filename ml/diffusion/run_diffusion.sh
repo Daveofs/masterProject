@@ -89,8 +89,8 @@ P_STD=${P_STD:-1.2}
 # (DISCO) map, fixing the large-scale kappa Cl the first full-field run destroyed.
 # Fractions of patch Nyquist. Passed to BOTH train (builds the target) and, via the
 # checkpoint, apply (composes the corrected map) -- they can't drift.
-HP_CUTOFF=${HP_CUTOFF:-0.10}
-HP_TRANSITION=${HP_TRANSITION:-0.10}
+HP_CUTOFF=${HP_CUTOFF:-0.05}
+HP_TRANSITION=${HP_TRANSITION:-0.12}
 # Field the residual is modelled in. 'delta' (linear overdensity) is the space
 # analysis.full_sky.od_cl actually measures. Training on 'log1p' was a FORMULATION BUG:
 # log1p compresses the density peaks so DISCO already looks ~correct there (low/high
@@ -111,7 +111,7 @@ if [ "${USE_COSMO_COND}" = "0" ]; then
 fi
 
 DATA_TAG=$(basename "${DATA_ROOT}")
-RUN_NAME=${RUN_NAME:-diffusion_${SPACE}_${DATA_TAG}_nside${NSIDE}_patch${PATCH_SIZE}_n${NPATCH}_ch${BASE_CH}_b${BATCH}_e${EPOCHS}_lr${LEARNING_RATE}_${COSMO_SUFFIX}}
+RUN_NAME=${RUN_NAME:-diffusion_${SPACE}_${DATA_TAG}_nside${NSIDE}_patch${PATCH_SIZE}_n${NPATCH}_ch${BASE_CH}_b${BATCH}_e${EPOCHS}_lr${LEARNING_RATE}_hpc${HP_CUTOFF}_hpt${HP_TRANSITION}${COSMO_SUFFIX}}
 KAPPA=${KAPPA:-1}
 KAPPA_FLAG=""; [ "${KAPPA}" = "1" ] && KAPPA_FLAG="--kappa"
 # Stage-3 cost knobs. Each full-sky shell reconstruction is one Heun ODE per tile, so
@@ -120,8 +120,8 @@ KAPPA_FLAG=""; [ "${KAPPA}" = "1" ] && KAPPA_FLAG="--kappa"
 # KAPPA_MAX_COSMOLOGIES x ~47 (every usable shell) -- kappa is by far the most
 # expensive section and runs LAST, so if the job runs out of time the Cl plots are
 # already written.
-MAX_COSMOLOGIES=${MAX_COSMOLOGIES:-10}
-KAPPA_MAX_COSMOLOGIES=${KAPPA_MAX_COSMOLOGIES:-10}
+MAX_COSMOLOGIES=${MAX_COSMOLOGIES:-30}
+KAPPA_MAX_COSMOLOGIES=${KAPPA_MAX_COSMOLOGIES:-30}
 N_ZBINS=${N_ZBINS:-3}
 N_SHELLS_PER_ZBIN=${N_SHELLS_PER_ZBIN:-5}
 

@@ -490,9 +490,24 @@ def plot_cosmo_param_matrix(pool: dict, held: dict, out_path,
     return out_path
 
 
+def _rolling_mean(v: np.ndarray, window: int) -> np.ndarray:
+    """Centered rolling mean, shrinking window at the edges (no NaN padding, no
+    look-ahead bias beyond what a centered window already implies) -- window=1
+    returns v unchanged."""
+    if window <= 1:
+        return v
+    half = window // 2
+    out = np.empty_like(v, dtype=np.float64)
+    for i in range(len(v)):
+        lo, hi = max(0, i - half), min(len(v), i + half + 1)
+        out[i] = v[lo:hi].mean()
+    return out
+
+
 def plot_train_val_loss(x, train_vals, val_vals, out_path, xlabel="epoch",
                         ylabel="loss", formula=None, train_label="train",
-                        val_label="validation (held-out)", skip_first=0):
+                        val_label="validation (held-out)", skip_first=0,
+                        smooth_window=1):
     """Shared train/validation loss curve -- ONE canonical figure, used identically
     by unet (plot_flow_loss.py, per-epoch flow-matching MSE) and
     transfer (transfer_function.py train(), per-iteration MLP squared-error) so the
@@ -509,7 +524,20 @@ def plot_train_val_loss(x, train_vals, val_vals, out_path, xlabel="epoch",
     magnitude above the plateau and compress every later point into a flat band even
     on the log scale. The omitted values are ANNOTATED on the figure (not silently
     dropped) so the plot stays honest about what it isn't showing. Default 0 = old
-    behavior; callers opt in."""
+    behavior; callers opt in.
+
+    smooth_window (default 1 = off, existing callers unaffected): plots a centered
+    rolling-mean curve INSTEAD of the raw per-epoch points. For diffusion's EDM loss
+    this is cosmetic, not a training fix -- 2026-07-23 found that cutting the LR 3x
+    (job diffusion_..._hpc0.05_hpt0.30, lr 3e-5->1e-5) left the sawtooth amplitude
+    essentially unchanged, which rules out optimization noise: the per-epoch mean is
+    a small-sample MC estimate of <lambda(sigma)*MSE> over a randomly-drawn sigma
+    batch each epoch (ln-sigma ~ N(P_mean,P_std^2), lambda(sigma) spans orders of
+    magnitude), so it is measurement variance in the metric, not the model's
+    trajectory -- no LR can smooth that away, only averaging over more epochs can.
+    The best-val marker still uses the RAW (unsmoothed) values, so early-stopping
+    checkpoint selection is reported honestly even when the displayed curve is
+    smoothed."""
     x = np.asarray(x); train_vals = np.asarray(train_vals); val_vals = np.asarray(val_vals)
     note = None
     if skip_first > 0 and len(x) > skip_first + 1:
@@ -517,15 +545,25 @@ def plot_train_val_loss(x, train_vals, val_vals, out_path, xlabel="epoch",
                 f"train {', '.join(f'{v:.3g}' for v in train_vals[:skip_first])} / "
                 f"val {', '.join(f'{v:.3g}' for v in val_vals[:skip_first])}")
         x, train_vals, val_vals = x[skip_first:], train_vals[skip_first:], val_vals[skip_first:]
-    best_i = int(np.argmin(val_vals))
+    best_i = int(np.argmin(val_vals))  # off the RAW values, before any smoothing
+
+    if smooth_window > 1:
+        note = (note + " | " if note else "") + f"{smooth_window}-{xlabel} rolling mean"
+        train_plot = _rolling_mean(train_vals, smooth_window)
+        val_plot = _rolling_mean(val_vals, smooth_window)
+    else:
+        train_plot, val_plot = train_vals, val_vals
 
     fig, ax = plt.subplots(figsize=(9, 5))
-    ax.plot(x, train_vals, "-o", ms=3, color="steelblue", label=train_label)
-    ax.plot(x, val_vals, "-o", ms=3, color="tomato", label=val_label)
+    ax.plot(x, train_plot, "-o", ms=3, color="steelblue", label=train_label)
+    ax.plot(x, val_plot, "-o", ms=3, color="tomato", label=val_label)
     if note:
         ax.text(0.02, 0.02, note, transform=ax.transAxes, fontsize=8, color="0.4")
     ax.axvline(x[best_i], color="0.6", ls=":", lw=1.0)
-    ax.scatter([x[best_i]], [val_vals[best_i]], color="tomato", zorder=5,
+    # Marker sits ON the drawn (possibly smoothed) curve for visual consistency;
+    # the label text still reports the true RAW best value/epoch used for
+    # checkpoint selection, so smoothing never misrepresents what was picked.
+    ax.scatter([x[best_i]], [val_plot[best_i]], color="tomato", zorder=5,
                label=f"best val {val_vals[best_i]:.4g} @ {xlabel} {x[best_i]}")
     ax.set_xlabel(xlabel); ax.set_ylabel(ylabel)
     ax.set_yscale("log"); ax.legend(fontsize=9); ax.grid(True, alpha=0.3)

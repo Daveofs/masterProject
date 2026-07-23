@@ -116,7 +116,11 @@ TEST_COSMOS_FLAG=""
 # shell of every eval cosmology is a full ODE sample). KAPPA=0 skips it.
 KAPPA=${KAPPA:-1}
 KAPPA_FLAG=""; [ "${KAPPA}" = "1" ] && KAPPA_FLAG="--kappa --kappa-nside 1024 --kappa-lmax 2048"
-MAX_COSMOLOGIES=${MAX_COSMOLOGIES:-3}
+# 30 = the FULL held-out set, matching unet/diffusion/transfer's eval scripts
+# (2026-07-22 consistency pass): all four pipelines share the identical 30-cosmology
+# held-out split (same 198-cosmo pool, same seed-0 shuffle -- verified), so pooling
+# the same 30 makes the grey low/true bands directly comparable across pipelines.
+MAX_COSMOLOGIES=${MAX_COSMOLOGIES:-30}
 # EVAL_NODES: node count for the SEPARATE dependent diagnostics job (stage 3 below)
 # -- since that job is submitted fresh via sbatch (not inline, see stage 3's WHY
 # note), it does NOT automatically inherit THIS job's --nodes allocation the way

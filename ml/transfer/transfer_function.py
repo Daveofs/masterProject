@@ -237,7 +237,16 @@ def _run_cls(run_dir: Path, lmax: int, log_density: bool = False):
     N_alm = (lmax + 1) * (lmax + 2) // 2
     low = np.load(run_dir / alm_fname("low", lmax, log_density), mmap_mode="r")
     high = np.load(run_dir / alm_fname("high", lmax, log_density), mmap_mode="r")
-    n = min(low.shape[0], high.shape[0])
+    # Drop the LAST lightcone shell (2026-07-22, matches unet/dataset.py's
+    # split_by_cosmo and apply_*'s n_shells_total-=1): DISCO's low map there
+    # carries only 16-65% of CosmoGrid's true counts (a truncated shell at the
+    # lightcone/box edge), and z-conditioning can't separate it from the
+    # second-to-last shell -- training on it was measured to teach a spurious
+    # "subtract high-ell power at z~3.4" correction (corrected/true Cl ~0.41-0.53
+    # at the SECOND-to-last shell for unet, across all 30 held-out cosmologies)
+    # even though that shell's own input was fine. Same truncated-edge-shell data
+    # feeds `train`/`fit` here, so the same exclusion applies.
+    n = min(low.shape[0], high.shape[0]) - 1
     cl_low = np.empty((n, lmax + 1))
     cl_high = np.empty((n, lmax + 1))
     cl_cross = np.empty((n, lmax + 1))
@@ -264,7 +273,7 @@ def _gather_fit_task(task):
     N_alm = (lmax + 1) * (lmax + 2) // 2
     low = np.load(lo, mmap_mode="r")
     high = np.load(hi, mmap_mode="r")
-    n = min(low.shape[0], high.shape[0])
+    n = min(low.shape[0], high.shape[0]) - 1     # drop last shell -- see _run_cls
     cl_low = np.empty((n, lmax + 1)); cl_high = np.empty((n, lmax + 1))
     cl_cross = np.empty((n, lmax + 1))
     for i in range(n):
@@ -409,7 +418,7 @@ def _gather_fit_runs(runs, lmax: int, log_density: bool, gather_workers: int):
         for lo, hi in runs:
             low = np.load(lo, mmap_mode="r")
             high = np.load(hi, mmap_mode="r")
-            n = min(low.shape[0], high.shape[0])
+            n = min(low.shape[0], high.shape[0]) - 1     # drop last shell -- see _run_cls
             cl_low = np.empty((n, lmax + 1)); cl_high = np.empty((n, lmax + 1))
             cl_cross = np.empty((n, lmax + 1))
             for i in range(n):
@@ -664,10 +673,10 @@ def _finalize_train(X, y, sum_cross, sum_low, sum_high, r_counts, last_cosmo, la
         else:
             no_improve += 1
         if it % 10 == 0:
-            print(f"  iter {it}: train_loss={train_loss:.3e} val_loss={val_loss:.3e}", flush=True)
+            print(f"  epoch {it}: train_loss={train_loss:.3e} val_loss={val_loss:.3e}", flush=True)
         if no_improve >= patience:
-            print(f"[train] early stopping at iter {it} "
-                  f"(no val improvement for {patience} iters)", flush=True)
+            print(f"[train] early stopping at epoch {it} "
+                  f"(no val improvement for {patience} epochs)", flush=True)
             break
     if best_weights is not None:                       # restore best-val weights
         model.coefs_, model.intercepts_ = best_weights
@@ -695,7 +704,7 @@ def _finalize_train(X, y, sum_cross, sum_low, sum_high, r_counts, last_cosmo, la
         loss_png = Path(out).with_suffix("").with_suffix(".loss.png")
         plot_train_val_loss(
             np.arange(len(train_loss_hist)), train_loss_hist, val_loss_hist, loss_png,
-            xlabel="iteration", ylabel="MLP squared-error loss (T emulator)",
+            xlabel="epoch", ylabel="MLP squared-error loss (T emulator)",
             val_label=f"validation (10% held-out samples, alpha={alpha:g})",
             formula=r"loss $=\frac{1}{2N}\sum_i(T_i-\hat T_i)^2$  "
                     "(L2 weight decay is an optimizer detail, not shown)")

@@ -45,7 +45,7 @@ if ! "${PYTHON_BIN}" -c "import numpy, matplotlib" >/dev/null 2>&1; then
   exit 3
 fi
 
-SNAPSHOT=${SCRATCH}/outputs/snapshots/grid_cosmo_000001_run_0.npz
+SNAPSHOT=/capstor/store/cscs/ska/sk037/grid_000001/CosmoML.00000
 OUTDIR=${SCRATCH}/outputs/plots/snapshots
 
 mkdir -p "${OUTDIR}"
@@ -113,7 +113,7 @@ else:
     p, _ = read_tipsy(snap, BOXSIZE)
     pos = np.column_stack([p['x'], p['y'], p['z']])
     grid_val = 832
-    slice_thickness_val = 5.0
+    slice_thickness_val = 10
 
 print(f"BOXSIZE: {BOXSIZE}, slice_thickness_val: {slice_thickness_val}, grid_val: {grid_val}")
 

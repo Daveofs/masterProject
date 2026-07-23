@@ -38,7 +38,7 @@ def main():
     out = Path(args.out or (Path(args.run_dir) / "loss_curve.png"))
     plot_train_val_loss(
         ep, tr, va, out, xlabel="epoch", ylabel="EDM weighted denoising loss",
-        val_label="validation (held-out cosmologies)", skip_first=1,
+        val_label="validation (held-out cosmologies)", skip_first=1, smooth_window=9,
         formula="EDM conditional diffusion (low->high): train vs validation\n"
                 r"loss $=\langle\,\lambda(\sigma)\|D_\theta(x_1+\sigma\epsilon,\sigma,\mathrm{cond})-x_1\|^2\,\rangle$, "
                 r"$\ln\sigma\sim\mathcal{N}(P_\mathrm{mean},P_\mathrm{std}^2)$, "

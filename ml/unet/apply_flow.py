@@ -696,6 +696,19 @@ def main():
                     [(bl, sh, el, np.array(lo), np.array(co))
                      for bl, sh, el, lo, co in panels_per_cosmo[ci]])
                    for ci, c in enumerate(grid_cosmos)]
+            # Per-(cosmology, shell) ratio dump: the pooled percentile band above is
+            # anonymous -- when it grows a lobe (e.g. the 2026-07-22 hp0.05/0.12
+            # runs' 16th-pctile power-loss on faint shells) there is no way to tell
+            # WHICH cosmology/shell drives it from the png alone. Keys:
+            # low_{cosmo}_s{shell} / corrected_{cosmo}_s{shell}, each Cl(x)/Cl(true).
+            np.savez_compressed(
+                out_dir / "cl_ratio_by_zbin_data.npz",
+                cosmos=np.array(grid_cosmos), lmax=lmax,
+                bin_labels=np.array([bl for bl, _ in zbins]),
+                bin_shells=np.array([sh for _, sh in zbins], dtype=object),
+                **{f"{kind}_{grid_cosmos[ci]}_s{int(zbins[bi][1][si])}": r
+                   for ci, bi, si, lo_r, co_r in flat_grid
+                   for kind, r in (("low", lo_r), ("corrected", co_r))})
             plot_cl_ratio_pctile_grid(
                 grid, out_dir / "cl_ratio_by_zbin_grid.png",
                 corrected_label="corrected (flow) / true (after)",

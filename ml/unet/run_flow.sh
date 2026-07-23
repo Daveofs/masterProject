@@ -59,7 +59,7 @@ UNET=/users/damrein/masterProject/ml/unet
 NSIDE=${NSIDE:-512}
 PATCH_SIZE=${PATCH_SIZE:-256}
 NPATCH=${NPATCH:-100000}
-EPOCHS=${EPOCHS:-100}
+EPOCHS=${EPOCHS:-200}
 LEARNING_RATE=${LEARNING_RATE:-3e-5}
 # NO_LR_SCALING=1 drops train_flow.py's world_size multiplier (16 GPUs -> the
 # configured LEARNING_RATE is used AS-IS, not x16 = 4.8e-4). Recurring pattern
@@ -67,11 +67,18 @@ LEARNING_RATE=${LEARNING_RATE:-3e-5}
 # no warmup caused a large early-training instability spike. Default ON (0) here
 # means scaling is STILL applied by default -- set NO_LR_SCALING=1 to test the
 # unscaled LR directly.
-NO_LR_SCALING=${NO_LR_SCALING:-1}
+NO_LR_SCALING=${NO_LR_SCALING:-0}
 NO_LR_SCALING_FLAG=""; [ "${NO_LR_SCALING}" = "1" ] && NO_LR_SCALING_FLAG="--no-lr-scaling"
 BATCH=${BATCH:-32}
 BASE_CH=${BASE_CH:-32}
 STEPS=${STEPS:-8}
+# High-pass residual formulation (2026-07-21, ported from diffusion/run_diffusion.sh
+# after comparing all three pipelines' cl_ratio_by_zbin_grid/kappa_cl_pctile_band --
+# see flow_model.py's module docstring): the flow target now only adds small-scale
+# content, large scales pinned to the low map. Passed to BOTH train (builds the
+# target) and, via the checkpoint, apply (composes the corrected map).
+HP_CUTOFF=${HP_CUTOFF:-0.05}
+HP_TRANSITION=${HP_TRANSITION:-0.12}
 # cosmology+redshift conditioning at the bottleneck (flow_model.FlowUNet) -- on by
 # default; set USE_COSMO_COND=0 for an A/B run against the unconditioned model.
 USE_COSMO_COND=${USE_COSMO_COND:-1}
@@ -90,11 +97,16 @@ fi
 # data-root switch always produce a fresh, correctly-matched, distinctly-named
 # patch dir + run (and never overwrites the other data root's existing outputs).
 DATA_TAG=$(basename "${DATA_ROOT}")
+# 'delta' (linear overdensity) is the space analysis.full_sky.od_cl actually
+# measures -- same fix diffusion made 2026-07-18 (see dataset.raw_to_delta_pair).
+# Assigned BEFORE RUN_NAME below (it is folded into it -- when it was assigned
+# after, every auto run-name silently expanded ${SPACE} to "" -> flow__grid_...).
+SPACE=${SPACE:-delta}
 # SPACE folded in (matching diffusion/run_diffusion.sh's RUN_NAME convention) so a
 # highpass-residual delta-space retrain never collides with an old pre-2026-07-21
 # full-field checkpoint at the same name -- apply_flow.py's hp_cutoff guard would
 # reject the old one anyway, but this keeps the two from silently overwriting.
-RUN_NAME=${RUN_NAME:-flow_${SPACE}_${DATA_TAG}_nside${NSIDE}_patch${PATCH_SIZE}_n${NPATCH}_ch${BASE_CH}_b${BATCH}_e${EPOCHS}_lr${LEARNING_RATE}_${COSMO_SUFFIX}_hp${HP_CUTOFF}_${HP_TRANSITION}}
+RUN_NAME=${RUN_NAME:-flow_${SPACE}_${DATA_TAG}_nside${NSIDE}_patch${PATCH_SIZE}_n${NPATCH}_ch${BASE_CH}_b${BATCH}_e${EPOCHS}_lr${LEARNING_RATE}_hpc${HP_CUTOFF}_hpt${HP_TRANSITION}${COSMO_SUFFIX}}
 # weak-lensing kappa map diagnostic (analysis.weak_lensing, apply_flow.py --kappa):
 # ON by default. It reconstructs every usable shell (z<~1.05, ~47/69) via full-sky
 # tiling for --kappa-max-cosmologies held-out cosmologies, which used to be far too
@@ -107,16 +119,6 @@ KAPPA_FLAG=""; [ "${KAPPA}" = "1" ] && KAPPA_FLAG="--kappa"
 # and the kappa diagnostic (--kappa-max-cosmologies) -- apply_flow.py defaults
 # each to 3 independently; one knob here keeps them in sync unless overridden.
 MAX_COSMO=${MAX_COSMO:-30}
-# High-pass residual formulation (2026-07-21, ported from diffusion/run_diffusion.sh
-# after comparing all three pipelines' cl_ratio_by_zbin_grid/kappa_cl_pctile_band --
-# see flow_model.py's module docstring): the flow target now only adds small-scale
-# content, large scales pinned to the low map. Passed to BOTH train (builds the
-# target) and, via the checkpoint, apply (composes the corrected map).
-HP_CUTOFF=${HP_CUTOFF:-0.05}
-HP_TRANSITION=${HP_TRANSITION:-0.20}
-# 'delta' (linear overdensity) is the space analysis.full_sky.od_cl actually
-# measures -- same fix diffusion made 2026-07-18 (see dataset.raw_to_delta_pair).
-SPACE=${SPACE:-delta}
 
 PATCH_DIR="/capstor/scratch/cscs/damrein/outputs/flowpatches/${DATA_TAG}_nside${NSIDE}_${PATCH_SIZE}_${NPATCH}"
 OUT_DIR="/capstor/scratch/cscs/damrein/outputs/flowruns/${RUN_NAME}"

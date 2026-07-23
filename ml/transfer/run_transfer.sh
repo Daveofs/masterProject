@@ -396,13 +396,28 @@ else
     REUSE_FLAG=""
 fi
 
+# DIAG_MAX_COSMOLOGIES: separate, SMALLER cap than MAX_COSMOLOGIES for THIS final
+# call specifically -- unlike stage 3a above (compute-only, sharded across nodes,
+# one cosmology's correction resident at a time), this single unsharded process
+# POOLS every --run-dirs cosmology's FULL nside=2048 corrected lightcone in memory
+# at once for patch_power_ratio_pctile_band.png/cl_ratio_by_zbin_grid.png/kappa's
+# pctile-band plots. Measured (2026-07-22, job 4257217, lmax=6143,
+# MAX_COSMOLOGIES=30): this OOM-killed at ~825GB on an 870GB node (69 shells x
+# 50M pixels x 4B ~= 13.8GB/cosmology x 30 ~= 414GB before kappa/plotting
+# temporaries -- already 95% of the node with room to spare gone). Default 10
+# keeps most of the statistical power of a pctile band while fitting in memory;
+# override explicitly once you've checked headroom for your LMAX/nside.
+DIAG_MAX_COSMOLOGIES=${DIAG_MAX_COSMOLOGIES:-10}
+if [ "${#EVAL_COSMOS_ARR[@]}" -gt "$DIAG_MAX_COSMOLOGIES" ]; then
+    echo "[stage 3] capping final pooled-diagnostics call to $DIAG_MAX_COSMOLOGIES/${#EVAL_COSMOS_ARR[@]} cosmologies (DIAG_MAX_COSMOLOGIES) -- the rest were still corrected in stage 3a's counts/ dir, just not pooled into these plots"
+fi
 RUN_DIRS=""
 TRANSFER_FILES=""
-for ((j = 0; j < ${#EVAL_COSMOS_ARR[@]}; j++)); do
+for ((j = 0; j < ${#EVAL_COSMOS_ARR[@]} && j < DIAG_MAX_COSMOLOGIES; j++)); do
     RUN_DIRS="$RUN_DIRS $DATA/${EVAL_COSMOS_ARR[$j]}/run_0"
     TRANSFER_FILES="$TRANSFER_FILES ${TRANSFER_ARR[$j]}"
 done
-echo "[stage 3] apply_transfer.py: correction (--no-clip, ell_min_mpc=$ELL_MIN_MPC, hp_transition=$HP_TRANSITION) + diagnostics (incl. kappa), ${#EVAL_COSMOS_ARR[@]} held-out cosmologies"
+echo "[stage 3] apply_transfer.py: correction (--no-clip, ell_min_mpc=$ELL_MIN_MPC, hp_transition=$HP_TRANSITION) + diagnostics (incl. kappa), $((${#EVAL_COSMOS_ARR[@]} < DIAG_MAX_COSMOLOGIES ? ${#EVAL_COSMOS_ARR[@]} : DIAG_MAX_COSMOLOGIES)) held-out cosmologies"
 uenv run pytorch/v2.9.1:v2 --view=default -- bash -c "
     source ${SPHEREFLOW_VENV}/bin/activate
     OMP_NUM_THREADS=128 python transfer/apply_transfer.py \
@@ -415,6 +430,7 @@ uenv run pytorch/v2.9.1:v2 --view=default -- bash -c "
         --out-counts-dir '$OUT/counts' \
         --patch-shells 5 10 15 30 50 --n-per-shell 1 --patch-size 256 \
         --fullsky-shells 5 10 15 30 50 \
+        --max-cosmologies $DIAG_MAX_COSMOLOGIES \
         --kappa \
         --out-dir '$OUT/eval'
 "

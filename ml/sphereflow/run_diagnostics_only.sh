@@ -99,7 +99,9 @@ LMAX="${LMAX:-3000}"
 # sample_ode starts from x0=cond (informative start, see sphere_flow.py's
 # docstring) instead of noise -- far fewer steps needed.
 STEPS="${STEPS:-8}"
-MAX_COSMOLOGIES="${MAX_COSMOLOGIES:-10}"
+# 30 = the FULL held-out set, matching every other pipeline's eval scripts (see
+# run_sphere_flow.sh's note) -- identical pooling makes the grey bands comparable.
+MAX_COSMOLOGIES="${MAX_COSMOLOGIES:-30}"
 KAPPA="${KAPPA:-1}"
 KAPPA_FLAG=""; [ "${KAPPA}" = "1" ] && KAPPA_FLAG="--kappa --kappa-nside 1024 --kappa-lmax 2048"
 # OVERLAP checkpoints only (meta['patch_mode']=='overlap', see sphere_flow.py) --
