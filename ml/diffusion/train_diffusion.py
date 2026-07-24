@@ -46,8 +46,8 @@ def estimate_sigma_data(loader, device, hp_cutoff: float, hp_transition: float,
     """Std of the diffusion TARGET (the high-pass residual, residual_target) over a
     few real batches -- EDM's own sigma_data=0.5 default is tuned for 8-bit CIFAR
     pixel statistics and has no reason to fit this. The target here is the SMALL-SCALE
-    residual (highpass(high_log-low_log)), which has far less variance than the full
-    field, so measuring sigma_data on it (not on high_log) is what keeps the EDM
+    residual (highpass(high_f-low_f)), which has far less variance than the full
+    field, so measuring sigma_data on it (not on high_f) is what keeps the EDM
     preconditioning c_skip/c_out/c_in correctly scaled."""
     vals = []
     for i, batch in enumerate(loader):
@@ -127,7 +127,7 @@ def main():
                    help="condition DenoiserUNet on cosmology + shell redshift at the "
                         "bottleneck (see model.DenoiserUNet). Default: on.")
     # High-pass residual formulation (see model.py docstring): the model diffuses only
-    # highpass(high_log-low_log); large scales below the cutoff are supplied by the low
+    # highpass(high_f-low_f); large scales below the cutoff are supplied by the low
     # map at compose time. These fractions are of the patch NYQUIST frequency. Default
     # 0.10/0.10: pins everything below ~0.1*Nyquist to DISCO (at nside=2048/patch256
     # that's roughly ell<~300, the coherent large scales that must be preserved for the

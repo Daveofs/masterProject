@@ -10,7 +10,9 @@ FlowUNet and flow_model.sample_ode.
 
 Test data = the validation (held-out COSMOLOGY) split of the patch dataset. For each
 patch we run the EDM Heun ODE sampler from x_T ~ N(0, sigma_max^2 I) conditioned on
-low (log1p-delta) to draw a high-pass RESIDUAL, then compose the corrected map as
+low (whichever --space the checkpoint was trained in -- default 'delta', the linear
+overdensity od_cl measures; 'log1p' only for pre-2026-07-18 checkpoints, see
+dataset.raw_to_delta_pair) to draw a high-pass RESIDUAL, then compose the corrected map as
 low + highpass(sample) (model.compose_corrected -- large scales pinned to the low
 map, see model.py's docstring for why), and compare corrected vs the true high by:
   * the 2D-FFT radial power spectrum ratio (the flat-patch analogue of the C_ell
@@ -263,8 +265,9 @@ def main():
 
     def sample(cond, cosmo_z, noise=None):
         """Draw a high-pass-residual diffusion sample and RETURN THE COMPOSED corrected
-        log-map (low + highpass(sample)) -- so every call site below gets the corrected
-        map directly, exactly as the old full-field sample() returned it. The large
+        field (low + highpass(sample), in whichever --space the checkpoint uses) -- so
+        every call site below gets the corrected map directly, exactly as the old
+        full-field sample() returned it. The large
         scales of the returned map are pinned to `cond` (the low map) by construction
         (see model.compose_corrected).
 
@@ -308,22 +311,22 @@ def main():
         high_all = torch.stack([ds[i]["high"] for i in range(len(ds))])
         cosmo_z_all = stack_cosmo_z(ds, dev, low_all.dtype)
         mb = args.eval_batch
-        low_log_parts, high_log_parts, corr_log_parts = [], [], []
+        low_f_parts, high_f_parts, corr_f_parts = [], [], []
         for b in range(0, low_all.shape[0], mb):
             lo = low_all[b:b + mb].to(dev); hi = high_all[b:b + mb].to(dev)
-            lo_log, hi_log = transform_pair(lo, hi, space)
+            lo_f, hi_f = transform_pair(lo, hi, space)
             with torch.no_grad():
-                co_log = sample(lo_log, cosmo_z_all[b:b + mb])
-            low_log_parts.append(lo_log); high_log_parts.append(hi_log); corr_log_parts.append(co_log)
-        low_log = torch.cat(low_log_parts); high_log = torch.cat(high_log_parts)
-        corr_log = torch.cat(corr_log_parts)
+                co_f = sample(lo_f, cosmo_z_all[b:b + mb])
+            low_f_parts.append(lo_f); high_f_parts.append(hi_f); corr_f_parts.append(co_f)
+        low_f = torch.cat(low_f_parts); high_f = torch.cat(high_f_parts)
+        corr_f = torch.cat(corr_f_parts)
 
-        mse_low = torch.mean((low_log - high_log) ** 2).item()
-        mse_corr = torch.mean((corr_log - high_log) ** 2).item()
+        mse_low = torch.mean((low_f - high_f) ** 2).item()
+        mse_corr = torch.mean((corr_f - high_f) ** 2).item()
 
-        pr_low_stack = radial_power_batch(low_log)
-        pr_corr_stack = radial_power_batch(corr_log)
-        pr_high_stack = radial_power_batch(high_log)
+        pr_low_stack = radial_power_batch(low_f)
+        pr_corr_stack = radial_power_batch(corr_f)
+        pr_high_stack = radial_power_batch(high_f)
         pr_low, pr_corr, pr_high = pr_low_stack.mean(0), pr_corr_stack.mean(0), pr_high_stack.mean(0)
         k = np.arange(len(pr_high))
         with np.errstate(divide="ignore", invalid="ignore"):
@@ -333,7 +336,7 @@ def main():
         def band(r, a, b):
             return float(np.nanmean(r[a:b]))
         nb = len(k)
-        print(f"[eval] MSE(log-delta) low={mse_low:.4e} corrected={mse_corr:.4e} "
+        print(f"[eval] MSE({space}) low={mse_low:.4e} corrected={mse_corr:.4e} "
               f"({100*(1-mse_corr/max(mse_low,1e-12)):+.0f}%)", flush=True)
         print(f"[eval] power ratio to high | low  (mid,high-k)=({band(lo_r,nb//4,nb//2):.3f},"
               f"{band(lo_r,nb//2,nb):.3f}) | corrected=({band(co_r,nb//4,nb//2):.3f},"
@@ -365,16 +368,16 @@ def main():
         ex_low = torch.stack([ex_ds[i]["low"] for i in range(ns)]).to(dev)
         ex_high = torch.stack([ex_ds[i]["high"] for i in range(ns)]).to(dev)
         ex_cosmo_z = stack_cosmo_z(ex_ds, dev, ex_low.dtype)
-        ex_low_log, ex_high_log = transform_pair(ex_low, ex_high, space)
+        ex_low_f, ex_high_f = transform_pair(ex_low, ex_high, space)
         with torch.no_grad():
-            ex_corr_log = sample(ex_low_log, ex_cosmo_z)
+            ex_corr_f = sample(ex_low_f, ex_cosmo_z)
 
-        rows = [(f"shell {example_shells[i]}", ex_low_log[i, 0].cpu().numpy(),
-                ex_corr_log[i, 0].cpu().numpy(), ex_high_log[i, 0].cpu().numpy())
+        rows = [(f"shell {example_shells[i]}", ex_low_f[i, 0].cpu().numpy(),
+                ex_corr_f[i, 0].cpu().numpy(), ex_high_f[i, 0].cpu().numpy())
                for i in range(ns)]
         plot_example_patch_grid(rows, out_dir / "example_patches.png",
                                 corrected_label="diffusion-corrected",
-                                suptitle="held-out test patches (log1p overdensity) + "
+                                suptitle=f"held-out test patches ({space} overdensity) + "
                                          "per-patch power ratio")
 
         n_stat = args.n_stat_patches
@@ -387,10 +390,10 @@ def main():
             s_high = torch.stack([sd[i]["high"] for i in range(len(sd))]).to(dev)
             s_cosmo_z = stack_cosmo_z(sd, dev, s_low.dtype)
             s_low_mean = s_low.mean(dim=(2, 3), keepdim=True)
-            s_low_log, _ = transform_pair(s_low, s_high, space)
+            s_low_f, _ = transform_pair(s_low, s_high, space)
             with torch.no_grad():
-                s_corr_log = sample(s_low_log, s_cosmo_z)
-            s_corr_raw = field_to_counts(s_corr_log, s_low_mean, space)
+                s_corr_f = sample(s_low_f, s_cosmo_z)
+            s_corr_raw = field_to_counts(s_corr_f, s_low_mean, space)
 
             low_np, high_np, corr_np = s_low.cpu().numpy(), s_high.cpu().numpy(), s_corr_raw.cpu().numpy()
             moment_shells.append(s)

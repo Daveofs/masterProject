@@ -208,7 +208,7 @@ The two paths achieve this division of labour through complementary operations. 
   \node[note, above=1.5mm of e0] {input\\ $H\times H$};
   \node[note, above=1.5mm of d0] {output\\ $H\times H$};
   % encoder arrows (down-right)
-  \draw[flow] (e0.south east) -- (e1.north west) node[midway, below left=-1mm, note] {pool $\tfrac12$};
+  \draw[flow] (e0.south east) -- (e1.north west) node[midway, below=2mm, note] {pool $\tfrac12$};
   \draw[flow] (e1.south east) -- (e2.north west);
   \draw[flow] (e2.south east) -- (e3.north west);
   \draw[flow] (e3.south east) -- (b.north west);
@@ -229,19 +229,6 @@ The two paths achieve this division of labour through complementary operations. 
 \caption{Generic U-Net topology \cite{ronneberger_u-net_2015}: a contracting path (left) halves the resolution and doubles the channel count $C$ at every level, a bottleneck (centre) holds the coarsest, most contextual representation, and an expanding path (right) mirrors the contraction. Skip connections (dashed) concatenate each encoder level's feature map into the decoder level of equal resolution, so fine spatial detail bypasses the bottleneck. The concrete instantiation used by the correction pipelines ($C=32$, four levels, FiLM conditioning) is described in Sec.~\ref{subsec:pipe-unet-flow}.}
 \label{fig:unet_generic}
 \end{figure}
-
-\subsubsection{Chebyshev Graph Convolution}
-\label{sssec:chebconv}
-
-A spherically-native alternative avoids the flat, patch-based representation entirely and instead operates on a graph built directly from the HEALPix pixelisation \cite{perraudin_deepsphere_2019}. One builds a weighted undirected graph $G=(V,E,W)$, where each pixel $i$ is a vertex $v_i$, connected by an edge to the 8 (or 7) vertices of its neighbouring pixels, with Gaussian weights
-\begin{equation}
-    W_{ij} = \begin{cases} \exp\!\left(-\dfrac{\lVert x_i - x_j \rVert^2}{2\rho^2}\right) & \text{if pixels } i,j \text{ are neighbours}, \\[4pt] 0 & \text{otherwise}, \end{cases}
-\end{equation}
-where $x_i$ is the three-dimensional position of pixel $i$ and $\rho$ the mean squared neighbour distance. From the normalised graph Laplacian $L = I - D^{-1/2}WD^{-1/2}$ (with $D$ the diagonal degree matrix), a graph signal $f\in\mathbb{R}^{N_{\mathrm{pix}}}$ is filtered by a kernel $h:\mathbb{R}_+\to\mathbb{R}$ through
-\begin{equation}
-    h(L)f = U\,h(\Lambda)\,U^\top f,
-\end{equation}
-where $U$ and $\Lambda$ are the eigenvectors and eigenvalues of $L$; choosing $h$ as a low-order Chebyshev polynomial makes the filter local and cheap to evaluate without any eigendecomposition \cite{perraudin_deepsphere_2019}. This graph-spectral filtering defines a convolution directly on the HEALPix sphere, sidestepping the interpolation and $SO(3)$-cost issues of Sec.~\ref{subsec:sr-problem}. The correction pipelines retained in this thesis (Sec.~\ref{sec:correction-pipelines}) instead operate on flat projected patches or in harmonic space, where the mature 2D-CNN and SHT tooling applies directly; the graph-convolutional route remains the natural candidate for a fully sphere-native extension.
 
 \subsection{Generative Paradigms}
 \label{subsec:generative-paradigms}
@@ -327,9 +314,9 @@ where both maps are generated from the \emph{same} initial conditions and cosmol
   \node[keybox, right=6mm of pair] (corr) {correction $f$};
   \node[databox, right=6mm of corr] (out) {corrected\\ lightcone};
   % pipeline chips under correction node
-  \node[transbox, below=3mm of corr, font=\scriptsize, minimum height=5mm] (t) {transfer};
-  \node[unetbox,  left=2mm of t, font=\scriptsize, minimum height=5mm] (u) {unet-flow};
-  \node[diffbox,  right=2mm of t, font=\scriptsize, minimum height=5mm] (d) {diffusion};
+  \node[transbox, below=2mm of corr, font=\scriptsize, minimum height=5mm] (t) {transfer};
+  \node[unetbox,  below=2mm of t, font=\scriptsize, minimum height=5mm] (u) {unet-flow};
+  \node[diffbox,  below=2mm of u, font=\scriptsize, minimum height=5mm] (d) {diffusion};
   % evaluation
   \node[box, below=3mm of out, font=\scriptsize, minimum height=5mm] (ev) {$C_\ell$, moments, $\kappa$};
   % --- arrows ---
@@ -446,20 +433,20 @@ The pre-step state is then discarded and the post-step state becomes the next st
 \begin{tikzpicture}[x=1cm, y=1cm]
   % ---- integration axis ----
   \draw[semithick, color=inkc] (0,0) -- (12.4,0) node[right, note] {$a$};
-  \foreach \x/\lab in {0.4/{a_0}, 3.4/{a_1}, 6.4/{a_2}, 9.4/{a_3}, 12.0/{a_4}} {
-    \draw[inkc] (\x,0.09) -- (\x,-0.09) node[below, font=\scriptsize] {$\lab$};
+  \foreach \x/\lab in {0.2/{a_0}, 3.2/{a_1}, 6.0/{a_2}, 9.8/{a_3}, 12.0/{a_4}} {
+    \draw[inkc] (\x,0.2) -- (\x,-0.2) node[below, font=\scriptsize] {$\lab$};
   }
   \node[note] at (2.6,-0.85) {integration grid $=$ shell edges (Eq.~\ref{eq:step_grid})};
   % ---- highlighted current step ----
-  \fill[accsoftc, opacity=0.55] (6.4,-0.28) rectangle (9.4,0.28);
+  \fill[accsoftc, opacity=0.55] (6.0,-0.28) rectangle (9.8,0.28);
   \node[note, text=accentc] at (7.9,0.55) {step $j$: one KDK sub-step};
   % ---- particle states above ----
-  \node[databox, minimum width=17mm] (pre)  at (6.4,1.9) {$\mathbf{x}_p^{(j)}$};
-  \node[databox, minimum width=17mm] (post) at (9.4,1.9) {$\mathbf{x}_p^{(j+1)}$};
-  \draw[flow] (pre.south) -- (6.4,0.32);
-  \draw[flow] (post.south) -- (9.4,0.32);
+  \node[databox, minimum width=17mm] (pre)  at (6.0,1.9) {$\mathbf{x}_p^{(j)}$};
+  \node[databox, minimum width=17mm] (post) at (9.8,1.9) {$\mathbf{x}_p^{(j+1)}$};
+  \draw[flow] (pre.south) -- (6.0,0.32);
+  \draw[flow] (post.south) -- (9.8,0.32);
   \node[note] at (7.9,2.6) {only two snapshots in memory};
-  \draw[skiparrow] (3.2,1.9) -- (5.35,1.9) node[midway, above, note] {discard};
+  \draw[skiparrow] (3.2,1.9) -- (5.0,1.9) node[midway, above, note] {discard};
   % ---- shell maps below ----
   \foreach \x/\i in {1.9/1, 4.9/2, 10.7/4} {
     \node[databox, minimum width=14mm, minimum height=7mm, font=\scriptsize] (s\i) at (\x,-2.1) {$\mathbf{S}_{\i}$};
@@ -551,8 +538,8 @@ This procedure reproduces \textsc{PkdGrav3}'s box-replication lightcone \cite{no
   \begin{scope}[shift={(7.6,-1.45)}]
     \fill[inkc] (0,0) circle (1.3pt) node[below left=-1pt, font=\scriptsize] {$\mathbf{o}$};
     % lightcone fronts (arcs)
-    \draw[accentc, semithick, dashed] (10:3.4) arc (10:70:3.4) node[pos=0.15, right=1mm, note] {$R_j = r_j^{\mathrm{hi}}$};
-    \draw[accentc, semithick, dotted] (10:2.5) arc (10:70:2.5) node[pos=0.12, right=1mm, note] {$R_{j+1} = r_j^{\mathrm{lo}}$};
+    \draw[accentc, semithick, dashed] (10:3.4) arc (10:70:3.4) node[pos=1.0, left=0mm, note] {$R_j = r_j^{\mathrm{hi}}$};
+    \draw[accentc, semithick, dotted] (10:2.5) arc (10:70:2.5) node[pos=1.0, left=0mm, note] {$R_{j+1} = r_j^{\mathrm{lo}}$};
     % annulus shading
     \fill[accsoftc, opacity=0.35] (12:2.5) arc (12:68:2.5) -- (68:3.4) arc (68:12:3.4) -- cycle;
     % particle trajectory
@@ -594,7 +581,7 @@ Three correction pipelines were implemented, each a self-contained module under 
 \label{fig:shared_problem}
 \end{figure}
 
-One measured property of the data drives every design choice that follows. The per-multipole cross-correlation
+One measured property of the data drives every design choice that follows. The per-multipole cross-correlation \cite{feng_fastpm_2016}
 \begin{equation}
   r(\ell, s) \;=\; \frac{\big\langle C_\ell^{\mathrm{low}\times\mathrm{high}}\big\rangle}{\sqrt{\big\langle C_\ell^{\mathrm{low}}\big\rangle\,\big\langle C_\ell^{\mathrm{high}}\big\rangle}},
   \label{eq:phase_corr}
@@ -603,7 +590,7 @@ computed across the training runs (\texttt{ml/transfer/transfer\_function.py}), 
 
 Three further design decisions are shared by all learned components and are motivated by measured failures of their alternatives:
 \begin{itemize}
-  \item \textbf{Work in linear overdensity $\delta$, not $\log(1+\delta)$.} The evaluation statistic (the angular power spectrum of $\delta$, \texttt{analysis/full\_sky.py}) lives in linear space. Training in log space compresses density peaks so strongly that the low/high power ratio there looks nearly correct (0.93--1.05) while the linear-space ratio the analysis actually measures is still deficient (down to 0.62 at high wavenumber) -- a model trained on the log-space residual therefore optimises a statistic that is already right and barely moves the one that matters (\texttt{ml/unet/dataset.py}).
+  \item \textbf{\color{red}{Work in linear overdensity $\delta$, not $\log(1+\delta)$.}} The evaluation statistic (the angular power spectrum of $\delta$, \texttt{analysis/full\_sky.py}) lives in linear space. Training in log space compresses density peaks so strongly that the low/high power ratio there looks nearly correct (0.93--1.05) while the linear-space ratio the analysis actually measures is still deficient (down to 0.62 at high wavenumber) -- a model trained on the log-space residual therefore optimises a statistic that is already right and barely moves the one that matters (\texttt{ml/unet/dataset.py}).
   \item \textbf{Correct only the small scales; pin the large scales to Disco-DJ.} Disco-DJ's large scales are already correct ($T\approx 1$, $r\approx 1$), so both generative pipelines are formulated as \emph{high-pass residual} models: the learning target is $\mathrm{HP}(\mathrm{high}-\mathrm{low})$, where $\mathrm{HP}$ is a radial Fourier high-pass with a raised-cosine transition (cutoff and transition width both $0.1$ of the patch Nyquist frequency by default), and the corrected patch is composed as $\mathrm{low} + \mathrm{HP}(\mathrm{sample})$. The composition re-applies the filter, so the output's large scales equal the low map's \emph{exactly}, regardless of integration error (\texttt{ml/unet/flow\_model.py}, \texttt{ml/diffusion/model.py}). This formulation is a direct response to two observed failures: a full-field diffusion model drew each tile's large scales from independent noise, so after stitching, the cross-tile phases averaged incoherently and destroyed the low-$\ell$ convergence spectrum; and even the low$\to$high flow drifted the already-correct large scales by a few percent per shell, which compounded coherently across the dozens of shells a convergence map integrates. The harmonic pipeline applies the same principle exactly in $\ell$-space, through a raised-cosine ramp on its correction factors.
   \item \textbf{Hold out whole cosmologies, not random patches.} The train/validation split is by cosmology (\texttt{dataset.split\_by\_cosmo}): patches from the same run share large-scale structure, so a random per-patch split would leak the validation set into training. All reported evaluations are on cosmologies the models never saw.
 \end{itemize}
@@ -681,7 +668,7 @@ Two subtleties matter only for the \emph{stochastic} pipeline (diffusion). First
 \subsection{Harmonic-Space Transfer-Function Pipeline}
 \label{subsec:pipe-transfer}
 
-The first pipeline (\texttt{ml/transfer/}) contains no image-level network at all: it exploits the phase-sharing fact of Eq.~\eqref{eq:phase_corr} and corrects only mode \emph{amplitudes}, in the spherical-harmonic basis anticipated in Sec.~\ref{subsec:sr-problem}. Every shell is transformed to its harmonic coefficients $a_{\ell m}$ (up to $\ell_{\max}=3000$), and each mode is rescaled by a per-shell transfer function
+The first pipeline (\texttt{ml/transfer/}) contains no image-level network at all: it exploits the phase-sharing fact of Eq.~\eqref{eq:phase_corr} and corrects only mode \emph{amplitudes}, in the spherical-harmonic basis anticipated in Sec.~\ref{subsec:sr-problem}. Every shell is transformed to its harmonic coefficients $a_{\ell m}$ (up to $\ell_{\max}=3000$), and each mode is rescaled by a per-shell transfer function \cite{feng_fastpm_2016, garrison_improving_2016}
 \begin{equation}
   a_{\ell m}^{\mathrm{corr}} = a_{\ell m}^{\mathrm{low}} \cdot T(\ell, s),
   \qquad
@@ -722,7 +709,7 @@ which by construction matches the target power spectrum while preserving the (co
 \end{equation}
 below which $T$ is forced to 1, with a raised-cosine ramp $w(\ell)$ handing over smoothly above it (a hard step in harmonic space rings in real space). This matches the measured behaviour: nearby shells visibly deviate from CosmoGridV1 from $\ell \sim 150$--$300$, while the most distant shells show no deviation out to $\ell = 3000$ -- and correctly receive no correction, because their $\ell_{\min}$ exceeds $\ell_{\max}$.
 
-\paragraph{Stochastic option.} Rescaling \emph{every} mode by the full $T$ matches $C_\ell$ in expectation but amplifies Disco-DJ's own single-realisation noise wherever $r<1$, overshooting the pixel variance of any one map. The \texttt{--stochastic} mode therefore splits the correction into a phase-correlated part, applied with the Wiener-like gain $r\,T$ to Disco-DJ's own modes, and the remaining power, filled with an \emph{independent} Gaussian realisation of spectrum $T^2(1-r^2)\,C_\ell^{\mathrm{low}}$; the two add to the correct total since $(rT)^2 + T^2(1-r^2) = T^2$. Fresh randomness thus enters exactly (and only) where the phases carry no information.
+\paragraph{\color{red}{Stochastic option.}} Rescaling \emph{every} mode by the full $T$ matches $C_\ell$ in expectation but amplifies Disco-DJ's own single-realisation noise wherever $r<1$, overshooting the pixel variance of any one map. The \texttt{--stochastic} mode therefore splits the correction into a phase-correlated part, applied with the Wiener-like gain $r\,T$ to Disco-DJ's own modes, and the remaining power, filled with an \emph{independent} Gaussian realisation of spectrum $T^2(1-r^2)\,C_\ell^{\mathrm{low}}$; the two add to the correct total since $(rT)^2 + T^2(1-r^2) = T^2$. Fresh randomness thus enters exactly (and only) where the phases carry no information.
 
 \paragraph{Positivity.} The corrected field is continuous and, on the sparse high-redshift shells, substantially negative (up to $\sim$49\% of pixels), whereas the truth is a non-negative count map. All cheap pixel-wise fixes were measured and rejected: clipping at zero, mean-debiasing after the clip, and a log-density formulation each destroy the small-scale $C_\ell$ that the correction just repaired (band ratios 0.74, 0.61, and 0.41 at $\ell = 800$--$1500$, versus 0.93 for the unclipped field). A statistically consistent re-discretisation was implemented in \texttt{poisson\_resample.py}: it builds a lognormal intensity $\lambda > 0$ carrying the shot-deconvolved target clustering -- mixing Disco-DJ's smoothed phases at low $\ell$ with an independent Gaussian realisation above, weighted by the measured $r(\ell)$ -- and draws $\mathrm{counts} \sim \mathrm{Poisson}(\lambda)$, with a damped fixed-point iteration calibrating the per-$\ell$ spectrum of $\lambda$; this yields integer counts with the correct mean, sparsity, and $C_\ell$ to a few percent. For the weak-lensing observables of this thesis, however, the unclipped continuous field is both cheaper and more accurate (convergence-$C_\ell$ ratios 0.94--1.01 versus 0.81--1.08 for the Poisson path), so \texttt{--no-clip} is the default and the Poisson re-discretisation is reserved for consumers that genuinely need per-pixel count validity.
 
@@ -773,9 +760,9 @@ The output head is likewise zero-initialised, so the untrained model predicts $v
   \draw[flow] (u4) -- (u3); \draw[flow] (u3) -- (u0); \draw[flow] (u0) -- (head);
   % FiLM arrows from embedding to blocks
   \foreach \b in {b1,b2,b3,b4,bot,u4,u0} {\draw[skiparrow] (emb.south) -- (\b.north);}
-  \node[note] at (5.05,1.2) {FiLM $(\mathrm{scale},\mathrm{shift})$ in every double-conv block};
+  \node[note] at (11.05,1.2) {FiLM $(\mathrm{scale},\mathrm{shift})$ in every double-conv block};
   % cosmo injection
-  \node[keybox, minimum height=6mm, font=\scriptsize] (cosmo) at (5.6,-1.5) {$\mathbf{c} \in \mathbb{R}^8$ (Eq.~\ref{eq:cosmo_z}) $\to$ MLP, zero-init};
+  \node[keybox, minimum height=6mm, font=\scriptsize] (cosmo) at (6.2,-1.5) {$\mathbf{c} \in \mathbb{R}^8$ (Eq.~\ref{eq:cosmo_z}) $\to$ MLP, zero-init};
   \draw[flowacc] (cosmo.north) -- (bot.south) node[midway, right, note] {$+$ at bottleneck};
 \end{tikzpicture}}
 \caption{The conditioned U-Net shared (as a local, independent copy) by both learned pipelines: \texttt{FlowUNet} takes 1 input channel ($x_t$) and embeds the flow time $t$; \texttt{DenoiserUNet} takes 2 (noisy residual $\oplus$ conditioning low map) and embeds the noise level $c_{\mathrm{noise}}(\sigma)$. The scalar embedding FiLM-modulates every block; the cosmology--redshift vector enters once, additively and zero-initialised, at the bottleneck.}
@@ -853,13 +840,13 @@ Development proceeded through three tiers of increasing scale -- a local worksta
 
 \begin{figure}[h!]
 \centering
-\begin{tikzpicture}[node distance=3mm and 10mm]
+\begin{tikzpicture}[node distance=10mm and 25mm]
   \node[databox, minimum width=37mm, minimum height=17mm] (local) {\textbf{Workstation}\\ \scriptsize $16^3$ end-to-end tests\\ \scriptsize $<1$ min, instant feedback};
   \node[box, minimum width=37mm, minimum height=17mm, right=of local] (euler) {\textbf{Euler (ETH)}\\ \scriptsize full $832^3$ runs, GPU builds\\ \scriptsize per-code environments};
   \node[keybox, minimum width=40mm, minimum height=17mm, right=of euler] (alps) {\textbf{Alps (CSCS)}\\ \scriptsize GH200, 120 GB/node\\ \scriptsize production sims $+$ training};
   \draw[flowacc] (local) -- (euler) node[midway, above, note] {memory-\\bound};
   \draw[flowacc] (euler) -- (alps) node[midway, above, note] {finer PM mesh,\\ larger batches};
-  \node[note] at (7.0,-1.7) {debugging loop: seconds \quad $\longleftrightarrow$ \quad headroom: Eq.~\eqref{eq:phasespace_mem} $\times$ code-specific overheads};
+  \node[note] at (6.0,-1.7) {debugging loop: seconds \quad $\longleftrightarrow$ \quad headroom: Eq.~\eqref{eq:phasespace_mem} $\times$ code-specific overheads};
 \end{tikzpicture}
 \caption{The three computing tiers. Each move to the right is forced by memory, not speed: the phase-space floor of Eq.~\eqref{eq:phasespace_mem} already exceeds a workstation, and Disco-DJ's PM mesh grows the demand further with resolution.}
 \label{fig:infra_tiers}

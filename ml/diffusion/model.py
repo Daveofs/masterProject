@@ -7,9 +7,15 @@ the first full-field run failed -- see diffusion-pipeline-build memory):
 The model does NOT generate the whole high-res field from noise. It generates only
 the small-scale (high-pass) RESIDUAL between high and low:
 
-    target x1 = highpass(high_log - low_log)          (small scales only)
-    cond      = low_log                                 (all scales, channel-concat)
-    corrected = low_log + highpass(diffusion_sample)   (compose at inference)
+    target x1 = highpass(high_f - low_f)          (small scales only)
+    cond      = low_f                                 (all scales, channel-concat)
+    corrected = low_f + highpass(diffusion_sample)   (compose at inference)
+
+low_f/high_f are whatever field --space selects (train_diffusion.py's transform_pair):
+'delta' (linear overdensity, the space analysis.full_sky.od_cl actually measures) by
+default since 2026-07-18, 'log1p' kept only for pre-2026-07-18 checkpoints/comparison
+-- see dataset.raw_to_delta_pair's docstring for the measured reason log1p was a
+formulation bug, not a detail.
 
 so the LARGE scales of the output are pinned EXACTLY to the low (DISCO) map and are
 never touched by the generator. This is dictated by the physics + the failure of the
@@ -32,7 +38,7 @@ CONSTRAIN it to the high-pass band via highpass() on both the target and the sam
 
 Everything ELSE is standard EDM: draw every sample from x_T ~ N(0, sigma_max^2 I),
 follow the Karras noise schedule + Heun 2nd-order sampler (~32 steps by default). The
-denoiser still conditions on the FULL low_log (all scales) via channel-concat -- it
+denoiser still conditions on the FULL low_f (all scales) via channel-concat -- it
 needs the large-scale context to know which small-scale structure to synthesize
 (low and high share small-scale PHASES per the transfer-fn memo), even though its
 OUTPUT is high-pass.
@@ -102,24 +108,24 @@ def highpass_2d(x: torch.Tensor, cutoff_frac: float, transition_frac: float) -> 
     return torch.fft.irfft2(f, s=(H, W))
 
 
-def residual_target(low_log: torch.Tensor, high_log: torch.Tensor,
+def residual_target(low_f: torch.Tensor, high_f: torch.Tensor,
                     cutoff_frac: float, transition_frac: float) -> torch.Tensor:
     """The diffusion TARGET x1: the high-pass part of the (high - low) residual. This
     is what the denoiser learns to produce -- small scales only, large scales dropped
     (they're supplied by the low map at compose time)."""
-    return highpass_2d(high_log - low_log, cutoff_frac, transition_frac)
+    return highpass_2d(high_f - low_f, cutoff_frac, transition_frac)
 
 
-def compose_corrected(low_log: torch.Tensor, sample: torch.Tensor,
+def compose_corrected(low_f: torch.Tensor, sample: torch.Tensor,
                       cutoff_frac: float, transition_frac: float) -> torch.Tensor:
-    """Re-assemble the corrected log-map from a diffusion SAMPLE: low map (all its
+    """Re-assemble the corrected field from a diffusion SAMPLE: low map (all its
     scales) + the high-pass sample. highpass() is applied to the sample again here
     (idempotent for an already-high-pass field) as a hard guarantee that the sample
     contributes NOTHING at large scales, so corrected's large scales == low's large
     scales exactly, independent of any low-frequency leakage the finite-step sampler
     might have left in. THE inverse of residual_target -- train and apply must both go
     through this pair."""
-    return low_log + highpass_2d(sample, cutoff_frac, transition_frac)
+    return low_f + highpass_2d(sample, cutoff_frac, transition_frac)
 
 
 class SinusoidalEmbedding(nn.Module):
@@ -266,7 +272,7 @@ class EDMPrecond(nn.Module):
         c_noise(sigma)= log(sigma) / 4
         D_theta(x, sigma, cond) = c_skip*x + c_out * F_theta(cat(c_in*x, cond), c_noise)
 
-    sigma_data should match the actual std of the target field (high_log) -- see
+    sigma_data should match the actual std of the target field (high_f) -- see
     train_diffusion.py's estimate_sigma_data, which measures it from real data
     instead of using EDM's CIFAR-tuned default of 0.5 blindly."""
 
@@ -347,7 +353,7 @@ def sample_heun(precond: EDMPrecond, cond: torch.Tensor, n_steps: int = 32,
                 noise: torch.Tensor | None = None, amp: bool = False) -> torch.Tensor:
     """EDM Algorithm 1, deterministic (S_churn=0): 2nd-order Heun ODE solver over the
     Karras sigma schedule, starting from x_T ~ N(0, sigma_max^2 I) -- independent of
-    cond, unlike sample_ode's x0=low_log. n_steps=32 by default (vs. the flow
+    cond, unlike sample_ode's x0=low_f. n_steps=32 by default (vs. the flow
     models' 4-8): a real diffusion trajectory is not a straight line, so it needs
     materially more function evaluations -- that is the whole point of trying this
     alternative, not a bug to tune away. Heun does UP TO 2 precond() calls per

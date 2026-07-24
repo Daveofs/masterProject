@@ -17,18 +17,26 @@ from .radial_power import radial_power
 
 
 def plot_example_patch_grid(rows, out_path, corrected_label="corrected", suptitle=None):
-    """rows: list of (row_label, low_log, corr_log, high_log) -- 2D log1p-delta
-    patches (see transforms.log1p_delta_pair). One row per shell/example. 4 columns:
-    low/corrected/high images + per-patch radial-power-ratio (the flat-patch analogue
-    of the C_ell ratio, bounded by that one patch's own Nyquist wavenumber)."""
+    """rows: list of (row_label, low_img, corr_img, high_img) -- 2D patches in
+    whatever overdensity space the CALLER chose to display (NOT necessarily log1p):
+    unet/apply_flow.py and diffusion/apply_diffusion.py pass their model's own
+    --space (default 'delta', the linear overdensity analysis.full_sky.od_cl
+    measures, since 2026-07-18); transfer/apply_transfer.py and
+    sphereflow/apply_sphere_flow.py pass genuine log1p (via transforms.log1p_delta_pair)
+    purely for display contrast. This function only draws the comparison -- it has
+    no opinion on which space rows arrives in, so the caller's own suptitle should
+    name the space (as the two model pipelines' now do). One row per shell/example.
+    4 columns: low/corrected/high images + per-patch radial-power-ratio (the
+    flat-patch analogue of the C_ell ratio, bounded by that one patch's own Nyquist
+    wavenumber)."""
     ns = len(rows)
     fig, axes = plt.subplots(ns, 4, figsize=(13, 3 * ns),
                              gridspec_kw={"width_ratios": [1, 1, 1, 1.3]})
     axes = np.atleast_2d(axes)
-    for i, (label, low_log, corr_log, high_log) in enumerate(rows):
-        vmin, vmax = float(high_log.min()), float(high_log.max())
-        for j, (img, ttl) in enumerate([(low_log, "low (DISCO)"), (corr_log, corrected_label),
-                                        (high_log, "high (CosmoGrid)")]):
+    for i, (label, low_img, corr_img, high_img) in enumerate(rows):
+        vmin, vmax = float(high_img.min()), float(high_img.max())
+        for j, (img, ttl) in enumerate([(low_img, "low (DISCO)"), (corr_img, corrected_label),
+                                        (high_img, "high (CosmoGrid)")]):
             a = axes[i, j]
             a.imshow(img, vmin=vmin, vmax=vmax, cmap="viridis")
             a.set_xticks([]); a.set_yticks([])
@@ -37,7 +45,7 @@ def plot_example_patch_grid(rows, out_path, corrected_label="corrected", suptitl
             if j == 0:
                 a.set_ylabel(label, fontsize=9)
 
-        pr_low = radial_power(low_log); pr_corr = radial_power(corr_log); pr_high = radial_power(high_log)
+        pr_low = radial_power(low_img); pr_corr = radial_power(corr_img); pr_high = radial_power(high_img)
         k = np.arange(len(pr_high))
         ai = axes[i, 3]
         with np.errstate(divide="ignore", invalid="ignore"):
@@ -555,8 +563,20 @@ def plot_train_val_loss(x, train_vals, val_vals, out_path, xlabel="epoch",
         train_plot, val_plot = train_vals, val_vals
 
     fig, ax = plt.subplots(figsize=(9, 5))
-    ax.plot(x, train_plot, "-o", ms=3, color="steelblue", label=train_label)
-    ax.plot(x, val_plot, "-o", ms=3, color="tomato", label=val_label)
+    # train drawn wider + dashed, val drawn on top solid + thinner + semi-
+    # transparent: whenever the two curves track closely (common once
+    # converged -- e.g. transfer's MLP emulator, where val is plotted second
+    # and used to fully occlude train underneath it since both lines were
+    # solid/opaque/same width), the dashed train line still pokes out from
+    # under val instead of disappearing entirely -- robust to how close the
+    # VALUES are, unlike an alpha-only fix. val's alpha=0.45 is additive on
+    # top of that (not a substitute for it): the dash pattern guarantees
+    # train is visible even under EXACT overlap, alpha just makes the overlap
+    # itself blend rather than read as a single flat line. (0.75 was tried
+    # first and was too subtle to actually notice -- 0.45 is a real, visible
+    # change, checked against a real plot, not just "should be different".)
+    ax.plot(x, train_plot, "--o", ms=3, lw=2.2, color="steelblue", label=train_label)
+    ax.plot(x, val_plot, "-o", ms=3, lw=1.3, alpha=0.45, color="tomato", label=val_label)
     if note:
         ax.text(0.02, 0.02, note, transform=ax.transAxes, fontsize=8, color="0.4")
     ax.axvline(x[best_i], color="0.6", ls=":", lw=1.0)

@@ -1,8 +1,10 @@
 """Time-conditioned UNet for conditional flow matching.
 
 Unlike model.py's UNet (deterministic, low -> high directly), this predicts a
-velocity field v_theta(x_t, t) used to integrate an ODE from x_0 = low_log
-(the low-fidelity patch, in delta space - NOT noise) to x_1, along the
+velocity field v_theta(x_t, t) used to integrate an ODE from x_0 = low_f
+(the low-fidelity patch, in whichever --space dataset.transform_pair selects --
+'delta' [linear overdensity] by default since 2026-07-18, 'log1p' only for
+pre-2026-07-18 checkpoints -- NOT noise) to x_1, along the
 straight-line interpolant x_t = (1-t)*x_0 + t*x_1.
 
 Starting the flow from the low-fidelity map instead of Gaussian noise is the
@@ -16,12 +18,12 @@ comparing all three pipelines' cl_ratio_by_zbin_grid.png / kappa_cl_pctile_band.
 diffusion's kappa Cl stayed near 1.0 everywhere; this model's and sphereflow's both
 showed a several-percent systematic LOW bias at every ell, and this model additionally
 showed a catastrophic percentile-band collapse on the sparsest shells -- see
-[[deepsphere-shell-correction]] memory). Root cause: x_1 used to be high_log directly,
+[[deepsphere-shell-correction]] memory). Root cause: x_1 used to be high_f directly,
 so the ODE was free to drift x_0's LARGE scales too, even though DISCO's large scales
 are already correct and need no correction -- any per-shell miscalibration there
 compounds coherently across the dozens of shells a kappa map integrates, exactly
 matching the observed kappa failure. Fix: x_1 is now x_0 + residual_target(x_0,
-high_log) -- a target that is IDENTICAL to x_0 at large scales (below --hp-cutoff)
+high_f) -- a target that is IDENTICAL to x_0 at large scales (below --hp-cutoff)
 and only diverges from it at small scales -- so the target velocity x_1-x_0 is a pure
 high-pass field, and integrating it can only ever add small-scale content. See
 residual_target/compose_corrected below and diffusion/model.py's docstring for the
@@ -75,26 +77,26 @@ def highpass_2d(x: torch.Tensor, cutoff_frac: float, transition_frac: float) -> 
     return torch.fft.irfft2(f, s=(H, W))
 
 
-def residual_target(low_log: torch.Tensor, high_log: torch.Tensor,
+def residual_target(low_f: torch.Tensor, high_f: torch.Tensor,
                     cutoff_frac: float = 0.10, transition_frac: float = 0.10) -> torch.Tensor:
-    """The flow TARGET's high-pass component: highpass(high_log - low_log). Combined
-    with x0=low_log, x1 = x0 + residual_target(...) makes the target velocity
+    """The flow TARGET's high-pass component: highpass(high_f - low_f). Combined
+    with x0=low_f, x1 = x0 + residual_target(...) makes the target velocity
     x1-x0 == this residual exactly -- a pure high-pass field, so the ODE can only
-    ever add small-scale content (large scales start AND end at low_log)."""
-    return highpass_2d(high_log - low_log, cutoff_frac, transition_frac)
+    ever add small-scale content (large scales start AND end at low_f)."""
+    return highpass_2d(high_f - low_f, cutoff_frac, transition_frac)
 
 
-def compose_corrected(low_log: torch.Tensor, sample: torch.Tensor,
+def compose_corrected(low_f: torch.Tensor, sample: torch.Tensor,
                       cutoff_frac: float = 0.10, transition_frac: float = 0.10) -> torch.Tensor:
-    """Re-assemble the corrected field from whatever the ODE produced: low_log +
-    highpass(sample). `sample` here is (ODE output - low_log), i.e. the EFFECTIVE
+    """Re-assemble the corrected field from whatever the ODE produced: low_f +
+    highpass(sample). `sample` here is (ODE output - low_f), i.e. the EFFECTIVE
     residual the integration actually accumulated -- highpass-ing it AGAIN before
-    adding back is a hard guarantee that large scales end up EXACTLY low_log's,
+    adding back is a hard guarantee that large scales end up EXACTLY low_f's,
     independent of any large-scale drift finite-step Euler integration left in
     (idempotent for an already-high-pass field, so this is a no-op when the ODE
     behaved perfectly). THE inverse of residual_target -- train and apply must both
     go through this pair, see diffusion/model.py's identical compose_corrected."""
-    return low_log + highpass_2d(sample, cutoff_frac, transition_frac)
+    return low_f + highpass_2d(sample, cutoff_frac, transition_frac)
 
 
 class SinusoidalTimeEmbedding(nn.Module):
@@ -131,15 +133,15 @@ class FiLMDoubleConv(nn.Module):
     def forward(self, x, emb):
         h = self.act1(self.norm1(self.conv1(x)))
         scale, shift = self.film(emb).chunk(2, dim=1)
-        h = h * (1 + scale[:, :, None, None]) + shift[:, :, None, None]
+        h = h * (1 + scale[:, :, None, None]) + shift[:, :, None, None] # rescales and shifts every channel content
         return self.act2(self.norm2(self.conv2(h)))
 
 
 class Down(nn.Module):
     def __init__(self, in_ch, out_ch, emb_dim):
         super().__init__()
-        self.pool = nn.MaxPool2d(2)
-        self.conv = FiLMDoubleConv(in_ch, out_ch, emb_dim)
+        self.pool = nn.MaxPool2d(2) # Half the spatial resolution
+        self.conv = FiLMDoubleConv(in_ch, out_ch, emb_dim) # Doubles the channels
 
     def forward(self, x, emb):
         return self.conv(self.pool(x), emb)
@@ -148,8 +150,8 @@ class Down(nn.Module):
 class Up(nn.Module):
     def __init__(self, in_ch, skip_ch, out_ch, emb_dim):
         super().__init__()
-        self.up = nn.ConvTranspose2d(in_ch, in_ch // 2, kernel_size=2, stride=2)
-        self.conv = FiLMDoubleConv(in_ch // 2 + skip_ch, out_ch, emb_dim)
+        self.up = nn.ConvTranspose2d(in_ch, in_ch // 2, kernel_size=2, stride=2) # Double the spatial resolution
+        self.conv = FiLMDoubleConv(in_ch // 2 + skip_ch, out_ch, emb_dim)  # Halves the channels
 
     def forward(self, x, skip, emb):
         x = self.up(x)
@@ -238,8 +240,8 @@ class FlowUNet(nn.Module):
 @torch.no_grad()
 def sample_ode(model: FlowUNet, x0: torch.Tensor, n_steps: int = 4,
               cosmo_z: torch.Tensor | None = None, amp: bool = False) -> torch.Tensor:
-    """Integrate dx/dt = v_theta(x, t [, cosmo_z]) from t=0 (x0 = low_log) to t=1
-    (predicted high_log), simple Euler steps. x0 is close to x1 by construction (same
+    """Integrate dx/dt = v_theta(x, t [, cosmo_z]) from t=0 (x0 = low_f) to t=1
+    (predicted high_f), simple Euler steps. x0 is close to x1 by construction (same
     large-scale structure), so few steps should suffice - unlike diffusion
     sampling from pure noise, which typically needs dozens+.
 

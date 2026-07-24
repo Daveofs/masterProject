@@ -834,10 +834,19 @@ def _finalize_train(X, y, sum_cross, sum_low, sum_high, r_counts, last_cosmo, la
         _sys.path.insert(0, str(Path(__file__).parent.parent))
         from analysis.plotting import plot_train_val_loss
         loss_png = Path(out).with_suffix("").with_suffix(".loss.png")
+        # smooth_window=15: at EVAL_EVERY=200 steps/point, a real run easily
+        # accumulates hundreds of points (job 2884508: 567) -- most of them
+        # packed into the post-convergence plateau, where they read as a dense,
+        # noisy smear rather than a legible trend. 15-point rolling mean (~3000
+        # steps) decluters that without hiding a genuine trend change; the
+        # best-val marker still uses the RAW value/step (see
+        # plot_train_val_loss's docstring), so early-stopping's actual
+        # checkpoint choice is never misrepresented by the smoothing.
         plot_train_val_loss(
             step_hist, train_loss_hist, val_loss_hist, loss_png,
             xlabel="step", ylabel="MLP squared-error loss (T emulator)",
             val_label=f"validation (10% held-out samples, alpha={alpha:g})",
+            smooth_window=15,
             formula=r"loss $=\frac{1}{2N}\sum_i(T_i-\hat T_i)^2$  "
                     "(L2 weight decay is an optimizer detail, not shown)")
     except Exception as e:
