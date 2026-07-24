@@ -47,14 +47,65 @@
 
 \begin{titlepage}
     \centering
-    \vspace*{1cm}
+    \vspace*{2mm}
     {\LARGE\bfseries AI-Enhanced Fast Cosmological Simulations for Accurate Large-Scale Structure Inference\\}
-    \vspace{1cm}
+    \vspace{6mm}
     {\large David Amrein, Jozef Bucko, Alexandre Refregier\\}
-    \vspace{0.5cm}
+    \vspace{2mm}
     {\large \today\\}
-    \vspace{1.5cm}
-    \includegraphics[width=0.6\linewidth]{plots/background/place_holder.png}
+    \vspace{6mm}
+    % ----- cover picture: the thesis in one diagram (assets: plots/cover/) -----
+    \resizebox{0.88\linewidth}{!}{%
+    \begin{tikzpicture}[x=1cm, y=1cm]
+      % --- cosmologies ---
+      \node[box, minimum width=38mm] (cos) at (3.0,16.1) {\textbf{Cosmologies}\\ \scriptsize $\Omega_{cdm},\ \Omega_b,\ \sigma_8,\ n_s,\ w_0,\ H_0$};
+      % --- initial conditions snapshot ---
+      \node[inner sep=0pt, draw=hairc, semithick] (ic) at (3.0,12.7) {\includegraphics[width=26mm]{plots/cover/snapshots_000.png}};
+      \node[note, anchor=south east] at (ic.north west) {$z = 99$};
+      \draw[flowacc] (cos.south) -- (ic.north) node[midway, right=1.5mm, note, align=left] {IC generation\\ Sec.~\ref{sec:ic_generation}};
+      % --- evolved box (PM branch) ---
+      \node[inner sep=0pt, draw=hairc, semithick] (z0) at (1.7,8.2) {\includegraphics[width=30mm]{plots/cover/snapshot_140.png}};
+      \node[note, anchor=south east] at (z0.north west) {$z = 0$};
+      \draw[flow] (ic.south) to[bend right=14]
+          node[pos=0.5, left=1.5mm, note, align=right] {PM: Disco-DJ\\ Sec.~\ref{sec:discodj}} (z0.north);
+      % --- DISCO lightcone (Mollweide, clipped to the ellipse) ---
+      \begin{scope}
+        \clip (2.6,3.4) ellipse [x radius=2.46, y radius=1.22];
+        \node at (2.6,3.4) {\includegraphics[width=50mm]{plots/cover/lightcone.png}};
+      \end{scope}
+      \draw[hairc, semithick] (2.6,3.4) ellipse [x radius=2.46, y radius=1.22];
+      % zoom funnel: the evolved box is one patch of the full lightcone
+      \draw[fill=hairc, fill opacity=0.28, draw=inkc!50, semithick]
+          (z0.south west) -- (z0.south east) -- (3.10,4.32) -- (2.72,4.32) -- cycle;
+      \draw[inkc!60, semithick] (2.72,4.02) rectangle (3.10,4.32);
+      \draw[flowacc] (z0.west) to[bend right=30]
+          node[pos=0.45, left=1.5mm, note, align=right] {shell builder\\ Sec.~\ref{sec:shell_builder}} (0.55,4.05);
+      \node[note] at (2.6,1.85) {\textsc{Disco-DJ} lightcone (low)};
+      % --- CosmoGrid lightcone (FMM branch) ---
+      \begin{scope}
+        \clip (8.1,3.4) ellipse [x radius=2.46, y radius=1.22];
+        \node at (8.1,3.4) {\includegraphics[width=50mm]{plots/cover/lightcone.png}};
+      \end{scope}
+      \draw[hairc, semithick] (8.1,3.4) ellipse [x radius=2.46, y radius=1.22];
+      \draw[flow] (ic.east) to[bend left=32]
+          node[pos=0.45, right=1.5mm, note, align=left] {FMM: \textsc{PkdGrav3}\\ Sec.~\ref{sec:pkdgrav}} (8.1,4.75);
+      \node[note] at (8.1,1.85) {CosmoGridV1 lightcone (high)};
+      % --- angular power spectrum sketch: the correction closes the gap ---
+      \begin{scope}[shift={(4.35,-1.15)}]
+        \draw[flow, color=mutedc] (0,0) -- (2.7,0) node[below left=0mm, note] {$\ell$};
+        \draw[flow, color=mutedc] (0,0) -- (0,1.55) node[left, note] {$C_\ell$};
+        \draw[dashed, mutedc] (0.05,1.25) -- (2.55,1.25);
+        \draw[inkc, semithick]  plot[smooth] coordinates {(0.1,1.24) (1.1,1.2) (1.7,1.05) (2.1,0.75) (2.4,0.35)};
+        \draw[accentc, semithick] plot[smooth] coordinates {(0.1,1.24) (1.3,1.23) (1.9,1.18) (2.3,1.05) (2.5,0.9)};
+        \node[tinylabel, text=inkc] at (2.15,0.18) {low};
+        \node[tinylabel, text=accentc] at (3.05,0.9) {corrected};
+      \end{scope}
+      \draw[flowacc] (2.9,1.6) to[bend right=25] (4.6,-0.15);
+      \draw[flow] (7.8,1.6) to[bend left=25] (7.15,-0.35);
+      \node[note, align=left, anchor=east] at (4.3,-0.55)
+          {correction pipelines, Sec.~\ref{sec:correction-pipelines}:\\
+           \textcolor{ctrans}{$\bullet$ transfer} \; \textcolor{cunet}{$\bullet$ unet-flow} \; \textcolor{cdiff}{$\bullet$ diffusion}};
+    \end{tikzpicture}}
     \vfill
     {\large Master Thesis \\ Department of Physics \\ ETH Zurich}  % adjust as needed
 \end{titlepage}
@@ -63,8 +114,22 @@
 
 \chapter*{Abstract}
 \addcontentsline{toc}{chapter}{Abstract}
+
+Map-level, simulation-based inference from large-scale-structure surveys requires very large numbers of accurate lightcone simulations -- a demand that gravity solvers like \textsc{PkdGrav3}, which anchor the CosmoGridV1 reference suite, can only meet at a cost of many node-hours per realisation. Fast particle-mesh codes such as Disco-DJ produce the same large-scale clustering in minutes, but their mesh-limited force resolution progressively suppresses small-scale power -- precisely the scales that carry much of the non-Gaussian information such analyses exploit. This thesis builds and validates a pipeline that combines the speed of the particle-mesh solver with the small-scale accuracy of the tree code. For each CosmoGridV1 cosmology, identical backscaled initial conditions are reconstructed from the published linear perturbations and handed to both solvers, and a custom shell builder embedded in Disco-DJ's time integration reproduces \textsc{PkdGrav3}'s moving-lightcone crossing condition on CosmoGridV1's exact radial shell grid -- yielding paired full-sky lightcones that differ only through the force solver. On these pairs, three correction models are trained and compared on held-out cosmologies: a deterministic per-multipole transfer-function rescaling in harmonic space, a conditional flow-matching U-Net that transports each map patch from low to high fidelity, and an EDM-style conditional diffusion model that generates the missing small-scale residual from noise. All three restore the angular power spectrum of the corrected lightcones to the few-percent level on the scales they act on; the two generative models additionally recover the non-Gaussian one-point moments and the weak-lensing convergence statistics that the deterministic rescaling by construction cannot. The corrected fast lightcones thus approach the reference simulations at a small fraction of their cost.
+
 \chapter{Introduction}
+\label{ch:introduction}
+
+The large-scale structure (LSS) of the Universe -- the cosmic web of halos, filaments, sheets, and voids traced by galaxies and dark matter -- is one of the richest available probes of cosmology: its growth over cosmic time is sensitive to the matter density $\Omega_m$, the clustering amplitude $\sigma_8$, and the dark-energy equation of state $w_0$ (Sec.~\ref{sec:cosmic_web}). Photometric surveys now measure this structure over large fractions of the sky, and the most powerful analyses no longer compress the data to two-point functions: they work at the \emph{map level}, extracting non-Gaussian information with deep networks trained on simulations \cite{fluri_full_2022, thomsen_dark_2026}. The price of this approach is simulation demand. Map-level inference is \emph{simulation-based}: every evaluation of the likelihood is implicit in a forward-simulated mock, so the analysis consumes entire suites of $N$-body lightcones spanning thousands of cosmologies -- the role played by CosmoGridV1 \cite{kacprzak_cosmogridv1_2023}, whose realisations are each expensive \textsc{PkdGrav3} runs (Sec.~\ref{sec:pkdgrav}).
+
+Fast approximate solvers offer a way out. Particle-mesh (PM) codes such as Disco-DJ \cite{list_disco-dj_2026} evolve the same initial conditions in minutes on a single GPU (Sec.~\ref{sec:discodj}), but their force resolution is capped by the mesh: small-scale power is progressively suppressed, and with it exactly the non-Gaussian content that motivates map-level inference in the first place. The question this thesis addresses is therefore: \emph{can the small-scale content of an expensive reference simulation be restored onto a cheap particle-mesh lightcone, accurately enough for map-level statistics, at negligible additional cost?}
+
+Answering it requires two ingredients that are as much infrastructure as machine learning. First, a controlled learning problem: the low- and high-fidelity maps must differ \emph{only} through the force solver, which demands byte-identical initial conditions (Sec.~\ref{sec:ic_generation}) and lightcones defined on identical radial shells -- the latter provided by a shell builder implemented inside Disco-DJ's time integration (Sec.~\ref{sec:shell_builder}), since the code's native lightcone support does not reach CosmoGridV1's depth. Second, the corrections themselves (Sec.~\ref{sec:correction-pipelines}): a deterministic transfer-function rescaling in spherical-harmonic space, and two generative, patch-based models -- conditional flow matching and EDM diffusion -- that draw genuinely stochastic small-scale structure where the fast solver carries none. Chapter~\ref{ch:results} evaluates all three on cosmologies held out of training, from per-shell power spectra down to weak-lensing convergence maps.
+
+The remainder of this chapter provides the background these methods rest on: the cosmological framework and the simulation codes (Sec.~\ref{sec:theoretical-background}), followed by the machine-learning concepts -- U-Nets, flow matching, and diffusion -- that the correction pipelines instantiate (Sec.~\ref{sec:sr-methods}).
+
 \section{Theoretical Background}
+\label{sec:theoretical-background}
 \subsection{Cosmological Framework}
 \subsubsection{The Cosmic Web}
 \label{sec:cosmic_web}
@@ -94,13 +159,55 @@ with $n_s$ the scalar spectral index \cite{eisenstein_baryonic_1998, huterer_gro
 \begin{equation}
     T(k) = 1 - \frac{k}{k_{\mathrm{eq}}} + \dots, \qquad k_{\mathrm{eq}} = H_0\sqrt{\frac{2\Omega_m}{\Omega_r}},
 \end{equation}
-\cite{bardeen_statistics_1986, eisenstein_baryonic_1998}. The transfer function is therefore an essential ingredient of the matter power spectrum, alongside the matter and radiation densities, and it also depends on the neutrino mass, as illustrated in Figure~\ref{fig:transfer_function}: massive neutrinos free-stream out of small-scale perturbations and suppress $T(k)$ below their free-streaming scale.
+\cite{bardeen_statistics_1986, eisenstein_baryonic_1998}. The transfer function is therefore shaped by the energy content of the Universe at each epoch: the scale $k_{\mathrm{eq}}$ is set by matter--radiation equality -- the crossing of the radiation and matter curves in Figure~\ref{fig:transfer_function} -- and massive neutrinos modify this budget in a scale-dependent way. As the red curves in Figure~\ref{fig:transfer_function} show, each neutrino mass state behaves as radiation while relativistic and dilutes like matter after its non-relativistic transition; in between, neutrinos free-stream out of small-scale perturbations and suppress $T(k)$ below their free-streaming scale.
 
 \begin{figure}[h!]
-    \centering
-    \includegraphics[width=0.8\linewidth]{plots/background/transfer_function.png}
-    \caption{Linear matter transfer function for three neutrino masses, $m_{\nu_1}=0$, $m_{\nu_2}=0.009$ and $m_{\nu_3}=0.05$~eV (red curves). Reproduced from \cite{lesgourgues_massive_2006}.}
-    \label{fig:transfer_function}
+\centering
+\begin{tikzpicture}[x=1cm, y=1cm]
+  % ---- axes (log-log): x = a/a0 from 1e-9 to 1, y = Omega_i from 1e-4 to 1 ----
+  \draw[semithick, inkc] (0,0) rectangle (10,6);
+  \foreach \x/\lab in {0.53/{$10^{-9}$}, 3.68/{$10^{-6}$}, 6.84/{$10^{-3}$}, 10/{$1$}}{
+    \draw[inkc] (\x,0) -- (\x,0.1); \node[note] at (\x,-0.35) {\lab};}
+  \foreach \y/\lab in {0.42/{$10^{-4}$}, 1.81/{$10^{-3}$}, 3.20/{$10^{-2}$}, 4.60/{$10^{-1}$}, 6.0/{$1$}}{
+    \draw[inkc] (0,\y) -- (0.1,\y); \node[note, anchor=east] at (-0.1,\y) {\lab};}
+  \node[note] at (5,-0.9) {$a/a_0$};
+  \node[note, rotate=90] at (-1.15,3) {$\Omega_i$};
+  % matter-radiation equality marker
+  \draw[dashed, mutedc] (6.29,0) -- (6.29,6);
+  \node[note] at (6.29,6.3) {$a_{\mathrm{eq}}$};
+  % ---- photons (radiation): flat, then diluting away after equality ----
+  \draw[cunet, semithick, dashed] plot[smooth] coordinates
+    {(0,5.78) (5.3,5.75) (6.29,5.55) (7.5,3.9) (8.8,2.0) (10,0.15)};
+  % ---- cdm: grows towards equality, dominates, dips as Lambda takes over ----
+  \draw[ctrans, semithick, dotted] plot[smooth] coordinates
+    {(2.18,0) (4.0,2.4) (5.5,4.4) (6.29,5.1) (7.0,5.5) (8.0,5.62) (9.0,5.55) (9.6,5.35) (10,5.18)};
+  % ---- baryons: parallel to cdm, lower amplitude ----
+  \draw[cdiff, thin] plot[smooth] coordinates
+    {(2.95,0) (4.7,2.3) (6.29,4.1) (7.0,4.45) (8.0,4.6) (9.0,4.5) (9.6,4.3) (10,4.17)};
+  % ---- Lambda: steep late-time rise ----
+  \draw[accentc, semithick, dashdotted] plot[smooth] coordinates
+    {(8.2,0.2) (8.8,2.2) (9.4,4.3) (9.8,5.4) (10,5.78)};
+  % ---- neutrinos (red): radiation-like early; massive states peel off ----
+  \draw[red!75!black, very thick] plot[smooth] coordinates
+    {(0,4.83) (6.29,4.58) (7.6,3.35) (8.3,2.6) (9.0,2.35) (9.6,2.25) (10,1.9)};
+  \draw[red!75!black, semithick] plot[smooth] coordinates
+    {(6.29,4.58) (7.6,3.3) (8.3,2.5) (8.9,1.7) (9.5,1.35) (10,1.1)};
+  \draw[red!75!black, thin] plot[smooth] coordinates
+    {(6.29,4.55) (7.8,2.7) (9.0,1.0) (9.7,0.1)};
+  \node[note, text=red!75!black] at (9.0,2.85) {$\nu_3$};
+  \node[note, text=red!75!black] at (9.35,1.0) {$\nu_2$};
+  \node[note, text=red!75!black] at (8.55,0.55) {$\nu_1$};
+  % ---- legend (empty lower-left region) ----
+  \begin{scope}[shift={(0.45,3.0)}]
+    \draw[ctrans, semithick, dotted] (0,1.6) -- (0.7,1.6); \node[note, anchor=west] at (0.8,1.6) {cdm};
+    \draw[cdiff, thin] (0,1.2) -- (0.7,1.2); \node[note, anchor=west] at (0.8,1.2) {b};
+    \draw[cunet, semithick, dashed] (0,0.8) -- (0.7,0.8); \node[note, anchor=west] at (0.8,0.8) {$\gamma$};
+    \draw[accentc, semithick, dashdotted] (0,0.4) -- (0.7,0.4); \node[note, anchor=west] at (0.8,0.4) {$\Lambda$};
+    \draw[red!75!black, semithick] (0,0.0) -- (0.7,0.0); \node[note, anchor=west] at (0.8,0.0) {$\nu_{1,2,3}$};
+  \end{scope}
+\end{tikzpicture}
+\caption{Evolution of the density parameters $\Omega_i(a)$ for photons ($\gamma$), cold dark matter, baryons, a cosmological constant, and three neutrino mass states $m_{\nu_1}=0$, $m_{\nu_2}=0.009$, $m_{\nu_3}=0.05$~eV (red curves; schematic redraw after \cite{lesgourgues_massive_2006}). Radiation dominates early, matter after the equality epoch $a_{\mathrm{eq}}$, and $\Lambda$ today. Each massive neutrino state tracks radiation until its non-relativistic transition and dilutes like matter afterwards -- the scale-dependent change in the energy budget that imprints the neutrino mass on $T(k)$.}
+\label{fig:transfer_function}
 \end{figure}
 
 The suppression propagates from $P(k)$ into every projected statistic, in particular the angular power spectrum $C_\ell$, which is (schematically) a line-of-sight projection of the three-dimensional power,
@@ -111,10 +218,38 @@ The suppression propagates from $P(k)$ into every projected statistic, in partic
 \cite{seljak_line_1996}; Figure~\ref{fig:neutrinos_effect} shows the resulting effect of the neutrino mass on $C_\ell$.
 
 \begin{figure}[h!]
-    \centering
-    \includegraphics[width=0.8\linewidth]{plots/background/neutrinos_effect.png}
-    \caption{Effect of the neutrino mass on the angular power spectrum. Reproduced from \cite{lesgourgues_massive_2006}.}
-    \label{fig:neutrinos_effect}
+\centering
+\begin{tikzpicture}[x=0.0062cm, y=0.85cm]
+  % ---- axes: ell in [2, 1500], l(l+1)Cl/2pi in arbitrary units ----
+  \draw[semithick, inkc] (2,0) rectangle (1520,6.4);
+  \foreach \x in {200, 600, 1000, 1400}{
+    \draw[inkc] (\x,0) -- (\x,0.12); \node[note] at (\x,-0.4) {$\x$};}
+  \node[note] at (760,-0.85) {$\ell$};
+  \node[note, rotate=90] at (-155,3.2) {$\ell(\ell+1)\,C_\ell / 2\pi$ \ (arb.\ units)};
+  % ---- no neutrinos (dotted black): peaks shifted, different heights ----
+  \draw[inkc, thick, dotted] plot[smooth] coordinates
+    {(2,0.8) (120,1.9) (160,3.2) (205,4.85) (250,4.1) (310,2.5) (360,1.6) (400,1.55)
+     (450,2.1) (510,2.95) (570,2.6) (630,2.0) (680,2.3) (720,2.95) (780,2.6) (850,1.7)
+     (920,1.2) (1000,1.45) (1090,1.2) (1180,0.85) (1270,1.1) (1360,0.85) (1450,0.6)};
+  % ---- f_nu = 0 (solid red) ----
+  \draw[red!75!black, semithick] plot[smooth] coordinates
+    {(2,0.85) (60,1.0) (120,2.0) (170,3.6) (220,5.75) (270,5.0) (330,3.1) (390,1.95)
+     (430,1.8) (490,2.2) (540,2.65) (600,2.35) (660,1.95) (700,1.9) (760,2.35) (810,2.75)
+     (880,2.3) (950,1.55) (1020,1.15) (1120,1.35) (1220,1.05) (1320,0.85) (1420,0.95) (1500,0.75)};
+  % ---- f_nu = 0.1 (dashed green): same phases, boosted peaks ----
+  \draw[cunet, semithick, dashed] plot[smooth] coordinates
+    {(2,0.85) (60,1.0) (120,2.1) (170,3.8) (220,6.15) (270,5.3) (330,3.2) (390,2.0)
+     (430,1.85) (490,2.3) (540,2.8) (600,2.45) (660,2.0) (700,1.95) (760,2.4) (810,2.8)
+     (880,2.35) (950,1.6) (1020,1.2) (1120,1.4) (1220,1.1) (1320,0.9) (1420,1.0) (1500,0.78)};
+  % ---- legend ----
+  \begin{scope}[shift={(1000,5.9)}]
+    \draw[inkc, thick, dotted] (0,0) -- (100,0); \node[note, anchor=west] at (115,0) {no $\nu$'s};
+    \draw[red!75!black, semithick] (0,-0.45) -- (100,-0.45); \node[note, anchor=west] at (115,-0.45) {$f_\nu = 0$};
+    \draw[cunet, semithick, dashed] (0,-0.9) -- (100,-0.9); \node[note, anchor=west] at (115,-0.9) {$f_\nu = 0.1$};
+  \end{scope}
+\end{tikzpicture}
+\caption{CMB temperature angular power spectrum for a cosmology without neutrinos, with massless neutrinos ($f_\nu = 0$), and with a neutrino fraction $f_\nu = 0.1$ (schematic redraw after \cite{lesgourgues_massive_2006}). Removing or weighing the neutrino component shifts and rescales the acoustic peaks -- the projected, observable imprint of the transfer-function changes of Figure~\ref{fig:transfer_function}.}
+\label{fig:neutrinos_effect}
 \end{figure}
 
 The dependence on the neutrino mass is not a side note here: it reappears directly when generating the initial conditions for the simulations in Sec.~\ref{sec:ic_generation}, since matching the transfer function -- neutrinos included -- is a precondition for those initial conditions to be consistent with CosmoGridV1. More generally, obtaining $P(k)$ precisely requires solving the coupled linear Einstein--Boltzmann equations for the perturbed Friedmann--Lema\^itre--Robertson--Walker metric and the phase-space distributions of all matter and radiation species -- the system solved by the \textsc{class} code used in Sec.~\ref{sec:ic_generation} and by the differentiable Einstein--Boltzmann module of the Disco-DJ framework \cite{hahn_disco-dj_2024}.
@@ -151,10 +286,34 @@ The gravity solver \textsc{PkdGrav3} takes the opposite approach: rather than a 
 This accuracy is not free: particles in different regions of a cosmological box span many orders of magnitude in local density, and hence in dynamical time, so a single global time step would be highly wasteful. \textsc{PkdGrav3} instead assigns each particle to one of several time-step ``rungs'', advancing only the particles active on a given rung at each sub-step, and additionally builds a second, smaller tree restricted to the small subset of particles on the shortest (``very active'') rungs so that this frequently-rebuilt tree stays cheap. The combination is summarised by the kick-drift-kick ``umbrella'' diagram over one base time step shown in Figure~\ref{fig:pkd_rungs}; it keeps the tree-construction cost from dominating the runtime even though the shortest rungs may be walked hundreds of times per base step \cite{potter_pkdgrav3_2016}.
 
 \begin{figure}[h!]
-    \centering
-    \includegraphics[width=0.5\linewidth]{plots/background/pkdgrav_rungs.png}
-    \caption{Kick--drift--kick ``umbrella'' diagram of \textsc{PkdGrav3}'s hierarchical multi-stepping over one base time step: each lower rung halves the step size, and only the particles on a given rung are advanced at its sub-steps. Reproduced from \cite{potter_pkdgrav3_2016}.}
-    \label{fig:pkd_rungs}
+\centering
+\begin{tikzpicture}[x=1cm, y=1cm]
+  % ---- time axis ----
+  \draw[-{Stealth[length=2.4mm]}, semithick, inkc] (0,0) -- (12.9,0);
+  \node[note] at (6.3,-0.4) {time};
+  % ---- rung 0: one base step (large drift arch) ----
+  \draw[inkc, semithick] (0.3,0) .. controls (3.3,4.6) and (9.3,4.6) .. (12.3,0);
+  \draw[flow, color=inkc] (0.3,4.35) -- (0.3,3.55) node[pos=0, above, font=\small] {Kick};
+  % ---- rung 1: two arches, half the step ----
+  \draw[inkc, semithick] (0.3,0) .. controls (1.8,3.1) and (4.8,3.1) .. (6.3,0);
+  \draw[inkc, semithick] (6.3,0) .. controls (7.8,3.1) and (10.8,3.1) .. (12.3,0);
+  \draw[flow, color=inkc] (6.3,3.3) -- (6.3,2.6) node[pos=0, above, font=\small] {Kick};
+  % ---- rungs 2+3 ("very active", frequently rebuilt small tree) ----
+  \foreach \s in {0.3, 3.3, 6.3, 9.3}{
+    \draw[red!75!black, semithick] (\s,0) .. controls (\s+0.75,1.45) and (\s+2.25,1.45) .. (\s+3,0);}
+  \foreach \s in {0.3, 1.8, 3.3, 4.8, 6.3, 7.8, 9.3, 10.8}{
+    \draw[red!75!black, thin] (\s,0) .. controls (\s+0.37,0.75) and (\s+1.13,0.75) .. (\s+1.5,0);}
+  \node[note, rotate=90, text=red!75!black] at (-0.45,0.9) {very active};
+  % ---- inactive-tree arrows: the big tree is reused across the small sub-steps ----
+  \foreach \c in {3.3, 9.3}{
+    \draw[flow, color=ctrans] (\c,2.55) -- (\c-1.5,1.25);
+    \draw[flow, color=ctrans] (\c,2.55) -- (\c,1.35);
+    \draw[flow, color=ctrans] (\c,2.55) -- (\c+1.5,1.25);}
+  \node[font=\small, text=ctrans] at (3.3,2.85) {inactive tree};
+  \node[font=\small, text=ctrans] at (9.3,2.85) {inactive tree};
+\end{tikzpicture}
+\caption{Kick--drift--kick ``umbrella'' diagram of \textsc{PkdGrav3}'s hierarchical multi-stepping over one base time step (schematic redraw after \cite{potter_pkdgrav3_2016}). Each lower rung halves the step size, and only the particles active on that rung are advanced at its sub-steps (red arches). The tree built for the slow, inactive particles is reused across many of these short sub-steps (blue arrows); only the small ``very active'' subset gets its own frequently-rebuilt tree, which keeps tree construction from dominating the runtime.}
+\label{fig:pkd_rungs}
 \end{figure}
 
 It is precisely this combination of a per-particle tree, per-particle rung state, and domain-decomposition buffers that gives \textsc{PkdGrav3} the larger, and rather different, memory footprint discussed quantitatively in Sec.~\ref{sec:local_dev}.
@@ -588,9 +747,8 @@ One measured property of the data drives every design choice that follows. The p
 \end{equation}
 computed across the training runs (\texttt{ml/transfer/transfer\_function.py}), shows that on the shells that carry signal, the low and high maps \emph{share phases} ($r \approx 0.9$--$1.0$) well into the small scales: Disco-DJ mostly gets the small-scale \emph{amplitude} wrong, not the positions of structures. This is why a pure amplitude rescaling (Sec.~\ref{subsec:pipe-transfer}) works at all. Only where $r$ decays -- on faint, shot-noise-dominated shells and at the highest multipoles (e.g.\ $r=0.56$ at $\ell=1000$ and $0.06$ at $\ell=2500$ on the faintest shells) -- do the maps genuinely decorrelate, and there the correct behaviour is not to amplify Disco-DJ's own noise but to \emph{generate} statistically fresh small-scale structure, which is precisely the role of the two generative pipelines (Secs.~\ref{subsec:pipe-unet-flow}, \ref{subsec:pipe-diffusion}).
 
-Three further design decisions are shared by all learned components and are motivated by measured failures of their alternatives:
+Two further design decisions are shared by all learned components and are motivated by measured failures of their alternatives:
 \begin{itemize}
-  \item \textbf{\color{red}{Work in linear overdensity $\delta$, not $\log(1+\delta)$.}} The evaluation statistic (the angular power spectrum of $\delta$, \texttt{analysis/full\_sky.py}) lives in linear space. Training in log space compresses density peaks so strongly that the low/high power ratio there looks nearly correct (0.93--1.05) while the linear-space ratio the analysis actually measures is still deficient (down to 0.62 at high wavenumber) -- a model trained on the log-space residual therefore optimises a statistic that is already right and barely moves the one that matters (\texttt{ml/unet/dataset.py}).
   \item \textbf{Correct only the small scales; pin the large scales to Disco-DJ.} Disco-DJ's large scales are already correct ($T\approx 1$, $r\approx 1$), so both generative pipelines are formulated as \emph{high-pass residual} models: the learning target is $\mathrm{HP}(\mathrm{high}-\mathrm{low})$, where $\mathrm{HP}$ is a radial Fourier high-pass with a raised-cosine transition (cutoff and transition width both $0.1$ of the patch Nyquist frequency by default), and the corrected patch is composed as $\mathrm{low} + \mathrm{HP}(\mathrm{sample})$. The composition re-applies the filter, so the output's large scales equal the low map's \emph{exactly}, regardless of integration error (\texttt{ml/unet/flow\_model.py}, \texttt{ml/diffusion/model.py}). This formulation is a direct response to two observed failures: a full-field diffusion model drew each tile's large scales from independent noise, so after stitching, the cross-tile phases averaged incoherently and destroyed the low-$\ell$ convergence spectrum; and even the low$\to$high flow drifted the already-correct large scales by a few percent per shell, which compounded coherently across the dozens of shells a convergence map integrates. The harmonic pipeline applies the same principle exactly in $\ell$-space, through a raised-cosine ramp on its correction factors.
   \item \textbf{Hold out whole cosmologies, not random patches.} The train/validation split is by cosmology (\texttt{dataset.split\_by\_cosmo}): patches from the same run share large-scale structure, so a random per-patch split would leak the validation set into training. All reported evaluations are on cosmologies the models never saw.
 \end{itemize}
@@ -605,10 +763,10 @@ Three further design decisions are shared by all learned components and are moti
 Mechanism        & per-$\ell$ amplitude rescale & conditional flow matching & EDM denoising diffusion \\
 Domain           & spherical harmonics $a_{\ell m}$ & flat $256^2$ gnomonic patches & flat $256^2$ gnomonic patches \\
 Generator start  & --- (deterministic) & $x_0 = $ low map (bridge) & $x_T \sim \mathcal{N}(0, \sigma_{\max}^2 I)$ \\
-What is produced & rescaled modes ($+$ optional constrained realisation) & high-pass residual, transported from low & high-pass residual, generated from noise \\
+What is produced & rescaled modes & high-pass residual, transported from low & high-pass residual, generated from noise \\
 Conditioning     & cosmology $\to$ MLP emulator of $T$ & cosmology$+z$ at bottleneck; $t$ via FiLM & cosmology$+z$ at bottleneck; $\sigma$ via FiLM; low map as input channel \\
 Sampler (steps)  & closed form (0) & Euler ODE (8) & Heun ODE (32) \\
-Cost             & cheap, CPU & moderate, GPU & highest, GPU \\
+Cost             & low; GPU (SHT $+$ emulator) & moderate, GPU & highest, GPU \\
 \bottomrule
 \end{tabular}
 \caption{The three correction pipelines at a glance. Sampler step counts are the defaults of the respective apply scripts (\texttt{apply\_flow.py}, \texttt{apply\_diffusion.py}).}
@@ -651,17 +809,31 @@ Two subtleties matter only for the \emph{stochastic} pipeline (diffusion). First
   % output
   \node[databox, minimum width=20mm] (out) at (12.7,0) {corrected\\ full-sky shell};
   \draw[flowacc] (blend.east) -- (out.west);
-  % taper profile
-  \begin{scope}[shift={(3.35,-2.35)}]
-    \draw[flow, color=mutedc] (0,0) -- (2.4,0) node[right, note] {$r$};
-    \draw[flow, color=mutedc] (0,0) -- (0,1.0) node[above, note] {$w$};
-    \draw[cunet, semithick] plot[domain=0:2.2, samples=40] (\x, {0.8*0.5*(1+cos(\x/2.2*180))});
-    \draw[cdiff, semithick, dashed] plot[domain=0:2.2, samples=40] (\x, {0.8*(0.5*(1+cos(\x/2.2*180)))^8});
-    \node[note, text=cunet] at (3.6,0.62) {$p=1$: averaging};
-    \node[note, text=cdiff] at (3.7,0.22) {$p\gg1$: soft Voronoi};
+  % ---- the weight profiles behind the blend: three neighbouring tiles ----
+  \begin{scope}[shift={(2.6,-3.15)}]
+    \draw[flow, color=mutedc] (-0.1,0) -- (3.6,0) node[right, note] {sky position};
+    \draw[flow, color=mutedc] (0,0) -- (0,1.15) node[above, note] {$w^{\,p}$};
+    \begin{scope}
+      \clip (0,-0.02) rectangle (3.3,1.15);
+      \draw[mutedc, semithick] plot[domain=-1.1:1.1, samples=40] ({0.55+\x}, {0.9*0.5*(1+cos(\x/1.1*180))});
+      \draw[cunet, semithick]  plot[domain=-1.1:1.1, samples=40] ({1.65+\x}, {0.9*0.5*(1+cos(\x/1.1*180))});
+      \draw[mutedc, semithick] plot[domain=-1.1:1.1, samples=40] ({2.75+\x}, {0.9*0.5*(1+cos(\x/1.1*180))});
+    \end{scope}
+    \node[note] at (1.7,-0.55) {$p=1$: broad overlap -- every pixel\\ \emph{averages} $N_{\mathrm{eff}}$ tile predictions};
+  \end{scope}
+  \begin{scope}[shift={(8.4,-3.15)}]
+    \draw[flow, color=mutedc] (-0.1,0) -- (3.6,0) node[right, note] {sky position};
+    \draw[flow, color=mutedc] (0,0) -- (0,1.15) node[above, note] {$w^{\,p}$};
+    \begin{scope}
+      \clip (0,-0.02) rectangle (3.3,1.15);
+      \draw[mutedc, semithick] plot[domain=-1.1:1.1, samples=60] ({0.55+\x}, {0.9*(0.5*(1+cos(\x/1.1*180)))^8});
+      \draw[cdiff, semithick]  plot[domain=-1.1:1.1, samples=60] ({1.65+\x}, {0.9*(0.5*(1+cos(\x/1.1*180)))^8});
+      \draw[mutedc, semithick] plot[domain=-1.1:1.1, samples=60] ({2.75+\x}, {0.9*(0.5*(1+cos(\x/1.1*180)))^8});
+    \end{scope}
+    \node[note] at (1.7,-0.55) {$p\gg1$ ($p{=}32$ used): soft Voronoi --\\ the nearest tile \emph{owns} each pixel};
   \end{scope}
 \end{tikzpicture}}
-\caption{Full-sky reconstruction from a patch model (\texttt{ml/analysis/patch\_tiling.py}). Tiles are extracted by cached gnomonic index maps, corrected in batches, and blended with a radial cosine taper $w$ raised to a power $p$. For the deterministic flow, $p=1$ simply averages agreeing predictions; for the stochastic diffusion sampler, a shared global noise field plus a large $p$ prevents the blend from averaging away the generated small-scale power.}
+\caption{Full-sky reconstruction from a patch model (\texttt{ml/analysis/patch\_tiling.py}). Top: tiles are extracted by cached gnomonic index maps, corrected in batches, and blended with a radial cosine taper $w$ raised to a power $p$ before normalisation. Bottom: the weight profiles of three neighbouring tiles along a cut through the sky. At $p=1$ the profiles overlap broadly, so each pixel is an average over $N_{\mathrm{eff}}$ tile predictions -- harmless for the deterministic flow, whose overlapping predictions agree, but destructive for a stochastic sampler, whose independent samples average out. At $p\gg1$ each profile collapses onto its tile centre and every pixel is dominated by a single prediction, so the overlap provides only context, in the spirit of the original overlap-tile strategy \cite{ronneberger_u-net_2015}.}
 \label{fig:tiling}
 \end{figure}
 
@@ -700,18 +872,16 @@ which by construction matches the target power spectrum while preserving the (co
 \label{fig:transfer_flow}
 \end{figure}
 
-\paragraph{Two estimators of $T$.} The \texttt{fit} mode averages the smoothed spectra over the training runs and treats $T$ as a property of the solver pair, independent of cosmology -- a robust deterministic baseline. The \texttt{emulate} mode instead trains a small MLP emulator (scikit-learn \texttt{MLPRegressor}, hidden layers $256$-$256$-$128$, ReLU, Adam with early stopping on a held-out validation loss) on features $\big(\log_{10}(\ell{+}1),\ z,\ H_0,\ \Omega_{cdm},\ \Omega_b,\ \Omega_m,\ n_s,\ \sigma_8,\ \log_{10} C_\ell^{\mathrm{low}}\big)$, standardised per feature, with target $T$; this interpolates the transfer function to unseen cosmologies of the grid. Both estimators also store the phase correlation $R(\ell, s)$ of Eq.~\eqref{eq:phase_corr}.
+\paragraph{Two estimators of $T$.} The \texttt{fit} mode averages the smoothed spectra over the training runs and treats $T$ as a property of the solver pair, independent of cosmology -- a robust deterministic baseline. The \texttt{emulate} mode instead trains a small MLP emulator of $T$ on features $\big(\log_{10}(\ell{+}1),\ z,\ H_0,\ \Omega_{cdm},\ \Omega_b,\ \Omega_m,\ n_s,\ \sigma_8,\ \log_{10} C_\ell^{\mathrm{low}}\big)$, standardised per feature; this interpolates the transfer function to unseen cosmologies of the grid. The emulator is a plain feed-forward network (hidden layers $256$--$256$--$128$, ReLU, linear output) implemented in PyTorch and trained on GPU (Adam, learning rate $10^{-4}$, batch size $4096$, $L_2$ weight decay $\alpha = 10^{-4}$), with a 10\% held-out validation split, early stopping, and best-validation weights restored (\texttt{transfer\_function.py}). The GPU implementation matters for a reason worth recording: the training set is millions of $(\ell, s)$ rows with only 9 features each, a workload where a CPU implementation is bound by per-batch overhead rather than arithmetic -- a GPU handles exactly this trivial-per-sample, huge-throughput shape. Both estimators also store the phase correlation $R(\ell, s)$ of Eq.~\eqref{eq:phase_corr}.
 
-\paragraph{Where to correct.} The correction must not touch the already-correct large scales, and ``large'' is a \emph{physical} statement: the PM resolution deficit sets in at a fixed comoving scale (of order the PM grid cell), which maps to a different multipole on every shell. Using the flat-sky relation $\ell \simeq k\,\chi(z)$, a fixed scale $L$ (default $3\,\mathrm{Mpc}/h$) is converted per shell to
+\paragraph{Where to correct.} The correction must not touch the already-correct large scales, and ``large'' is a \emph{physical} statement: the PM resolution deficit sets in at a fixed comoving scale (of order the PM grid cell), which maps to a different multipole on every shell. Using the flat-sky relation $\ell \simeq k\,\chi(z)$, a fixed scale $L$ ($5\,\mathrm{Mpc}/h$ in the production configuration, \texttt{run\_transfer.sh}) is converted per shell to
 \begin{equation}
   \ell_{\min}(s) = \left\lceil \frac{2\pi\,\chi(z_s)}{L} \right\rceil,
   \label{eq:ell_min}
 \end{equation}
 below which $T$ is forced to 1, with a raised-cosine ramp $w(\ell)$ handing over smoothly above it (a hard step in harmonic space rings in real space). This matches the measured behaviour: nearby shells visibly deviate from CosmoGridV1 from $\ell \sim 150$--$300$, while the most distant shells show no deviation out to $\ell = 3000$ -- and correctly receive no correction, because their $\ell_{\min}$ exceeds $\ell_{\max}$.
 
-\paragraph{\color{red}{Stochastic option.}} Rescaling \emph{every} mode by the full $T$ matches $C_\ell$ in expectation but amplifies Disco-DJ's own single-realisation noise wherever $r<1$, overshooting the pixel variance of any one map. The \texttt{--stochastic} mode therefore splits the correction into a phase-correlated part, applied with the Wiener-like gain $r\,T$ to Disco-DJ's own modes, and the remaining power, filled with an \emph{independent} Gaussian realisation of spectrum $T^2(1-r^2)\,C_\ell^{\mathrm{low}}$; the two add to the correct total since $(rT)^2 + T^2(1-r^2) = T^2$. Fresh randomness thus enters exactly (and only) where the phases carry no information.
-
-\paragraph{Positivity.} The corrected field is continuous and, on the sparse high-redshift shells, substantially negative (up to $\sim$49\% of pixels), whereas the truth is a non-negative count map. All cheap pixel-wise fixes were measured and rejected: clipping at zero, mean-debiasing after the clip, and a log-density formulation each destroy the small-scale $C_\ell$ that the correction just repaired (band ratios 0.74, 0.61, and 0.41 at $\ell = 800$--$1500$, versus 0.93 for the unclipped field). A statistically consistent re-discretisation was implemented in \texttt{poisson\_resample.py}: it builds a lognormal intensity $\lambda > 0$ carrying the shot-deconvolved target clustering -- mixing Disco-DJ's smoothed phases at low $\ell$ with an independent Gaussian realisation above, weighted by the measured $r(\ell)$ -- and draws $\mathrm{counts} \sim \mathrm{Poisson}(\lambda)$, with a damped fixed-point iteration calibrating the per-$\ell$ spectrum of $\lambda$; this yields integer counts with the correct mean, sparsity, and $C_\ell$ to a few percent. For the weak-lensing observables of this thesis, however, the unclipped continuous field is both cheaper and more accurate (convergence-$C_\ell$ ratios 0.94--1.01 versus 0.81--1.08 for the Poisson path), so \texttt{--no-clip} is the default and the Poisson re-discretisation is reserved for consumers that genuinely need per-pixel count validity.
+\paragraph{Negative pixels.} The corrected field inevitably contains negative pixels, and it is worth being precise about why. The truth is a non-negative, integer \emph{count} map, and on the distant, sparse shells the mean count per pixel lies far below unity, so most pixels are exactly zero. The correction, by contrast, is a band-limited real-space \emph{fluctuation} field: the residual $(T-1)\,a_{\ell m}$ reconstructed by the inverse SHT is a smooth, zero-mean oscillation with both signs. Adding such a field onto a map dominated by empty pixels necessarily drives every pixel where the negative half-wave exceeds the local count below zero -- negativity is a structural consequence of representing a boosted \emph{continuous} overdensity on top of a nearly empty \emph{discrete} map, not a numerical defect of the method. Every cheap pixel-wise repair was measured and rejected: flooring at zero deletes only the negative excursions, which raises the mean and injects spurious power exactly on the small scales the correction just restored, and re-balancing the mean afterwards or correcting the logarithm of the density instead merely redistributes the same bias. The corrected field is therefore deliberately \emph{not post-processed}: it is treated as a continuous overdensity field (\texttt{--no-clip}) and passed unchanged into every downstream statistic -- angular power spectra, moments, and the weak-lensing convergence maps of Chapter~\ref{ch:results} -- none of which requires per-pixel count validity.
 
 \subsection{U-Net Flow-Matching Pipeline}
 \label{subsec:pipe-unet-flow}
@@ -741,31 +911,72 @@ The output head is likewise zero-initialised, so the untrained model predicts $v
 \begin{figure}[h!]
 \centering
 \resizebox{\textwidth}{!}{%
-\begin{tikzpicture}[node distance=3mm and 4mm]
-  % embedding node
-  \node[databox, minimum width=44mm] (emb) at (5.05,2.15) {sinusoidal emb.\ of $t$ (flow) / $c_{\mathrm{noise}}(\sigma)$ (diffusion) $\to$ MLP $\to$ 512-d};
-  % chain of blocks
-  \node[unetbox] (in) at (0,0) {in\\ \scriptsize 1 / 2 ch};
-  \node[unetbox, right=of in] (b1) {32};
-  \node[unetbox, right=of b1] (b2) {64};
-  \node[unetbox, right=of b2] (b3) {128};
-  \node[unetbox, right=of b3] (b4) {256};
-  \node[keybox, right=of b4] (bot) {512\\ \scriptsize $16^2$};
-  \node[unetbox, right=of bot] (u4) {256};
-  \node[unetbox, right=of u4] (u3) {$\cdots$};
-  \node[unetbox, right=of u3] (u0) {32};
-  \node[unetbox, right=of u0] (head) {$1{\times}1$\\ \scriptsize zero-init};
-  \draw[flow] (in) -- (b1); \draw[flow] (b1) -- (b2); \draw[flow] (b2) -- (b3);
-  \draw[flow] (b3) -- (b4); \draw[flow] (b4) -- (bot); \draw[flow] (bot) -- (u4);
-  \draw[flow] (u4) -- (u3); \draw[flow] (u3) -- (u0); \draw[flow] (u0) -- (head);
-  % FiLM arrows from embedding to blocks
-  \foreach \b in {b1,b2,b3,b4,bot,u4,u0} {\draw[skiparrow] (emb.south) -- (\b.north);}
-  \node[note] at (11.05,1.2) {FiLM $(\mathrm{scale},\mathrm{shift})$ in every double-conv block};
-  % cosmo injection
-  \node[keybox, minimum height=6mm, font=\scriptsize] (cosmo) at (6.2,-1.5) {$\mathbf{c} \in \mathbb{R}^8$ (Eq.~\ref{eq:cosmo_z}) $\to$ MLP, zero-init};
-  \draw[flowacc] (cosmo.north) -- (bot.south) node[midway, right, note] {$+$ at bottleneck};
+\begin{tikzpicture}[x=1cm, y=1cm]
+  % ================= (a) sinusoidal embedding of the scalar =================
+  \node[note, anchor=west] at (-0.6,3.6) {\textbf{(a)} sinusoidal embedding: one scalar $\to$ 64 frequencies};
+  \node[databox, minimum width=17mm] (tval) at (0.1,2.0) {$t$ (flow) /\\ $c_{\mathrm{noise}}(\sigma)$ (diff.)};
+  \begin{scope}[shift={(1.85,1.05)}]
+    \draw[hairc, rounded corners=2pt, fill=white] (-0.15,-0.45) rectangle (2.45,2.35);
+    \draw[ctrans, semithick] plot[domain=0:2.2, samples=60]  (\x, {1.85+0.28*sin(\x*180)});
+    \draw[ctrans, semithick] plot[domain=0:2.2, samples=90]  (\x, {0.95+0.28*sin(\x*540)});
+    \draw[ctrans, semithick] plot[domain=0:2.2, samples=160] (\x, {0.05+0.28*sin(\x*1620)});
+    \node[tinylabel, anchor=west] at (2.5,1.85) {$\sin(\omega_1 t)$};
+    \node[tinylabel, anchor=west] at (2.5,0.95) {$\sin(\omega_k t)$};
+    \node[tinylabel, anchor=west] at (2.5,0.05) {$\sin(\omega_{64} t)$};
+  \end{scope}
+  \draw[flow] (tval.east) -- (1.7,2.0);
+  \node[box, minimum width=14mm] (mlp) at (6.6,2.0) {MLP\\ \scriptsize $128 \to 512$};
+  \draw[flow] (5.75,2.0) -- (mlp.west) node[midway, above=0.5mm, note] {$\oplus\ \cos$};
+  \node[keybox, minimum width=19mm] (emb) at (9.3,2.0) {$\mathrm{emb} \in \mathbb{R}^{512}$};
+  \draw[flow] (mlp) -- (emb);
+  % ================= (b) FiLM inside one block =================
+  \node[note, anchor=west] at (-0.6,0.15) {\textbf{(b)} one \texttt{FiLMDoubleConv} block: the embedding rescales and shifts each of the $C$ channels};
+  \begin{scope}[shift={(0,-1.7)}]
+    \node[unetbox] (c1) at (0.6,0) {conv $3{\times}3$\\ \scriptsize GN(8) $+$ SiLU};
+    % channel stack (C feature maps)
+    \node[fill=cunet!20, draw=cunet!60, rounded corners=1pt, minimum width=11mm, minimum height=2.2mm, inner sep=0pt] (ch1) at (3.0, 0.45) {};
+    \node[fill=cunet!32, draw=cunet!60, rounded corners=1pt, minimum width=11mm, minimum height=2.2mm, inner sep=0pt] (ch2) at (3.0, 0.15) {};
+    \node[fill=cunet!44, draw=cunet!60, rounded corners=1pt, minimum width=11mm, minimum height=2.2mm, inner sep=0pt] (ch3) at (3.0,-0.15) {};
+    \node[fill=cunet!56, draw=cunet!60, rounded corners=1pt, minimum width=11mm, minimum height=2.2mm, inner sep=0pt] (ch4) at (3.0,-0.45) {};
+    \node[note] at (3.0,-0.95) {$C$ channels $h_c$};
+    \draw[flow] (c1.east) -- (2.3,0);
+    % FiLM affine
+    \node[keybox, minimum width=30mm] (film) at (5.95,0) {$h_c \;\mapsto\; (1+\gamma_c)\,h_c + \beta_c$\\ \scriptsize one $(\gamma_c, \beta_c)$ per channel};
+    \draw[flow] (3.7,0) -- (film.west);
+    \node[unetbox, anchor=west] (c2) at (8.15,0) {conv $3{\times}3$\\ \scriptsize GN(8) $+$ SiLU};
+    \draw[flow] (film.east) -- (c2.west);
+    % per-block projection from the shared embedding
+    \node[box, minimum height=6mm, font=\scriptsize] (proj) at (5.95,1.5) {per-block \texttt{Linear}: $512 \to 2C$ \;$\Rightarrow$\; $(\gamma, \beta)$};
+    \draw[flowacc] (emb.south) .. controls (9.3,0.9) and (8.3,1.5) .. (proj.east);
+    \draw[flowacc] (proj.south) -- (film.north);
+  \end{scope}
+  % ================= (c) where the modulation enters the U-Net =================
+  \node[note, anchor=west] at (-0.6,-3.6) {\textbf{(c)} the same shared embedding modulates \emph{every} block; cosmology enters once, at the bottleneck};
+  \begin{scope}[shift={(0,-5.4)}]
+    \node[unetbox, font=\scriptsize] (in) at (0.1,0) {in\\ \tiny 1/2 ch};
+    \node[unetbox, font=\scriptsize] (b1) at (1.35,0) {32};
+    \node[unetbox, font=\scriptsize] (b2) at (2.45,0) {64};
+    \node[unetbox, font=\scriptsize] (b3) at (3.6,0) {128};
+    \node[unetbox, font=\scriptsize] (b4) at (4.75,0) {256};
+    \node[keybox, font=\scriptsize]  (bot) at (6.05,0) {512, $16^2$};
+    \node[unetbox, font=\scriptsize] (u4) at (7.35,0) {256};
+    \node[unetbox, font=\scriptsize] (u3) at (8.45,0) {$\cdots$};
+    \node[unetbox, font=\scriptsize] (u0) at (9.5,0) {32};
+    \node[unetbox, font=\scriptsize] (head) at (10.75,0) {$1{\times}1$\\ \tiny zero-init};
+    \draw[flow] (in) -- (b1); \draw[flow] (b1) -- (b2); \draw[flow] (b2) -- (b3);
+    \draw[flow] (b3) -- (b4); \draw[flow] (b4) -- (bot); \draw[flow] (bot) -- (u4);
+    \draw[flow] (u4) -- (u3); \draw[flow] (u3) -- (u0); \draw[flow] (u0) -- (head);
+    % embedding bus
+    \node[keybox, font=\scriptsize, minimum height=5mm] (emb2) at (0.35,1.25) {emb (a)};
+    \draw[skiparrow] (emb2.east) -- (10.0,1.25);
+    \foreach \b in {b1,b2,b3,b4,bot,u4,u0} {\draw[skiparrow] (\b |- 0,1.25) -- (\b.north);}
+    \node[note, anchor=west] at (10.1,1.25) {FiLM (b) in\\ every block};
+    % cosmology injection
+    \node[box, minimum height=6mm, font=\scriptsize] (cosmo) at (6.05,-1.35) {$\mathbf{c} \in \mathbb{R}^8$ (Eq.~\ref{eq:cosmo_z}) $\to$ MLP, zero-init};
+    \draw[flowacc] (cosmo.north) -- (bot.south) node[midway, right=0.5mm, note] {$+$};
+  \end{scope}
 \end{tikzpicture}}
-\caption{The conditioned U-Net shared (as a local, independent copy) by both learned pipelines: \texttt{FlowUNet} takes 1 input channel ($x_t$) and embeds the flow time $t$; \texttt{DenoiserUNet} takes 2 (noisy residual $\oplus$ conditioning low map) and embeds the noise level $c_{\mathrm{noise}}(\sigma)$. The scalar embedding FiLM-modulates every block; the cosmology--redshift vector enters once, additively and zero-initialised, at the bottleneck.}
+\caption{Scalar conditioning in the shared U-Net (\texttt{FlowUNet} / \texttt{DenoiserUNet}). (a) The single scalar -- the flow time $t$ or the noise embedding $c_{\mathrm{noise}}(\sigma)$ -- is lifted onto 64 sinusoids of geometrically spaced frequencies (plus their cosines) and expanded by a two-layer MLP into a 512-dimensional embedding: low frequencies encode coarse position along the trajectory, high frequencies fine position. (b) Inside every double-convolution block, a block-specific linear layer projects this shared embedding to one $(\gamma_c, \beta_c)$ pair per channel, applied as a feature-wise affine transform between the two convolutions -- FiLM changes what the channels \emph{contain}, never how many there are. (c) The same embedding modulates every encoder, bottleneck, and decoder block, so one network represents the full trajectory-dependent map; the cosmology--redshift vector instead enters once, additively and zero-initialised, at the bottleneck.}
 \label{fig:film_unet}
 \end{figure}
 
@@ -788,7 +999,13 @@ with the standard coefficients
   c_{\mathrm{noise}} = \tfrac14 \ln \sigma,
   \label{eq:edm_coeffs}
 \end{equation}
-\cite{karras_elucidating_2022}. The conditioning channel is neither noised nor rescaled by $c_{\mathrm{in}}$ -- it is not part of the diffusion process, it only steers it. One EDM default is deliberately \emph{not} adopted: the data scale $\sigma_d$, tuned to $0.5$ for 8-bit natural images in \cite{karras_elucidating_2022}, is instead \emph{measured} as the standard deviation of the actual training target -- the high-pass residual, whose variance is far smaller than the full field's -- over a few real batches at start-up (\texttt{estimate\_sigma\_data}); using the wrong $\sigma_d$ would mis-scale all four coefficients of Eq.~\eqref{eq:edm_coeffs}.
+\cite{karras_elucidating_2022}. Each coefficient has a distinct job, and together they let \emph{one} network operate across five orders of magnitude in noise level (Figure~\ref{fig:edm_sampling}):
+\begin{itemize}
+  \item $c_{\mathrm{in}}$ normalises the input: $x = x_1 + \sigma\varepsilon$ has variance $\sigma^2 + \sigma_d^2$, so $c_{\mathrm{in}}\,x$ has unit variance at \emph{every} noise level -- the raw network $F_\theta$ never has to adapt its operating range to $\sigma$.
+  \item $c_{\mathrm{skip}}$ and $c_{\mathrm{out}}$ blend an identity path with the network output. At small $\sigma$, $c_{\mathrm{skip}} \to 1$ and $c_{\mathrm{out}} \to 0$: the noisy input is already almost the answer, and the network only supplies a small correction. At large $\sigma$, $c_{\mathrm{skip}} \to 0$ and $c_{\mathrm{out}} \to \sigma_d$: the input is essentially pure noise, and the network must synthesise the answer outright. The denoiser thus interpolates \emph{continuously} between ``pass through'' and ``generate'', instead of one set of weights having to learn both regimes unaided.
+  \item $c_{\mathrm{noise}}$ log-compresses $\sigma \in [0.002, 80]$ into an $\mathcal{O}(1)$ scalar, which is what the sinusoidal embedding of Figure~\ref{fig:film_unet}(a) receives -- the diffusion counterpart of the flow time $t$.
+\end{itemize}
+The conditioning channel is neither noised nor rescaled by $c_{\mathrm{in}}$ -- it is not part of the diffusion process, it only steers it. One EDM default is deliberately \emph{not} adopted: the data scale $\sigma_d$, tuned to $0.5$ for 8-bit natural images in \cite{karras_elucidating_2022}, is instead \emph{measured} as the standard deviation of the actual training target -- the high-pass residual, whose variance differs materially from a natural image's -- over a few real batches at start-up (\texttt{estimate\_sigma\_data}); using the wrong $\sigma_d$ would mis-scale all four coefficients of Eq.~\eqref{eq:edm_coeffs} at once.
 
 \paragraph{Training.} Per example, a noise level is drawn as $\ln\sigma \sim \mathcal{N}(-1.2, 1.2^2)$, the target is noised to $x_t = x_1 + \sigma\varepsilon$, and the denoising error is weighted per noise level and normalised per patch:
 \begin{equation}
@@ -812,22 +1029,47 @@ integrated with Heun's second-order method over $N = 32$ steps from $x_T \sim \m
 \begin{figure}[h!]
 \centering
 \resizebox{\textwidth}{!}{%
-\begin{tikzpicture}[node distance=3.5mm and 6mm]
-  \node[diffbox] (xt) {$x_T \sim \mathcal{N}(0, \sigma_{\max}^2 I)$\\ \scriptsize shared sphere noise};
-  \node[diffbox, right=of xt] (heun) {Heun ODE, 32 steps\\ \scriptsize $D_\theta(x, \sigma_i, \delta_{\mathrm{low}}, \mathbf{c})$, Eq.~\eqref{eq:karras_schedule}};
-  \node[diffbox, right=of heun] (res) {sample $=$\\ high-pass residual};
-  \node[keybox, right=of res] (comp) {$\delta_{\mathrm{low}} + \mathrm{HP}(\mathrm{sample})$};
-  \node[databox, right=of comp] (out) {corrected\\ patch};
-  \draw[flow] (xt) -- (heun);
-  \draw[flow] (heun) -- (res);
+\begin{tikzpicture}[x=1cm, y=1cm]
+  % ================= the preconditioned denoiser =================
+  \draw[hairc, rounded corners=4pt, fill=surfc!60] (-0.75,-2.75) rectangle (11.35,2.15);
+  \node[note, anchor=north west] at (-0.6,2.05)
+      {\textbf{EDM denoiser} $D_\theta$ (Eq.~\ref{eq:edm_precond}): a preconditioning shell around the U-Net of Fig.~\ref{fig:film_unet}};
+  \node[databox, minimum width=10mm] (xt) at (0.15,0.9) {$x_t$};
+  \node[box, font=\scriptsize] (cin) at (1.7,0.9) {$\times\, c_{\mathrm{in}}$};
+  \node[circle, draw=hairc, fill=white, inner sep=1pt, font=\small] (cat) at (3.05,0.9) {$\oplus$};
+  \node[diffbox, font=\scriptsize, minimum height=6mm] (cond) at (3.05,-0.6) {cond $= \delta_{\mathrm{low}}$\\ \tiny full patch, never noised};
+  \node[unetbox, minimum width=24mm, minimum height=13mm] (unet) at (5.35,0.9) {$F_\theta$\\ \scriptsize U-Net, Fig.~\ref{fig:film_unet}};
+  \node[box, font=\scriptsize] (cout) at (7.55,0.9) {$\times\, c_{\mathrm{out}}$};
+  \node[circle, draw=hairc, fill=white, inner sep=1pt, font=\small] (add) at (9.0,0.9) {$+$};
+  \node[box, font=\scriptsize] (cskip) at (5.35,-1.75) {$\times\, c_{\mathrm{skip}}$};
+  \draw[flow] (xt) -- (cin); \draw[flow] (cin) -- (cat);
+  \draw[flow] (cond.north) -- (cat.south);
+  \draw[flow] (cat) -- (unet); \draw[flow] (unet) -- (cout); \draw[flow] (cout) -- (add);
+  \draw[flow] (xt.south) |- (cskip.west);
+  \draw[flow] (cskip.east) -| (add.south);
+  \node[databox, minimum width=13mm] (dout) at (10.5,0.9) {$D_\theta(x_t)$};
+  \draw[flowacc] (add) -- (dout);
+  % sigma conditioning
+  \node[databox, font=\scriptsize, minimum width=8mm] (sig) at (0.15,-1.75) {$\sigma$};
+  \node[box, font=\scriptsize] (cn) at (2.15,-1.75) {$c_{\mathrm{noise}} = \tfrac14 \ln\sigma$};
+  \draw[skiparrow] (sig) -- (cn);
+  \draw[skiparrow] (cn.east) .. controls (3.6,-1.75) and (5.35,-0.9) .. (unet.south)
+      node[pos=0.55, right=1mm, note] {FiLM, Fig.~\ref{fig:film_unet}};
+  \node[note, anchor=west] at (6.6,-1.75) {$\sigma$ also sets $c_{\mathrm{in}},\,c_{\mathrm{skip}},\,c_{\mathrm{out}}$ (Eq.~\ref{eq:edm_coeffs})};
+  % ================= the sampling loop =================
+  \node[diffbox, minimum width=26mm] (start) at (0.9,-4.6) {$x_T \sim \mathcal{N}(0, \sigma_{\max}^2 I)$\\ \scriptsize shared sphere noise};
+  \node[diffbox, minimum width=30mm] (loop) at (4.75,-4.6) {Heun step $\sigma_i \to \sigma_{i+1}$\\ \scriptsize $\le 2$ calls of $D_\theta$ per step};
+  \draw[flow] (start) -- (loop);
+  \draw[flow] (loop.north) .. controls (4.15,-3.75) and (5.35,-3.75) .. (loop.70)
+      node[pos=0.5, above, note] {$\times\,32$ down the Karras ladder (Eq.~\ref{eq:karras_schedule}): $\sigma\!: 80 \to \cdots \to 0.002 \to 0$};
+  \node[diffbox] (res) at (7.85,-4.6) {sample $=$\\ high-pass residual};
+  \draw[flow] (loop) -- (res);
+  \node[keybox] (comp) at (10.3,-4.6) {$\delta_{\mathrm{low}} + \mathrm{HP}(\cdot)$};
   \draw[flow] (res) -- (comp);
+  \node[databox, minimum width=15mm] (out) at (12.35,-4.6) {corrected\\ patch};
   \draw[flowacc] (comp) -- (out);
-  \node[databox, below=4.5mm of heun, minimum height=6mm, font=\scriptsize] (cond) {conditioning: full low patch (channel-concat) $+$ $\mathbf{c}$};
-  \draw[skiparrow] (cond.north) -- (heun.south);
-  % sigma ladder
-  \node[note] at (2.9,1.35) {$\sigma:\ 80 \;\rightarrow\; \cdots \;\rightarrow\; 0.002 \;\rightarrow\; 0$};
 \end{tikzpicture}}
-\caption{EDM sampling in the diffusion pipeline (\texttt{ml/diffusion/model.py}). The sampler runs from pure noise down the Karras schedule; the low map steers every denoiser call but is never noised itself. Composition re-applies the high-pass filter, so the output's large scales are Disco-DJ's exactly.}
+\caption{The diffusion pipeline (\texttt{ml/diffusion/model.py}). Top: the EDM denoiser is the U-Net of Figure~\ref{fig:film_unet} wrapped in the four preconditioning coefficients of Eq.~\eqref{eq:edm_coeffs} -- the input is variance-normalised by $c_{\mathrm{in}}$ and concatenated with the (never-noised) low patch; the output blends an identity path ($c_{\mathrm{skip}}\,x_t$) with the network's contribution ($c_{\mathrm{out}} F_\theta$), shifting smoothly from ``pass through'' at low $\sigma$ to ``generate'' at high $\sigma$; $c_{\mathrm{noise}}$ feeds $\sigma$ to the FiLM conditioning. Bottom: sampling starts from pure noise and applies 32 Heun steps down the Karras schedule, each invoking $D_\theta$ up to twice; the final sample is the high-pass residual, composed onto the low map so the large scales remain Disco-DJ's exactly.}
 \label{fig:edm_sampling}
 \end{figure}
 
@@ -894,8 +1136,273 @@ billed regardless of how much of $t$ is spent computing -- which is exactly why 
 The whole project -- the analysis and ML pipelines together with the modified Disco-DJ containing the shell builder -- is kept in a dedicated Git repository. Beyond protection against machine failure, this gives a reliable way back to a known-good state when an experimental change breaks the pipeline, and keeps the many configuration variants organised.
 
 \chapter{Results}
+\label{ch:results}
+
+This chapter evaluates the three correction pipelines of Sec.~\ref{sec:correction-pipelines} on cosmologies held out of all fitting and training. Sec.~\ref{sec:res-protocol} fixes the evaluation protocol -- the held-out split, the statistics, and how the uncertainty bands are constructed -- and the three sections that follow present and discuss each pipeline in turn, on the same set of diagnostics: training behaviour, full-sky angular power spectra, example patches, one-point moments, and weak-lensing convergence. Sec.~\ref{sec:res-synthesis} draws the comparison.
+
+\section{Evaluation Protocol}
+\label{sec:res-protocol}
+
+\paragraph{Held-out cosmologies.} All pipelines share one split convention (\texttt{transfer\_function.split\_val\_cosmos}, \texttt{dataset.split\_by\_cosmo}): of the 198 grid cosmologies with both a Disco-DJ and a CosmoGridV1 lightcone available, whole cosmologies are shuffled with a fixed seed and 30 ($15\%$) are withheld from every fit and training run. Figure~\ref{fig:heldout_params} shows where they sit in parameter space; Table~\ref{tab:heldout} lists their parameters. The compute-heavy full-sky and weak-lensing diagnostics are evaluated on the first ten of them (in catalogue order, marked $^\ast$) -- the same ten for every pipeline, so all figures of this chapter are directly comparable.
+
+\begin{figure}[h!]
+    \centering
+    \includegraphics[width=0.8\linewidth]{plots/results/heldout_cosmo_params_grid.png}
+    \caption{The 198 runnable grid cosmologies (gray) and the 30 held-out validation cosmologies (blue) in the sampled $w$CDM parameter space (\texttt{ml/analysis/plot\_cosmo\_params.py}). The held-out set spans the full ranges of $\Omega_m$, $\sigma_8$, $w_0$, $H_0$, $n_s$, and $\Omega_b$, so the reported performance probes genuine interpolation across the grid, not proximity to training cosmologies.}
+    \label{fig:heldout_params}
+\end{figure}
+
+\begin{table}[h!]
+\centering
+\scriptsize
+\begin{tabular}{@{}lrrrrrr@{}}
+\toprule
+held-out cosmology & $\Omega_m$ & $\sigma_8$ & $w_0$ & $H_0$ & $n_s$ & $\Omega_b$ \\
+\midrule
+\texttt{cosmo\_000176}$^\ast$ & 0.1359 & 0.8102 & $-1.0167$ & 64.91 & 0.9786 & 0.04652 \\
+\texttt{cosmo\_037862}$^\ast$ & 0.3631 & 0.6731 & $-0.9210$ & 70.89 & 0.9795 & 0.04729 \\
+\texttt{cosmo\_049966}$^\ast$ & 0.3457 & 0.6225 & $-1.1554$ & 73.37 & 0.9793 & 0.04958 \\
+\texttt{cosmo\_063262}$^\ast$ & 0.3144 & 0.7464 & $-1.0841$ & 74.08 & 0.9484 & 0.04672 \\
+\texttt{cosmo\_067387}$^\ast$ & 0.2580 & 0.9483 & $-1.1878$ & 71.13 & 0.9466 & 0.04941 \\
+\texttt{cosmo\_074758}$^\ast$ & 0.3507 & 0.8838 & $-1.0176$ & 67.60 & 0.9665 & 0.04998 \\
+\texttt{cosmo\_077582}$^\ast$ & 0.3267 & 0.6668 & $-0.7812$ & 73.72 & 0.9768 & 0.04788 \\
+\texttt{cosmo\_081222}$^\ast$ & 0.3621 & 0.6908 & $-0.9372$ & 70.14 & 0.9465 & 0.04793 \\
+\texttt{cosmo\_081972}$^\ast$ & 0.2813 & 0.6719 & $-1.2005$ & 65.30 & 0.9722 & 0.04836 \\
+\texttt{cosmo\_084691}$^\ast$ & 0.2468 & 0.9099 & $-0.8558$ & 65.69 & 0.9458 & 0.04854 \\
+\texttt{cosmo\_105300} & 0.2991 & 0.6627 & $-0.9119$ & 71.53 & 0.9628 & 0.04871 \\
+\texttt{cosmo\_108452} & 0.2722 & 0.6512 & $-1.0935$ & 68.04 & 0.9792 & 0.04739 \\
+\texttt{cosmo\_109740} & 0.2490 & 0.8995 & $-0.9140$ & 73.03 & 0.9642 & 0.04949 \\
+\texttt{cosmo\_109922} & 0.4185 & 0.6632 & $-1.2038$ & 66.81 & 0.9420 & 0.04626 \\
+\texttt{cosmo\_114124} & 0.2325 & 0.7521 & $-0.9378$ & 65.64 & 0.9742 & 0.04694 \\
+\texttt{cosmo\_114878} & 0.3110 & 0.7352 & $-1.1996$ & 69.81 & 0.9499 & 0.04748 \\
+\texttt{cosmo\_133366} & 0.3769 & 0.6473 & $-1.0025$ & 72.34 & 0.9449 & 0.04811 \\
+\texttt{cosmo\_137035} & 0.2863 & 0.9697 & $-1.1830$ & 68.54 & 0.9586 & 0.04974 \\
+\texttt{cosmo\_143827} & 0.2447 & 0.9341 & $-1.2089$ & 68.29 & 0.9723 & 0.04960 \\
+\texttt{cosmo\_147659} & 0.2829 & 0.9211 & $-1.1250$ & 65.39 & 0.9676 & 0.04770 \\
+\texttt{cosmo\_155250} & 0.4290 & 0.6048 & $-1.1952$ & 69.43 & 0.9512 & 0.04904 \\
+\texttt{cosmo\_155780} & 0.2548 & 0.7404 & $-1.1146$ & 70.31 & 0.9447 & 0.04750 \\
+\texttt{cosmo\_167159} & 0.1771 & 0.9406 & $-0.7824$ & 65.14 & 0.9707 & 0.04789 \\
+\texttt{cosmo\_175764} & 0.2932 & 0.8234 & $-0.7555$ & 72.51 & 0.9723 & 0.04995 \\
+\texttt{cosmo\_181694} & 0.3108 & 0.8603 & $-0.9706$ & 67.37 & 0.9421 & 0.04930 \\
+\texttt{cosmo\_188574} & 0.3172 & 0.8159 & $-0.8226$ & 73.05 & 0.9733 & 0.04662 \\
+\texttt{cosmo\_191155} & 0.2375 & 0.9563 & $-0.9280$ & 68.87 & 0.9629 & 0.04925 \\
+\texttt{cosmo\_199774} & 0.3224 & 0.7821 & $-0.9628$ & 66.58 & 0.9591 & 0.04750 \\
+\texttt{cosmo\_203054} & 0.3463 & 0.7607 & $-1.2027$ & 72.73 & 0.9413 & 0.04983 \\
+\texttt{cosmo\_203124} & 0.2807 & 0.7217 & $-1.0855$ & 66.96 & 0.9617 & 0.04725 \\
+\bottomrule
+\end{tabular}
+\caption{The 30 held-out validation cosmologies and their varied parameters (from each run's \texttt{params.yml}; all other parameters are fixed across the CosmoGridV1 grid, Sec.~\ref{sec:cosmogrid}). Cosmologies marked $^\ast$ form the shared ten-cosmology evaluation set used for all full-sky and weak-lensing figures in this chapter.}
+\label{tab:heldout}
+\end{table}
+
+\paragraph{Statistics and resolutions.} Every pipeline is scored with the same shared diagnostics (\texttt{ml/analysis/}): per-shell full-sky angular power spectra pooled into three redshift bins, example patches with per-patch 2D power ratios, one-point moments (variance, skewness, excess kurtosis) as a function of shell depth, and weak-lensing convergence maps. The $\kappa$ maps are built with the \textsc{UFalcon} lightcone integration \cite{sgier_fast_2018} (\texttt{ml/analysis/weak\_lensing.py}): all corrected shells within a source bin's redshift range are combined into one convergence map per cosmology at $N_{\mathrm{side}}=1024$ ($\ell \le 2048$), using the DES-Y3 \textsc{metacal} source redshift distributions of tomographic bins 1 ($z \lesssim 1.05$) and 4 ($z \lesssim 1.85$) -- the lowest- and highest-redshift bins, which weight the nearby (hardest) and distant (easiest) shells respectively. One resolution asymmetry must be kept in mind throughout: the transfer pipeline operates on the native $N_{\mathrm{side}}=2048$ shells up to $\ell_{\max}=3000$, whereas the two learned pipelines were trained and applied at $N_{\mathrm{side}}=512$ (Sec.~\ref{subsec:pipe-patches}), so their shell-level statistics extend only to $\ell \sim 1500$ and their $\kappa$ maps lack input power beyond the corresponding band limit.
+
+\paragraph{Percentile bands.} The shaded bands in the $C_\ell$-ratio figures are \emph{percentile bands across the held-out evaluation set}, not error bars on a mean. For the shell-level grids (e.g.\ Figure~\ref{fig:transfer_cl}), five shells are sampled from each redshift bin for each of the ten cosmologies, and the ratio $C_\ell/C_\ell^{\mathrm{true}}$ is computed per (cosmology, shell) pair -- fifty samples per bin. The solid line is their median; the band spans the 16th to 84th percentile, i.e.\ the central 68\% of the actual cosmology-to-cosmology and shell-to-shell scatter. A narrow band therefore means the correction is \emph{uniformly} good across cosmologies and depths, not merely good on average; for the $\kappa$ figures the band is taken across the ten cosmologies at fixed $\ell$.
+
+\section{Transfer-Function Pipeline}
+\label{sec:res-transfer}
+
+\paragraph{Configuration and training.} The emulator was trained on the 168 training cosmologies with $\ell_{\max}=3000$, spectra smoothed with a 21-point boxcar (Sec.~\ref{subsec:pipe-transfer}), and the per-shell correction onset fixed at $5\,\mathrm{Mpc}/h$ with a raised-cosine transition of width $0.10\,\ell_{\max}$; the MLP ($256$--$256$--$128$, Adam, learning rate $10^{-4}$, batch $4096$, $L_2$ decay $10^{-4}$) is summarised in Table~\ref{tab:training}. Figure~\ref{fig:transfer_loss} shows its loss: training and validation losses coincide throughout -- with only nine features and millions of rows, the emulator cannot memorise -- and converge within the first $\sim 10^4$ gradient steps to a best validation loss of $\tfrac12\mathrm{MSE} = 9.9\times10^{-5}$, corresponding to an RMS error on the predicted transfer function of $\sqrt{2 \times 9.9\times10^{-5}} \approx 1.4\%$ per $(\ell, s)$ sample.
+
+\begin{table}[h!]
+\centering
+\small
+\begin{tabular}{@{}lp{3.7cm}p{3.7cm}p{3.7cm}@{}}
+\toprule
+ & \textcolor{ctrans}{\textbf{transfer}} & \textcolor{cunet}{\textbf{unet-flow}} & \textcolor{cdiff}{\textbf{diffusion}} \\
+\midrule
+Training data & smoothed $C_\ell$ of 168 cosmologies, $\ell \le 3000$ & \multicolumn{2}{p{7.6cm}}{$10^5$ paired $256^2$ patches at $N_{\mathrm{side}}=512$, drawn from the same 168 training cosmologies (15\% of cosmologies held out)} \\
+Model size & MLP $256$--$256$--$128$ & \multicolumn{2}{p{7.6cm}}{4-level FiLM U-Net, base width 32 (Fig.~\ref{fig:film_unet})} \\
+Epochs & $\le 200$, early stop (patience 10) & 200 (best epoch 109) & 200 (best epoch 165) \\
+Optimiser / LR & Adam, $10^{-4}$, batch 4096 & Adam, $3\times10^{-5}$ $\times$ 16 ranks $= 4.8\times10^{-4}$, cosine-annealed, batch 32/rank & Adam, $3\times10^{-5}$ (unscaled), cosine-annealed, batch 32/rank \\
+Hardware & 1 GH200 & \multicolumn{2}{p{7.6cm}}{16-rank DDP: 4 Alps nodes $\times$ 4 GH200 (\texttt{torchrun}, Appendix~\ref{app:slurm})} \\
+Key settings & smooth window 21; $\ell_{\min}$: $5$ Mpc$/h$; transition $0.1\,\ell_{\max}$; $L_2$ $\alpha=10^{-4}$ & HP cutoff/transition $0.05/0.20$ of Nyquist; grad clip 1; Eq.~\eqref{eq:flow_loss} & HP $0.05/0.20$; $\sigma_d = 1.006$ (measured); $\ln\sigma \sim \mathcal{N}(-1.2, 1.2^2)$; Eq.~\eqref{eq:edm_loss} \\
+Inference & closed form & 8 Euler steps & 32 Heun steps; shared noise; taper $p=32$ \\
+\bottomrule
+\end{tabular}
+\caption{Production training configurations of the three pipelines (from the runs' \texttt{args.json} and \texttt{run\_transfer.sh} / \texttt{run\_flow.sh} / \texttt{run\_diffusion.sh}).}
+\label{tab:training}
+\end{table}
+
+\begin{figure}[h!]
+    \centering
+    \includegraphics[width=0.78\linewidth]{plots/results/transfer/emulator_loss.png}
+    \caption{Training and validation loss of the transfer-function emulator (squared error on $T$, without the $L_2$ term; 15-step rolling mean). Both curves coincide and plateau within the first $\sim 10^4$ steps; the best validation loss corresponds to an RMS emulation error of $\approx 1.4\%$ on $T(\ell, s)$.}
+    \label{fig:transfer_loss}
+\end{figure}
+
+\paragraph{Full-sky $C_\ell$.} Figure~\ref{fig:transfer_cl} is the pipeline's core result. Before correction, the low maps lose up to half the power in the nearest redshift bin ($C_\ell/C_\ell^{\mathrm{true}} \approx 0.5$ at $\ell \sim 3000$) and several percent in the middle bin. After correction, the median ratio stays within $\approx 2\%$ of unity at every multipole out to $\ell = 3000$ in all three bins, with a mild residual dip near the correction onset of the nearest shells. The most distant bin shows the physically expected behaviour built into Eq.~\eqref{eq:ell_min}: the fixed $5\,\mathrm{Mpc}/h$ scale is unresolvable there within $\ell_{\max}$, the deficit is absent, and the pipeline correctly applies (almost) no correction -- the ratio stays within $\sim 1\%$, drifting to $\approx +1.5\%$ only in the last, noise-dominated multipole bins.
+
+\begin{figure}[h!]
+    \centering
+    \includegraphics[width=\textwidth]{plots/results/transfer/cl_ratio_by_zbin_grid.png}
+    \caption{Full-sky shell $C_\ell$ ratio to truth for the transfer pipeline, pooled per redshift bin (10 cosmologies $\times$ 5 shells; median and 16--84\% band, Sec.~\ref{sec:res-protocol}). Gray: uncorrected Disco-DJ; blue: corrected. The correction holds the ratio within a few percent out to $\ell = 3000$ wherever a deficit exists, and correctly leaves the already-accurate distant bin (right) untouched.}
+    \label{fig:transfer_cl}
+\end{figure}
+
+\paragraph{Patches.} The example patches of Figure~\ref{fig:transfer_patches} make the mechanism visible: because the correction rescales amplitudes but keeps Disco-DJ's phases, the corrected patch shows the \emph{same} structures as the input, with the missing small-scale graininess restored on top. The per-patch power-ratio panels come with a caveat: they measure a spherical-harmonic-calibrated correction through flat-sky 2D FFTs of individual gnomonic patches, and on several shells this diagnostic shows band-limited overshoots that the full-sky $C_\ell$ of Figure~\ref{fig:transfer_cl} -- the statistic the method is calibrated on, and the one used downstream -- does not exhibit. The discrepancy is a property of the patch diagnostic (projection and pixelisation of a full-sky correction), and its residual cause has not been fully isolated.
+
+\begin{figure}[h!]
+    \centering
+    \includegraphics[width=0.92\textwidth]{plots/results/transfer/example_patches.png}
+    \caption{Example patches for the transfer pipeline at native $N_{\mathrm{side}}=2048$ (rows: shells of increasing depth, drawn from different held-out cosmologies; columns: Disco-DJ, corrected, CosmoGridV1, and the per-patch 2D power ratio). Phases are preserved, so corrected and low show identical structures; only the small-scale amplitude changes.}
+    \label{fig:transfer_patches}
+\end{figure}
+
+\paragraph{Moments.} Figure~\ref{fig:transfer_moments} exposes the pipeline's designed-in limitation. The full-sky variance of the corrected shells lands on the truth -- variance is an integral of $C_\ell$, which the method matches by construction. Skewness and excess kurtosis, however, remain at the level of the uncorrected maps, far below the reference on the sparse shells: a deterministic, phase-preserving amplitude rescale cannot manufacture the one-point non-Gaussianity that the missing small-scale structure carries. This is precisely the gap the generative pipelines exist to close.
+
+\begin{figure}[h!]
+    \centering
+    \includegraphics[width=\textwidth]{plots/results/transfer/moments_vs_shell.png}
+    \caption{Full-sky one-point moments versus shell depth for the transfer pipeline (median and 16--84\% band across the 10 evaluation cosmologies). The corrected variance (left) matches the truth, but skewness (middle) and excess kurtosis (right) stay at the uncorrected level -- a power-spectrum correction leaves the higher moments untouched.}
+    \label{fig:transfer_moments}
+\end{figure}
+
+\paragraph{Weak lensing.} At the convergence-map level (Figure~\ref{fig:transfer_kappa}), the uncorrected lightcones underestimate the $\kappa$ power by up to $\approx 47\%$ (bin 1) and $\approx 26\%$ (bin 4) at $\ell \approx 2000$. The corrected maps stay within $\approx 5\%$ of the truth at all multipoles in both bins -- a shallow $\approx 0.95$ dip around $\ell \approx 300$--$500$ in bin 1, recovering to unity by $\ell \approx 1000$, and a flat $\approx 0.97$ plateau in bin 4 -- with percentile bands of only a few percent width across cosmologies. The $\kappa$ moments (Figure~\ref{fig:transfer_kappa_moments}) repeat the shell-level pattern: variance is recovered, while skewness and kurtosis are lifted only part of the way to the truth.
+
+\begin{figure}[h!]
+    \centering
+    \begin{minipage}{0.49\textwidth}\includegraphics[width=\linewidth]{plots/results/transfer/kappa_cl_pctile_band_bin1.png}\end{minipage}\hfill
+    \begin{minipage}{0.49\textwidth}\includegraphics[width=\linewidth]{plots/results/transfer/kappa_cl_pctile_band_bin4.png}\end{minipage}
+    \caption{Weak-lensing convergence $C_\ell$ ratio to truth for the transfer pipeline (UFalcon integration \cite{sgier_fast_2018}; DES-Y3 source bins 1, left, and 4, right; median and 16--84\% band across the 10 evaluation cosmologies). The corrected lightcones (blue) stay within $\approx 5\%$ of the reference at all $\ell \le 2048$, where the uncorrected baseline (gray) loses up to half the power.}
+    \label{fig:transfer_kappa}
+\end{figure}
+
+\begin{figure}[h!]
+    \centering
+    \includegraphics[width=\textwidth]{plots/results/transfer/kappa_moments_scatter_bin1.png}\\[1mm]
+    \includegraphics[width=\textwidth]{plots/results/transfer/kappa_moments_scatter_bin4.png}
+    \caption{Convergence-map moments per evaluation cosmology for the transfer pipeline (top: source bin 1; bottom: bin 4). The corrected variance tracks the truth; skewness and excess kurtosis close only part of the gap -- consistent with Figure~\ref{fig:transfer_moments}.}
+    \label{fig:transfer_kappa_moments}
+\end{figure}
+
+\section{U-Net Flow-Matching Pipeline}
+\label{sec:res-flow}
+
+\paragraph{Configuration and training.} The flow was trained for 200 epochs on the $10^5$-patch dataset (Table~\ref{tab:training}), distributed over 16 DDP ranks (4 Alps nodes $\times$ 4 GH200), with the base learning rate $3\times10^{-5}$ scaled linearly to $4.8\times10^{-4}$ and cosine-annealed; the high-pass residual formulation used cutoff $0.05$ and transition $0.20$ of the patch Nyquist frequency. Figure~\ref{fig:flow_loss} shows the variance-normalised flow-matching loss of Eq.~\eqref{eq:flow_loss}: validation improves until epoch $\approx 110$ (best $0.166$ at epoch 109 -- the checkpoint used for everything below) and then drifts slowly upward while the training loss continues to fall, i.e.\ mild but genuine overfitting past that point. The residual plateau is expected rather than alarming: at intermediate $t$ the target velocity is not uniquely determined by the network's input, so the regression loss is bounded below by this irreducible conditional variance.
+
+\begin{figure}[h!]
+    \centering
+    \includegraphics[width=0.78\linewidth]{plots/results/flow/loss_curve.png}
+    \caption{Training and validation loss of the flow-matching U-Net (Eq.~\ref{eq:flow_loss}; 5-epoch rolling mean). Validation is best at epoch 109 and drifts upward afterwards while training continues to fall; the best-validation checkpoint is used for all evaluation.}
+    \label{fig:flow_loss}
+\end{figure}
+
+\paragraph{Full-sky $C_\ell$.} After tiling the corrected patches back onto the sphere (Sec.~\ref{subsec:pipe-patches}), the shell spectra of Figure~\ref{fig:flow_cl} track the truth to within $\approx 0.5\%$ across the corrected range in the two nearer redshift bins, with a mild $\lesssim +0.5\%$ overshoot around $\ell \approx 400$--$900$ in the nearest bin and a roll-off to $\approx 0.96$ in the last multipole bins as the $N_{\mathrm{side}}=512$ band limit ($\ell \sim 1500$) is approached. In the distant bin -- where Disco-DJ needs no correction -- the corrected and uncorrected curves coincide within the band: the high-pass residual formulation leaves already-correct maps alone, as designed.
+
+\begin{figure}[h!]
+    \centering
+    \includegraphics[width=\textwidth]{plots/results/flow/cl_ratio_by_zbin_grid.png}
+    \caption{Full-sky shell $C_\ell$ ratio to truth for the flow pipeline (same construction as Figure~\ref{fig:transfer_cl}; note the evaluation resolution $N_{\mathrm{side}}=512$, hence $\ell \lesssim 1500$). The correction restores the up-to-20\% deficit of the nearest bin to sub-percent level over most of the range, degrading only towards the reconstruction band limit.}
+    \label{fig:flow_cl}
+\end{figure}
+
+\paragraph{Patches and moments.} In the example patches (Figure~\ref{fig:flow_patches}), the flow-corrected column is visually indistinguishable from the CosmoGrid column, and the per-patch power ratio holds near unity at wavenumbers where the uncorrected ratio falls to $0.4$--$0.6$. Because the ODE integrates a \emph{sample} rather than a conditional mean, the correction carries genuine small-scale variance -- which is what the one-point moments confirm (Figure~\ref{fig:flow_moments}): across held-out patches, skewness and excess kurtosis are restored onto the reference at every shell depth, with only a slight overshoot on the sparsest, most shot-noise-dominated shell.
+
+\begin{figure}[h!]
+    \centering
+    \includegraphics[width=0.92\textwidth]{plots/results/flow/example_patches.png}
+    \caption{Held-out test patches for the flow pipeline (rows: shells 5--50; columns: Disco-DJ, flow-corrected, CosmoGridV1, per-patch 2D power ratio). The corrected sample restores both the visual texture and the small-scale power that the low maps lack.}
+    \label{fig:flow_patches}
+\end{figure}
+
+\begin{figure}[h!]
+    \centering
+    \includegraphics[width=\textwidth]{plots/results/flow/patch_moments_vs_shell.png}
+    \caption{One-point moments versus shell depth for the flow pipeline (median and 16--84\% band across up to 64 held-out patches per shell). Unlike the transfer correction (Figure~\ref{fig:transfer_moments}), the flow restores skewness and excess kurtosis onto the truth, with a slight overshoot on the sparsest shell.}
+    \label{fig:flow_moments}
+\end{figure}
+
+\paragraph{Weak lensing.} The convergence spectra (Figure~\ref{fig:flow_kappa}) follow the truth to within the band width out to $\ell \approx 700$ (bin 1) and $\ell \approx 1000$ (bin 4), then decline smoothly to $\approx 0.90$ and $\approx 0.95$ respectively at $\ell \approx 2000$. This high-$\ell$ deficit is consistent with the evaluation resolution: the $\kappa$ integration extends to $\ell = 2048$, beyond the band limit of the $N_{\mathrm{side}}=512$ shell reconstructions that feed it. The $\kappa$ moments (Figure~\ref{fig:flow_kappa_moments}) are the pipeline's strongest single result: for every one of the ten held-out cosmologies, the corrected variance, skewness, and excess kurtosis land on the reference values, where the uncorrected maps miss by large factors.
+
+\begin{figure}[h!]
+    \centering
+    \begin{minipage}{0.49\textwidth}\includegraphics[width=\linewidth]{plots/results/flow/kappa_cl_pctile_band_bin1.png}\end{minipage}\hfill
+    \begin{minipage}{0.49\textwidth}\includegraphics[width=\linewidth]{plots/results/flow/kappa_cl_pctile_band_bin4.png}\end{minipage}
+    \caption{Convergence $C_\ell$ ratio to truth for the flow pipeline (bins 1 and 4, as Figure~\ref{fig:transfer_kappa}). The correction holds to the truth out to $\ell \approx 700$--$1000$ and degrades towards $\ell = 2048$, where the $N_{\mathrm{side}}=512$ reconstruction provides no input power.}
+    \label{fig:flow_kappa}
+\end{figure}
+
+\begin{figure}[h!]
+    \centering
+    \includegraphics[width=\textwidth]{plots/results/flow/kappa_moments_scatter_bin1.png}\\[1mm]
+    \includegraphics[width=\textwidth]{plots/results/flow/kappa_moments_scatter_bin4.png}
+    \caption{Convergence-map moments per evaluation cosmology for the flow pipeline (top: bin 1; bottom: bin 4). Corrected variance, skewness, and excess kurtosis all coincide with the truth across the full held-out set.}
+    \label{fig:flow_kappa_moments}
+\end{figure}
+
+\section{Diffusion Pipeline}
+\label{sec:res-diffusion}
+
+\paragraph{Configuration and training.} The diffusion model shares the flow's data, architecture width, schedule length, and high-pass formulation (Table~\ref{tab:training}); it differs in the objective (Eq.~\ref{eq:edm_loss}, with the measured $\sigma_d = 1.006$), the unscaled learning rate of $3\times10^{-5}$, and the 32-step Heun sampler with shared sphere noise and $p=32$ blending at inference. Its loss curve (Figure~\ref{fig:diff_loss}) looks qualitatively different from the flow's: the EDM-weighted denoising loss collapses from $\approx 5.9$ to $\approx 0.9$ within the first $\sim 15$ epochs and is then almost flat, with training and validation coinciding to the end (best validation $0.80$ at epoch 165) -- no overfitting is observed. This is characteristic of the objective: every example is presented at a freshly drawn noise level and noise realisation, an implicit augmentation that makes memorisation far harder than for the flow's fixed low$\to$high pairs.
+
+\begin{figure}[h!]
+    \centering
+    \includegraphics[width=0.78\linewidth]{plots/results/diffusion/loss_curve.png}
+    \caption{Training and validation loss of the EDM diffusion model (Eq.~\ref{eq:edm_loss}; 9-epoch rolling mean). The loss plateaus early and train/validation coincide throughout -- the per-example noise draws act as strong implicit augmentation.}
+    \label{fig:diff_loss}
+\end{figure}
+
+\paragraph{Full-sky $C_\ell$.} The reconstructed shell spectra (Figure~\ref{fig:diff_cl}) match the flow's picture closely: sub-percent agreement over most of the corrected range, a slightly larger mid-band overshoot ($\lesssim +1\%$ around $\ell \approx 400$--$900$ in the nearest bin), and a shallower end-of-band dip -- in the middle bin the diffusion correction returns to unity at the band edge where the flow dips to $\approx 0.993$. That a 32-step stochastic sampler, stitched from thousands of tiles sharing one global noise field, reproduces full-sky spectra at this level is the central validation of the tiling scheme of Sec.~\ref{subsec:pipe-patches}.
+
+\begin{figure}[h!]
+    \centering
+    \includegraphics[width=\textwidth]{plots/results/diffusion/cl_ratio_by_zbin_grid.png}
+    \caption{Full-sky shell $C_\ell$ ratio to truth for the diffusion pipeline (same construction and resolution as Figure~\ref{fig:flow_cl}).}
+    \label{fig:diff_cl}
+\end{figure}
+
+\paragraph{Patches and moments.} The examples of Figure~\ref{fig:diff_patches} show small-scale texture generated \emph{from noise} that is statistically -- though, by construction, not pixel-by-pixel -- equivalent to the reference. The per-patch power ratios are correspondingly noisier than the flow's, each patch being an independent sample, with modest overshoots at intermediate wavenumbers on some shells. The one-point moments (Figure~\ref{fig:diff_moments}) recover most of the gap to the truth, with a slight \emph{under}shoot of skewness and kurtosis on the faintest shells -- the mirror image of the flow's slight overshoot there.
+
+\begin{figure}[h!]
+    \centering
+    \includegraphics[width=0.92\textwidth]{plots/results/diffusion/example_patches.png}
+    \caption{Held-out test patches for the diffusion pipeline (layout as Figure~\ref{fig:flow_patches}). The small-scale structure of the corrected column is generated from noise, conditioned on the low patch -- statistically matched to the truth rather than phase-matched.}
+    \label{fig:diff_patches}
+\end{figure}
+
+\begin{figure}[h!]
+    \centering
+    \includegraphics[width=\textwidth]{plots/results/diffusion/patch_moments_vs_shell.png}
+    \caption{One-point moments versus shell depth for the diffusion pipeline (as Figure~\ref{fig:flow_moments}). Most of the non-Gaussianity gap is closed, with a slight undershoot on the sparsest shells.}
+    \label{fig:diff_moments}
+\end{figure}
+
+\paragraph{Weak lensing.} At the $\kappa$ level (Figure~\ref{fig:diff_kappa}), the diffusion correction is the best of the three at high multipoles in bin 1: it remains within $\approx 5\%$ of the truth out to $\ell = 2048$, where the flow has declined to $\approx 0.90$, and bin 4 sits at $\approx 0.97$ at the same scales. Its percentile bands are somewhat wider than the flow's -- the price of a genuinely stochastic sampler. The $\kappa$ moments (Figure~\ref{fig:diff_kappa_moments}) land close to the truth for all ten cosmologies, with a small systematic undershoot of skewness and kurtosis relative to the flow's essentially exact recovery.
+
+\begin{figure}[h!]
+    \centering
+    \begin{minipage}{0.49\textwidth}\includegraphics[width=\linewidth]{plots/results/diffusion/kappa_cl_pctile_band_bin1.png}\end{minipage}\hfill
+    \begin{minipage}{0.49\textwidth}\includegraphics[width=\linewidth]{plots/results/diffusion/kappa_cl_pctile_band_bin4.png}\end{minipage}
+    \caption{Convergence $C_\ell$ ratio to truth for the diffusion pipeline (bins 1 and 4). Flatter at high $\ell$ than the flow (Figure~\ref{fig:flow_kappa}), at the cost of slightly wider cosmology-to-cosmology bands.}
+    \label{fig:diff_kappa}
+\end{figure}
+
+\begin{figure}[h!]
+    \centering
+    \includegraphics[width=\textwidth]{plots/results/diffusion/kappa_moments_scatter_bin1.png}\\[1mm]
+    \includegraphics[width=\textwidth]{plots/results/diffusion/kappa_moments_scatter_bin4.png}
+    \caption{Convergence-map moments per evaluation cosmology for the diffusion pipeline (top: bin 1; bottom: bin 4). Close to the truth throughout, with a small systematic undershoot of the higher moments.}
+    \label{fig:diff_kappa_moments}
+\end{figure}
+
+\section{Synthesis}
+\label{sec:res-synthesis}
+
+Three consistent messages emerge. First, \emph{every} pipeline repairs the two-point statistics on the scales it acts on: the transfer function holds shell and convergence spectra within a few percent out to the native $\ell = 3000$ resolution at almost no inference cost, and the two learned pipelines do the same within their $N_{\mathrm{side}}=512$ evaluation band. Second, the statistics beyond two-point cleanly separate the deterministic from the generative route: skewness and kurtosis -- at shell level and $\kappa$ level alike -- are untouched by the amplitude rescale but restored by both generative models, with the flow essentially exact and the diffusion slightly conservative. Third, the two generative models trade differently at the convergence level: the flow gives the most precise moments and the tightest bands, the diffusion the flattest high-$\ell$ spectra. The comparison between transfer and the learned pipelines at the highest multipoles is not yet apples-to-apples -- the learned corrections were evaluated at $N_{\mathrm{side}}=512$, and extending them to the native resolution is the most direct next step (Chapter~\ref{ch:conclusion}).
 
 \chapter{Conclusion}
+\label{ch:conclusion}
+
+This thesis set out to answer a practical question at the heart of map-level, simulation-based cosmological inference: can the small-scale accuracy of an expensive reference $N$-body lightcone be restored onto a cheap particle-mesh lightcone, well enough for the statistics such analyses actually consume? The answer, on held-out cosmologies spanning the full CosmoGridV1 $w$CDM grid, is yes -- with the qualification that \emph{which} correction suffices depends on \emph{which} statistic must be right.
+
+The foundation was infrastructural. By reconstructing each CosmoGridV1 cosmology's exact linear input -- transfer function, $\sigma_8$, and radiation density, massive neutrinos included -- and letting \textsc{PkdGrav3} generate one backscaled initial condition consumed byte-identically by both solvers (Sec.~\ref{sec:ic_generation}), and by embedding a shell builder into Disco-DJ's time integration that reproduces \textsc{PkdGrav3}'s moving-lightcone crossing condition on CosmoGridV1's radial shell grid within constant memory (Sec.~\ref{sec:shell_builder}), the learning problem was reduced to its irreducible core: paired full-sky lightcones differing only through the force solver. Every result in Chapter~\ref{ch:results} rests on this controlled setup.
+
+On these pairs, three corrections were built (Sec.~\ref{sec:correction-pipelines}), sharing one measured insight -- Disco-DJ's small-scale deficit is primarily one of \emph{amplitude}, its phases remaining correlated with the truth deep into the nonlinear regime -- and one shared guarantee, the high-pass residual formulation that pins the already-correct large scales to the fast simulation exactly. The deterministic transfer-function pipeline holds shell and weak-lensing convergence spectra within a few percent of the reference out to the native $\ell = 3000$, at essentially zero inference cost; it is the method of choice wherever two-point statistics suffice. What it cannot do -- by construction, not by failure -- is generate the one-point non-Gaussianity of the missing structure. The two generative pipelines close exactly that gap: both the flow-matching U-Net and the EDM diffusion model restore skewness and excess kurtosis at shell and convergence level on cosmologies they never saw, the flow essentially exactly and with the tightest cosmology-to-cosmology scatter, the diffusion slightly conservatively but with the flattest high-multipole convergence spectra. That a 32-step stochastic sampler, evaluated on thousands of overlapping tiles sharing a single global noise field, reassembles into consistent full-sky maps also validates the overlap-tile machinery itself as a general route for applying patch-based generative models to the sphere.
+
+Several limitations bound these conclusions and set the agenda. The learned pipelines were trained and evaluated at $N_{\mathrm{side}}=512$, so their corrections currently stop short of the native $\ell = 3000$ band where the transfer function was scored -- retraining on native-resolution patches is the most direct extension, and the patch machinery already supports it. The corrected fields are continuous overdensities, not integer count maps, which downstream weak-lensing statistics tolerate but a consumer requiring per-pixel count validity would not. The corrections were validated on matter shells and derived convergence maps at fixed total neutrino mass, without baryonic feedback -- which operates on precisely the scales corrected here and would need its own treatment \cite{schneider_matter_2015, fluri_full_2022}. And each cosmology entered with a single realisation, so realisation-to-realisation generalisation at fixed cosmology remains to be quantified.
+
+The direction, however, is clear. A Disco-DJ lightcone costs minutes where the reference costs node-hours, and the corrections add almost nothing to that -- so corrected fast lightcones can populate the simulation demand of deep-learning analyses of current surveys \cite{thomsen_dark_2026, fluri_full_2022} at a small fraction of the reference suite's cost, reserving full $N$-body runs for validation rather than production. The longer-term prospect is tighter still: Disco-DJ is differentiable end-to-end \cite{list_disco-dj_2026}, and a differentiable corrected forward model -- from cosmological parameters through the corrected lightcone to the map-level statistic -- would put gradient-based inference within reach of the same pipeline.
 
 \printbibliography
 
@@ -909,7 +1416,7 @@ The whole project -- the analysis and ML pipelines together with the modified Di
 \begin{minted}[
   frame=single,
   framesep=8pt,
-  fontsize=\small,
+  fontsize=\footnotesize,
   linenos=false,
 ]{bash}
 #!/bin/bash
@@ -931,7 +1438,20 @@ The whole project -- the analysis and ML pipelines together with the modified Di
 #SBATCH --job-name=run_disco
 #SBATCH --output=../run_disco-%j.out
 #SBATCH --error=../run_disco-%j.err
+\end{minted}
+\end{minipage}
+\caption{SLURM job script for a Disco-DJ run, part 1: the scheduler header (resources, accounting, bookkeeping -- Sec.~\ref{sec:infrastructure}).}
+\end{listing}
 
+\begin{listing}[H]
+\centering
+\begin{minipage}{0.75\textwidth}
+\begin{minted}[
+  frame=single,
+  framesep=8pt,
+  fontsize=\footnotesize,
+  linenos=false,
+]{bash}
 # =========== Execution body ===========
 
 # 1. Activate the code-specific virtual environment
@@ -960,10 +1480,9 @@ srun --ntasks="${NTASKS}" \
     --res-pm "${RES_PM}" \
     --boxsize "${BOXSIZE}" \
     # ... additional flags
-
 \end{minted}
 \end{minipage}
-\caption{SLURM job script for a Disco-DJ run.}
+\caption{SLURM job script for a Disco-DJ run, part 2: the execution body (environment activation, input paths, physical parameters, and the process-per-GPU launch).}
 \end{listing}
 
 \end{document}
