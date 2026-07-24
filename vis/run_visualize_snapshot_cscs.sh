@@ -45,7 +45,7 @@ if ! "${PYTHON_BIN}" -c "import numpy, matplotlib" >/dev/null 2>&1; then
   exit 3
 fi
 
-SNAPSHOT=/capstor/store/cscs/ska/sk037/grid_000001/CosmoML.00000
+SNAPSHOT=/capstor/store/cscs/ska/sk037/grid_000001/CosmoML.00140
 OUTDIR=${SCRATCH}/outputs/plots/snapshots
 
 mkdir -p "${OUTDIR}"
@@ -113,7 +113,7 @@ else:
     p, _ = read_tipsy(snap, BOXSIZE)
     pos = np.column_stack([p['x'], p['y'], p['z']])
     grid_val = 832
-    slice_thickness_val = 10
+    slice_thickness_val = 8.0
 
 print(f"BOXSIZE: {BOXSIZE}, slice_thickness_val: {slice_thickness_val}, grid_val: {grid_val}")
 
@@ -126,6 +126,12 @@ plot_density_slice(
     grid=grid_val,
     input_file=snap,
     output_dir=outdir,
+    # This snapshot is the IC: true density contrast is ~1000x smaller than a
+    # structure-formed snapshot, so the shared (vmin=-1, vmax=1) scale used
+    # elsewhere renders it as a near-flat color. auto_scale stretches to this
+    # slice's own min/max instead so the initial perturbations are actually
+    # visible (not directly color-comparable to later snapshots/shells anymore).
+    auto_scale=False,
 )
 PY
 

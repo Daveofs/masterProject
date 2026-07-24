@@ -600,6 +600,49 @@ def _gather_train_runs(runs, lmax: int, log_density: bool, info_npz, smooth_wind
     return X, y, sum_cross, sum_low, sum_high, r_counts, last_cosmo, last_z, last_cl_low_s
 
 
+# ---------------------------------------------------------------------------
+# T emulator, torch/GPU (2026-07-23, replaced sklearn's MLPRegressor): for this
+# workload -- a tiny model (9 features, hidden_layer_sizes like 256,256,128)
+# but tens of millions of training rows -- sklearn's partial_fit was measured
+# to be bound by per-call/per-batch Python overhead, not FLOPs, so raising
+# --cpus-per-task or --gather-workers did nothing for actual training
+# wall-clock (only the alm2cl SHT-heavy gather stage is genuinely CPU-thread-
+# bound). A GPU handles exactly this shape of workload (trivial per-sample
+# compute, huge batch throughput) far better. Uses the SAME uenv pytorch
+# image + sphereflow venv apply_transfer.py's --kappa already runs under (see
+# run_transfer.sh) -- not a new dependency. Both helpers import torch lazily
+# (function-local, like sklearn's own imports elsewhere in this file) so
+# `fit`/`gather-shard --method fit`/etc., which never touch the emulator,
+# don't need torch installed to run.
+# ---------------------------------------------------------------------------
+
+def _build_torch_mlp(input_dim: int, hidden_layer_sizes: tuple):
+    """Plain feedforward MLP: Linear+ReLU per hidden layer, linear (no
+    activation) output -- architecture-equivalent to
+    MLPRegressor(activation='relu')."""
+    import torch.nn as nn
+    dims = [input_dim, *hidden_layer_sizes]
+    layers = []
+    for i in range(len(dims) - 1):
+        layers.append(nn.Linear(dims[i], dims[i + 1]))
+        layers.append(nn.ReLU())
+    layers.append(nn.Linear(dims[-1], 1))
+    return nn.Sequential(*layers)
+
+
+def _torch_predict(model, scaler, X: np.ndarray, device) -> np.ndarray:
+    """scaler.transform (CPU, cheap -- StandardScaler is unrelated to the GPU
+    bottleneck, kept as-is) + one batched forward pass -- the torch equivalent
+    of MLPRegressor.predict(), used by both train()'s cosmo-vec sanity check
+    and emulate()."""
+    import torch
+    model.eval()
+    Xs = scaler.transform(X)
+    with torch.no_grad():
+        pred = model(torch.as_tensor(Xs, dtype=torch.float32, device=device))
+    return pred.squeeze(-1).cpu().numpy()
+
+
 def _finalize_train(X, y, sum_cross, sum_low, sum_high, r_counts, last_cosmo, last_z,
                     last_cl_low_s, lmax: int, log_density: bool, test_cosmos: set[str],
                     hidden_str: str, alpha: float, max_iter: int, smooth_window, out):
@@ -610,9 +653,9 @@ def _finalize_train(X, y, sum_cross, sum_low, sum_high, r_counts, last_cosmo, la
     manual train/val split + partial_fit loop below is inherently seeded by
     array ORDER, which differs once shards from different nodes are
     concatenated (see gather-merge's docstring for why this is acceptable)."""
-    from sklearn.neural_network import MLPRegressor
     from sklearn.preprocessing import StandardScaler
     import joblib
+    import torch
 
     ell = np.arange(lmax + 1)
     with np.errstate(divide="ignore", invalid="ignore"):
@@ -657,38 +700,127 @@ def _finalize_train(X, y, sum_cross, sum_low, sum_high, r_counts, last_cosmo, la
     X_tr_eval, y_tr_eval = X_tr[tr_eval_idx], y_tr[tr_eval_idx]
     X_va_eval, y_va_eval = X_va[va_eval_idx], y_va[va_eval_idx]
 
-    model = MLPRegressor(hidden_layer_sizes=hidden, activation="relu",
-                         solver="adam", alpha=alpha, batch_size=4096,
-                         learning_rate_init=1e-4, verbose=False, random_state=0)
-    train_loss_hist, val_loss_hist = [], []
-    best_val, best_weights, no_improve, patience = np.inf, None, 0, 10
-    for it in range(max_iter):
-        model.partial_fit(X_tr, y_tr)                  # one epoch (adam, batch_size=4096)
-        train_loss = float(np.mean((model.predict(X_tr_eval) - y_tr_eval) ** 2)) / 2
-        val_loss = float(np.mean((model.predict(X_va_eval) - y_va_eval) ** 2)) / 2
-        train_loss_hist.append(train_loss); val_loss_hist.append(val_loss)
-        if val_loss < best_val - 1e-9:
-            best_val, best_weights, no_improve = val_loss, \
-                ([c.copy() for c in model.coefs_], [b.copy() for b in model.intercepts_]), 0
-        else:
-            no_improve += 1
-        if it % 10 == 0:
-            print(f"  epoch {it}: train_loss={train_loss:.3e} val_loss={val_loss:.3e}", flush=True)
-        if no_improve >= patience:
-            print(f"[train] early stopping at epoch {it} "
-                  f"(no val improvement for {patience} epochs)", flush=True)
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"[train] torch device: {device}"
+          + (f" ({torch.cuda.get_device_name(0)})" if device.type == "cuda" else
+             "  -- NO GPU FOUND, falling back to CPU (slow for this dataset size; "
+             "check --gres=gpu:N was requested and the uenv/venv this runs under "
+             "has CUDA-enabled torch)"), flush=True)
+    model = _build_torch_mlp(Xs.shape[1], hidden).to(device)
+    # weight_decay is torch's L2-penalty analogue of sklearn's alpha -- not a
+    # bit-for-bit reproduction of sklearn's exact penalty formula (the original
+    # code already treated alpha as "an optimizer detail, not part of the
+    # reported/plotted loss" -- see the loss-plot comment below -- so an exact
+    # match was never guaranteed, just a chosen regularization strength).
+    optimizer = torch.optim.Adam(model.parameters(), lr=1e-4, weight_decay=alpha)
+    batch_size = 4096
+
+    X_tr_t = torch.as_tensor(X_tr, dtype=torch.float32, device=device)
+    y_tr_t = torch.as_tensor(y_tr, dtype=torch.float32, device=device)
+    X_tr_eval_t = torch.as_tensor(X_tr_eval, dtype=torch.float32, device=device)
+    y_tr_eval_t = torch.as_tensor(y_tr_eval, dtype=torch.float32, device=device)
+    X_va_eval_t = torch.as_tensor(X_va_eval, dtype=torch.float32, device=device)
+    y_va_eval_t = torch.as_tensor(y_va_eval, dtype=torch.float32, device=device)
+    n_tr = X_tr_t.shape[0]
+    shuffle_gen = torch.Generator().manual_seed(0)   # CPU generator -- randperm, then .to(device)
+
+    def _eval_loss(Xe, ye):
+        model.eval()
+        with torch.no_grad():
+            return 0.5 * torch.mean((model(Xe).squeeze(-1) - ye) ** 2).item()
+
+    def _save(path):
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
+        tmp = f"{path}.tmp"
+        joblib.dump({"model_state_dict": {k: v.detach().cpu() for k, v in model.state_dict().items()},
+                    "hidden_layer_sizes": hidden, "input_dim": Xs.shape[1],
+                    "scaler": scaler, "lmax": lmax, "smooth_window": smooth_window,
+                    "R": R, "log_density": log_density, "test_cosmos": sorted(test_cosmos),
+                    "cosmo_keys": COSMO_KEYS, "feature_order":
+                    ["log10(l+1)", "z", *COSMO_KEYS, "log10(Cl_low)"],
+                    "framework": "torch"}, tmp)
+        os.replace(tmp, path)
+
+    # Evaluate/log/checkpoint every EVAL_EVERY gradient steps, not once per full
+    # epoch (2026-07-23): one "epoch" here is a full pass over potentially tens
+    # of millions of (shell, ell) rows -- a single training run only ever
+    # produces a handful of epoch-granularity points (e.g. 16), which reads as
+    # a sparse, noisy curve compared to unet/diffusion's (their "epoch" is a
+    # pass over a much smaller patch dataset, not DDP -- diffusion's run_epoch()
+    # also only returns ONE loss value per epoch; more GPUs just makes each of
+    # ITS epochs faster, it doesn't add curve resolution either). patience stays
+    # expressed as PATIENCE_EPOCHS full-dataset-equivalents (same semantic
+    # tolerance as before: give up after this many epochs' worth of steps with
+    # no improvement), just translated into eval-interval units -- so stopping
+    # behavior (in total steps trained) is UNCHANGED, only how many points get
+    # plotted along the way.
+    steps_per_epoch = max(1, n_tr // batch_size)
+    max_steps = max_iter * steps_per_epoch
+    # Capped so tiny datasets/short runs (small max_steps -- e.g. quick smoke
+    # tests) still get several eval points instead of zero (200 could otherwise
+    # exceed the entire run's total step budget and never fire).
+    EVAL_EVERY = max(1, min(200, max_steps // 5))
+    PATIENCE_EPOCHS = 10
+    patience = max(1, round(PATIENCE_EPOCHS * steps_per_epoch / EVAL_EVERY))
+    print(f"[train] {steps_per_epoch:,} steps/epoch, evaluating every {EVAL_EVERY} steps "
+          f"(patience={patience} evals ~= {PATIENCE_EPOCHS} epochs of no improvement)", flush=True)
+
+    step_hist, train_loss_hist, val_loss_hist = [], [], []
+    best_val, best_state, no_improve = np.inf, None, 0
+    global_step = 0
+    stop = False
+    for epoch in range(max_iter):
+        if stop:
             break
-    if best_weights is not None:                       # restore best-val weights
-        model.coefs_, model.intercepts_ = best_weights
+        model.train()
+        perm = torch.randperm(n_tr, generator=shuffle_gen).to(device)
+        for b in range(steps_per_epoch):
+            idx = perm[b * batch_size:(b + 1) * batch_size]
+            optimizer.zero_grad()
+            loss = 0.5 * torch.mean((model(X_tr_t[idx]).squeeze(-1) - y_tr_t[idx]) ** 2)
+            loss.backward()
+            optimizer.step()
+            global_step += 1
+            if global_step % EVAL_EVERY != 0:
+                continue
+            train_loss = _eval_loss(X_tr_eval_t, y_tr_eval_t)
+            val_loss = _eval_loss(X_va_eval_t, y_va_eval_t)
+            step_hist.append(global_step)
+            train_loss_hist.append(train_loss); val_loss_hist.append(val_loss)
+            if val_loss < best_val - 1e-9:
+                best_val, best_state, no_improve = val_loss, \
+                    {k: v.detach().clone() for k, v in model.state_dict().items()}, 0
+            else:
+                no_improve += 1
+            print(f"  step {global_step}/{max_steps}: train_loss={train_loss:.3e} "
+                  f"val_loss={val_loss:.3e}", flush=True)
+            if best_state is not None:
+                # Periodic checkpoint (same cadence as the eval/log above) --
+                # otherwise this function only ever saves ONCE, after the loop
+                # breaks/completes, so a SLURM walltime kill mid-training loses
+                # the ENTIRE run (gather + however many hours of training) with
+                # zero output. Swap in the BEST-so-far state_dict (not the
+                # current, possibly-already-drifted-past-best one) to write the
+                # checkpoint, then put the LIVE training state back so the loop
+                # continues exactly where it was. Atomic tmp-then-rename so a
+                # kill mid-write can't leave a torn/corrupt emulator.pkl behind.
+                live_state = {k: v.detach().clone() for k, v in model.state_dict().items()}
+                model.load_state_dict(best_state)
+                _save(out)
+                model.load_state_dict(live_state)
+                print(f"  [checkpoint] saved best-so-far (val={best_val:.3e}) to {out}", flush=True)
+            if no_improve >= patience:
+                print(f"[train] early stopping at step {global_step} "
+                      f"(no val improvement for {patience} evals ~= {PATIENCE_EPOCHS} epochs)",
+                      flush=True)
+                stop = True
+                break
+    if best_state is not None:                          # restore best-val weights
+        model.load_state_dict(best_state)
     print(f"[train] final: train_loss={train_loss_hist[-1]:.3e} "
           f"best_val_loss={best_val:.3e}", flush=True)
 
-    Path(out).parent.mkdir(parents=True, exist_ok=True)
-    joblib.dump({"model": model, "scaler": scaler, "lmax": lmax,
-                 "smooth_window": smooth_window, "R": R,
-                 "log_density": log_density, "test_cosmos": sorted(test_cosmos),
-                 "cosmo_keys": COSMO_KEYS, "feature_order":
-                 ["log10(l+1)", "z", *COSMO_KEYS, "log10(Cl_low)"]}, out)
+    _save(out)
     print(f"[train] saved emulator to {out}", flush=True)
 
     # ---- loss / validation-loss curve plot ----
@@ -703,8 +835,8 @@ def _finalize_train(X, y, sum_cross, sum_low, sum_high, r_counts, last_cosmo, la
         from analysis.plotting import plot_train_val_loss
         loss_png = Path(out).with_suffix("").with_suffix(".loss.png")
         plot_train_val_loss(
-            np.arange(len(train_loss_hist)), train_loss_hist, val_loss_hist, loss_png,
-            xlabel="epoch", ylabel="MLP squared-error loss (T emulator)",
+            step_hist, train_loss_hist, val_loss_hist, loss_png,
+            xlabel="step", ylabel="MLP squared-error loss (T emulator)",
             val_label=f"validation (10% held-out samples, alpha={alpha:g})",
             formula=r"loss $=\frac{1}{2N}\sum_i(T_i-\hat T_i)^2$  "
                     "(L2 weight decay is an optimizer detail, not shown)")
@@ -722,8 +854,8 @@ def _finalize_train(X, y, sum_cross, sum_low, sum_high, r_counts, last_cosmo, la
     z_ref = float(last_z[len(last_z) // 2]); cl_ref = last_cl_low_s[len(last_z) // 2]
     X_real = build_features(ell, z_ref, last_cosmo, cl_ref)
     X_mean = build_features(ell, z_ref, mean_cosmo, cl_ref)
-    T_real = model.predict(scaler.transform(X_real))
-    T_mean = model.predict(scaler.transform(X_mean))
+    T_real = _torch_predict(model, scaler, X_real, device)
+    T_mean = _torch_predict(model, scaler, X_mean, device)
     diff = np.abs(T_real - T_mean)
     print(f"[train] cosmo-vec sanity: |T(real cosmo) - T(mean training cosmo)| "
           f"max={diff.max():.4f} mean={diff.mean():.4f} "
@@ -875,8 +1007,17 @@ def gather_merge(args):
 def emulate(args):
     """Predict T(shell, ell) for a run with the trained emulator -> transfer.npz."""
     import joblib
+    import torch
     bundle = joblib.load(args.emulator)
-    model, scaler = bundle["model"], bundle["scaler"]
+    if bundle.get("framework") != "torch":
+        raise RuntimeError(f"{args.emulator} is not a torch-format emulator bundle "
+                           f"(predates the sklearn->torch GPU rewrite, 2026-07-23) -- "
+                           f"re-run `train`/`gather-merge` to produce a compatible one.")
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model = _build_torch_mlp(bundle["input_dim"], bundle["hidden_layer_sizes"]).to(device)
+    model.load_state_dict(bundle["model_state_dict"])
+    model.eval()
+    scaler = bundle["scaler"]
     lmax = int(bundle["lmax"])
     smooth_window = int(bundle.get("smooth_window", 1))
     log_density = bool(bundle.get("log_density", False))
@@ -913,11 +1054,11 @@ def emulate(args):
 
     X_all = np.concatenate([build_features(ell, float(z[i]), cosmo, cl_low_all[i])
                             for i in range(n_shells)])
-    Ti_all = model.predict(scaler.transform(X_all)).reshape(n_shells, lmax + 1)
+    Ti_all = _torch_predict(model, scaler, X_all, device).reshape(n_shells, lmax + 1)
 
     mid = n_shells // 2
     X_mean = build_features(ell, float(z[mid]), mean_cosmo, cl_low_all[mid])
-    T_mean = model.predict(scaler.transform(X_mean))
+    T_mean = _torch_predict(model, scaler, X_mean, device)
     d = np.abs(Ti_all[mid] - T_mean)
     print(f"  [cosmo check] shell {mid}: |T(this cosmo) - T(mean training cosmo)| "
           f"max={d.max():.4f} mean={d.mean():.4f} "

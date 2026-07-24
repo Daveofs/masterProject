@@ -525,11 +525,17 @@ def _nz_tag(nz_path) -> str:
 def plot_kappa(args, run_dirs: list[Path], corrected_by_run: dict):
     """Weak-lensing kappa map diagnostic (analysis.weak_lensing): reduces the WHOLE
     usable lightcone [--kappa-zi, --kappa-zf] of low/corrected/high into ONE kappa
-    map each via UFalcon, for EVERY held-out run-dir (not capped by
-    --max-cosmologies -- unlike unet/apply_flow.py, "corrected" here is
-    already the full in-memory array from apply(), no extra reconstruction cost per
-    shell, so this is comparatively cheap: just filtering + a handful of
-    construct_kappa_map calls per cosmology instead of tiling+ODE per shell). Each
+    map each via UFalcon, for EVERY held-out run-dir. NOT compute-cheap in the
+    sense the COMPUTE itself is light (just filtering + a handful of
+    construct_kappa_map calls per cosmology instead of tiling+ODE per shell), but
+    it IS memory-heavy: this runs while `corrected_by_run` already holds every
+    held-out cosmology's full array simultaneously (needed by the earlier
+    patches/full_sky/zbin_grid stages too), and materializes its OWN per-cosmology
+    low/high/corrected shell-stack copies on top of that -- OOM-killed a
+    10-cosmology run at ~420GB (job 2884508, 2026-07-24) before those copies were
+    switched to float32. --run-dirs is the only cap that actually limits this
+    (run_transfer.sh's DIAG_MAX_COSMOLOGIES, not apply_transfer.py's own
+    --max-cosmologies, which only caps cl_ratio_by_zbin_grid.png's rows). Each
     run's OWN params.yml is loaded fresh via weak_lensing.load_cosmo_yaml (H0, Om,
     Ob, O_nu, ... -- "further values" beyond transfer_function.py's own COSMO_KEYS
     subset), since weak_lensing_ufalcon.py's hardcoded example cosmology was
@@ -568,9 +574,19 @@ def plot_kappa(args, run_dirs: list[Path], corrected_by_run: dict):
         low_all = np.load(run / f"low_shells_nside={nside}.npy", mmap_mode="r")
         high_all = np.load(run / args.info_npz, mmap_mode="r")["shells"]
         corrected = corrected_by_run[run]
-        low_shells = np.stack([np.asarray(low_all[int(s)], np.float64) for s in usable])
-        high_shells = np.stack([np.asarray(high_all[int(s)], np.float64) for s in usable])
-        corr_shells = np.stack([np.asarray(corrected[int(s)], np.float64) for s in usable])
+        # float32, not float64 (2026-07-24): these are materialized COPIES (up to
+        # ~69 usable shells x nside=2048's 50M pixels each), not mmap views, and
+        # this loop runs while `corrected_by_run` ALREADY holds every held-out
+        # cosmology's full array simultaneously (needed by the earlier patches/
+        # full_sky/zbin_grid stages too) -- three float64 shell stacks here added
+        # up to ~83GB of PEAK EXTRA memory per cosmology on top of that baseline,
+        # which OOM-killed a 10-cosmology run (job 2884508) during this exact
+        # stage. float32 halves it; kappa_map/kappa_cl's own internals don't
+        # require float64 (only kappa_cl's FINAL, much-smaller-array output is
+        # explicitly cast to float64, unaffected by this).
+        low_shells = np.stack([np.asarray(low_all[int(s)], np.float32) for s in usable])
+        high_shells = np.stack([np.asarray(high_all[int(s)], np.float32) for s in usable])
+        corr_shells = np.stack([np.asarray(corrected[int(s)], np.float32) for s in usable])
         print(f"[plot_kappa] {run.parent.name}: {len(usable)} usable shells "
               f"(z in [{lower_z.min():.3f},{upper_z.max():.3f}])", flush=True)
 

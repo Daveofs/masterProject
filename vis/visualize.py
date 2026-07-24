@@ -10,8 +10,9 @@ def plot_shells(
     plot_logarithmic: bool = False,
     name: str | None = None,
     normalize: bool = True,
-    vmin: float | None = None,
-    vmax: float | None = None,
+    vmin: float | None = -1.0,
+    vmax: float | None = 1.0,
+    cmap: str = "viridis",
 ) -> Path:
     """Load a shell file (.npz or .fits) and plot it as a HEALPix map.
 
@@ -154,7 +155,7 @@ def plot_shells(
         out_path = output_dir / file_name
         log_m = np.log10(1.01 + m)
         hp.mollview(log_m, nest=False, title=f"z-bin {z_bin}, nside {nside}, log10(1.01+δ)",
-                    xsize=3000, min=vmin, max=vmax)
+                    xsize=3000, min=vmin, max=vmax, cmap=cmap)
         plt.savefig(out_path, dpi=300, bbox_inches="tight")
         plt.close()
     else:
@@ -164,7 +165,7 @@ def plot_shells(
             file_name = f"{file_name}.png"
         out_path = output_dir / file_name
         hp.mollview(m, nest=False, title=f"z-bin {z_bin}, nside {nside}", xsize=3000,
-                    min=vmin, max=vmax)
+                    min=vmin, max=vmax, cmap=cmap)
         plt.savefig(out_path, dpi=300, bbox_inches="tight")
         plt.close()
 
@@ -181,8 +182,19 @@ def plot_density_slice(
     grid: int = 256,
     input_file: str | Path | None = None,
     output_dir: Path | None = None,
+    vmin: float | None = -1.0,
+    vmax: float | None = 1.0,
+    cmap: str = "viridis",
+    auto_scale: bool = False,
 ) -> Path:
-    """Bin a thin slab of particles onto a 2D grid and plot the density contrast."""
+    """Bin a thin slab of particles onto a 2D grid and plot the density contrast.
+
+    auto_scale: if True, ignore vmin/vmax and stretch the color scale to this
+        slice's own min/max instead. Use for near-uniform fields (e.g. initial
+        conditions) whose true contrast is too small to show up against the
+        shared (vmin, vmax) used for structure-formed snapshots/shells — the
+        output is then no longer color-comparable to those other plots.
+    """
     try:
         import matplotlib.pyplot as plt
     except ImportError as exc:  # pragma: no cover - optional dependency
@@ -235,7 +247,12 @@ def plot_density_slice(
         range=[[0.0, boxsize], [0.0, boxsize]],
     )
 
-    # log10(1.01 + δ) — same normalisation used in sim_discodj_multigpu.py plots
+    # δ = count/<count> - 1, same overdensity definition used by plot_shells().
+    # Plot log10(1.01+δ) rather than raw δ: δ itself can run into the hundreds
+    # in cluster cores, which would blow past any (vmin, vmax) shared with the
+    # shell maps and clip almost all real structure to a single flat color.
+    # The log transform compresses that range enough that IC, snapshot, and
+    # shell plots can all share the same (vmin, vmax, cmap).
     density = hist / np.mean(hist) - 1.0
     log_density = np.log10(1.01 + density)
 
@@ -257,6 +274,14 @@ def plot_density_slice(
         file_name = f"density_slice_axis{slice_axis}_center{center:.1f}.png"
 
     out_path = output_dir / file_name
-    plt.imsave(out_path, log_density.T, cmap="inferno", origin="lower")
+
+    # Same quantity (log10(1.01+δ)), same (vmin, vmax), same colormap as
+    # plot_shells(plot_logarithmic=True) so the two plot types are directly
+    # comparable -- unless auto_scale overrides that for a near-uniform field.
+    from matplotlib.colors import Normalize
+
+    norm = Normalize(vmin=None if auto_scale else vmin, vmax=None if auto_scale else vmax, clip=True)
+    rgba = plt.get_cmap(cmap)(norm(log_density.T))
+    plt.imsave(out_path, rgba, origin="lower")
     print(f"Saved density slice to {out_path}")
     return out_path

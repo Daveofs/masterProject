@@ -1,10 +1,11 @@
 #!/bin/bash
-#SBATCH --nodes=10
+#SBATCH --nodes=1
 #SBATCH --job-name=transfer-fn
 #SBATCH --partition=normal
-#SBATCH --account=sk037
+#SBATCH --account=a0158
 #SBATCH --ntasks-per-node=1
-#SBATCH --cpus-per-task=128
+#SBATCH --cpus-per-task=288
+#SBATCH --gres=gpu:1
 #SBATCH --time=12:00:00
 #SBATCH --output=/capstor/scratch/cscs/damrein/outputs/logs/transfer/slurm-%j.out
 #SBATCH --error=/capstor/scratch/cscs/damrein/outputs/logs/transfer/slurm-%j.err
@@ -16,9 +17,11 @@
 #
 #   corrected_alm(ell,m) = low_alm(ell,m) * T(ell, shell),  T = sqrt(<Cl_high>/<Cl_low>)
 #
-# CPU-only (healpy), 128 cpus/node (measured: a single shell's SHT calls saturate
-# OMP threading around 128 threads -- 128->256 gave ZERO further speedup, measured
-# directly). Four stages:
+# CPU-only (healpy). Node cpu count is CLUSTER-specific (128 cpus/node on Alps,
+# where a single shell's SHT calls were measured to saturate OMP threading
+# around 128 threads -- 128->256 gave ZERO further speedup; 288 cpus/node on
+# Clariden -- see --cpus-per-task/OMP_NUM_THREADS below, which track whichever
+# cluster this submits to). Four stages:
 #   0. held-out cosmologies: a random FRACTION of cosmologies (VAL_FRAC, default
 #      0.15) is held out for validation -- same whole-cosmology-split convention
 #      as unet/dataset.py's split_by_cosmo (default val_frac=0.15) --
@@ -164,7 +167,7 @@ DATA=/capstor/scratch/cscs/damrein/grid
 # shell. Override at submission time, e.g. `sbatch --export=LMAX=4096 ...`; NOT
 # yet confirmed to fix the "washed out" patch look (2026-07-21) -- this is the
 # knob to test that hypothesis with, not a validated fix.
-LMAX=${LMAX:-6143}
+LMAX=${LMAX:-3000}
 # Stage 1's per-node SHT worker count. 20 was sized for lmax=3000; each worker's
 # map2alm/alm2map memory footprint grows with lmax (roughly linearly, at fixed
 # nside=2048), so running 20 of them CONCURRENTLY at a much higher lmax can
@@ -182,7 +185,25 @@ METHOD=${METHOD:-emulate}
 # Emulator hyperparameters (METHOD=emulate only).
 HIDDEN=${HIDDEN:-256,256,128}
 MAX_ITER=${MAX_ITER:-200}
-SAMPLE_FRAC=${SAMPLE_FRAC:-1.0}   # <1.0 subsamples ell per shell (faster training)
+# transfer_function.py builds one training ROW per (run, shell, ell) triple, so
+# raising LMAX inflates the training set size ~linearly (lmax+1 ell values per
+# shell) -- with batch_size fixed at 4096 (deliberately, see train()'s own
+# comment: a larger batch was measured to converge WORSE at matched wall-clock),
+# more samples means proportionally more gradient steps, and therefore wall-
+# clock, PER EPOCH. Measured (2026-07-22/23, jobs 4257217/4264882, lmax=6143):
+# ~12 min/epoch vs the lmax=3000 baseline's roughly 9x-fewer-samples pace --
+# with MAX_ITER=200 that's potentially many hours before early stopping.
+# --sample-frac randomly keeps a fraction of ell per shell (still spanning the
+# full ell range -- smooth_cl's boxcar smoothing already makes adjacent ell
+# highly redundant, so little signal is lost) -- scale it down automatically
+# above lmax=3000 to keep per-epoch wall-clock roughly independent of LMAX,
+# floored at 0.15 so very high lmax doesn't over-thin the training signal.
+SAMPLE_FRAC_DEFAULT=$(python3 -c "
+lmax = $LMAX
+frac = 3000.0 / lmax if lmax > 3000 else 1.0
+print(round(max(frac, 0.15), 3))
+")
+SAMPLE_FRAC=${SAMPLE_FRAC:-$SAMPLE_FRAC_DEFAULT}   # <1.0 subsamples ell per shell (faster training)
 SMOOTH_WINDOW=${SMOOTH_WINDOW:-21}
 # Set INCLUDE_TEST=1 to fit/train T on the held-out cosmologies too (sanity check:
 # expect corrected/high ~ 1 by construction). Empty = proper leave-one-out.
@@ -221,20 +242,26 @@ TEST_COSMOS_FLAGS="--test-cosmos ${COSMOS_ARR[@]}"
 
 # Cap how many held-out cosmologies actually go through the EXPENSIVE stage
 # 2b/3 (apply()) -- training above already excludes the FULL set.
-MAX_COSMOLOGIES=${MAX_COSMOLOGIES:-30}
+MAX_COSMOLOGIES=${MAX_COSMOLOGIES:-10}
 EVAL_COSMOS_ARR=("${COSMOS_ARR[@]:0:$MAX_COSMOLOGIES}")
 
 echo "==== transfer-function pipeline | data=$DATA | lmax=$LMAX | method=$METHOD | ell_min_mpc=$ELL_MIN_MPC | nodes=$N_NODES ===="
 echo "held out from training (${#COSMOS_ARR[@]}): ${COSMOS_ARR[@]}"
 echo "evaluated in stages 2b/3 (${#EVAL_COSMOS_ARR[@]} of them, MAX_COSMOLOGIES=$MAX_COSMOLOGIES): ${EVAL_COSMOS_ARR[@]}"
 
+# Single source of truth for node cpu count -- SLURM sets this from
+# --cpus-per-task above, so it automatically tracks whichever cluster this
+# submits to (128 on Alps, 288 on Clariden) without hardcoding either value
+# more than once. Every OMP_NUM_THREADS=... below reuses this.
+CPUS_PER_NODE=${SLURM_CPUS_PER_TASK:-288}
+
 # ---- 1. Preprocess alms (skips runs already done). Embarrassingly parallel
 # across cosmologies (process_single_run's own skip-if-done check means
 # concurrent shards never touch the same output file) -- sharded across every
 # allocated node when N_NODES>1, same srun-background+wait pattern as stages
 # 2/3, instead of the whole dataset landing on one node. OMP_NUM_THREADS is
-# sized so NUM_WORKERS*OMP_NUM_THREADS doesn't oversubscribe a node's 128 cpus.
-OMP_NUM_THREADS_PP=$(( 128 / NUM_WORKERS ))
+# sized so NUM_WORKERS*OMP_NUM_THREADS doesn't oversubscribe a node's cpus.
+OMP_NUM_THREADS_PP=$(( CPUS_PER_NODE / NUM_WORKERS ))
 [ "$OMP_NUM_THREADS_PP" -lt 1 ] && OMP_NUM_THREADS_PP=1
 if [ "$N_NODES" -gt 1 ]; then
     echo "[stage 1] preprocessing alms across $N_NODES nodes (sharded, $NUM_WORKERS workers/node)"
@@ -267,11 +294,11 @@ fi
 echo "[stage 1] done -- $N_ALM_FILES low_alms_lmax${LMAX}.npy files present"
 
 # ---- 2. Build T(ell, shell) via the chosen method (held-out cosmologies left out) ----
-# OMP_NUM_THREADS=128 here (not the file-wide default of 8): the gather loop in
-# `train`/`fit` is dominated by hp.alm2cl (OpenMP-parallel healpy SHT calls) over
-# many training runs -- running that at 8 threads while 128 cpus are allocated
-# left >90% of the node idle (measured: job 4200458 took ~1.3 min/run just to
-# gather Cls at OMP_NUM_THREADS=8).
+# OMP_NUM_THREADS=$CPUS_PER_NODE here (not the file-wide default of 8): the
+# gather loop in `train`/`fit` is dominated by hp.alm2cl (OpenMP-parallel
+# healpy SHT calls) over many training runs -- running that at 8 threads while
+# the full node is allocated left >90% of the node idle (measured: job
+# 4200458 took ~1.3 min/run just to gather Cls at OMP_NUM_THREADS=8).
 GATHER_METHOD="fit"; [ "$METHOD" = "emulate" ] && GATHER_METHOD="train"
 if [ "$N_NODES" -gt 1 ]; then
     echo "[stage 2] gathering '$GATHER_METHOD' across $N_NODES nodes (sharded)"
@@ -280,7 +307,7 @@ if [ "$N_NODES" -gt 1 ]; then
         TRAIN_SHARD_FLAGS="--smooth-window $SMOOTH_WINDOW --sample-frac $SAMPLE_FRAC"
     for ((i = 0; i < N_NODES; i++)); do
         srun --nodes=1 --ntasks=1 --exclusive bash -c "
-            OMP_NUM_THREADS=128 python transfer/transfer_function.py gather-shard \
+            OMP_NUM_THREADS=$CPUS_PER_NODE python transfer/transfer_function.py gather-shard \
                 --data-dir '$DATA' --lmax $LMAX --method $GATHER_METHOD \
                 $TEST_COSMOS_FLAGS $FIT_FLAGS $TRAIN_SHARD_FLAGS \
                 --gather-workers 32 --shard-index $i --num-shards $N_NODES \
@@ -297,10 +324,16 @@ if [ "$N_NODES" -gt 1 ]; then
         SHARD_FILES="$SHARD_FILES $OUT/shard_${i}.pkl"
     done
     if [ "$METHOD" = "emulate" ]; then
-        echo "[stage 2 merge] training MLP emulator from $N_NODES shards"
-        OMP_NUM_THREADS=128 python transfer/transfer_function.py gather-merge \
-            --shards $SHARD_FILES --hidden "$HIDDEN" --max-iter $MAX_ITER \
-            --out "$OUT/emulator.pkl" || { echo "ERROR: gather-merge failed, aborting before stage 2b/3."; exit 1; }
+        echo "[stage 2 merge] training MLP emulator from $N_NODES shards (GPU, torch)"
+        # Runs under sphereflow (uenv+venv) -- deepSphere lacks torch; see the
+        # "T emulator, torch/GPU" comment block in transfer_function.py for why
+        # this moved off sklearn's CPU-only MLPRegressor.
+        uenv run pytorch/v2.9.1:v2 --view=default -- bash -c "
+            source ${SPHEREFLOW_VENV}/bin/activate
+            OMP_NUM_THREADS=$CPUS_PER_NODE python transfer/transfer_function.py gather-merge \
+                --shards $SHARD_FILES --hidden '$HIDDEN' --max-iter $MAX_ITER \
+                --out '$OUT/emulator.pkl'
+        " || { echo "ERROR: gather-merge failed, aborting before stage 2b/3."; exit 1; }
     else
         echo "[stage 2 merge] fitting T(ell,shell) from $N_NODES shards"
         python transfer/transfer_function.py gather-merge \
@@ -308,16 +341,19 @@ if [ "$N_NODES" -gt 1 ]; then
             || { echo "ERROR: gather-merge failed, aborting before stage 2b/3."; exit 1; }
     fi
 elif [ "$METHOD" = "emulate" ]; then
-    echo "[stage 2] training MLP emulator (hidden=$HIDDEN, max_iter=$MAX_ITER, sample_frac=$SAMPLE_FRAC)"
-    OMP_NUM_THREADS=128 python transfer/transfer_function.py train \
-        --data-dir "$DATA" --lmax $LMAX \
-        $TEST_COSMOS_FLAGS $FIT_FLAGS \
-        --hidden "$HIDDEN" --max-iter $MAX_ITER --sample-frac $SAMPLE_FRAC \
-        --gather-workers 32 \
-        --out "$OUT/emulator.pkl"
+    echo "[stage 2] training MLP emulator (hidden=$HIDDEN, max_iter=$MAX_ITER, sample_frac=$SAMPLE_FRAC) (GPU, torch)"
+    uenv run pytorch/v2.9.1:v2 --view=default -- bash -c "
+        source ${SPHEREFLOW_VENV}/bin/activate
+        OMP_NUM_THREADS=$CPUS_PER_NODE python transfer/transfer_function.py train \
+            --data-dir '$DATA' --lmax $LMAX \
+            $TEST_COSMOS_FLAGS $FIT_FLAGS \
+            --hidden '$HIDDEN' --max-iter $MAX_ITER --sample-frac $SAMPLE_FRAC \
+            --gather-workers 32 \
+            --out '$OUT/emulator.pkl'
+    "
 else
     echo "[stage 2] fitting T(ell, shell) (train-averaged)"
-    OMP_NUM_THREADS=128 python transfer/transfer_function.py fit \
+    OMP_NUM_THREADS=$CPUS_PER_NODE python transfer/transfer_function.py fit \
         --data-dir "$DATA" --lmax $LMAX \
         $TEST_COSMOS_FLAGS $FIT_FLAGS --gather-workers 32 --out "$OUT/transfer.npz"
 fi
@@ -333,11 +369,15 @@ if [ "$METHOD" = "emulate" ]; then
         # exist: split_val_cosmos already filters out cosmologies with no
         # disco_sim/ data (see its docstring), but this is defense in depth
         # against any OTHER emulate failure (corrupt alms, etc.) so one bad
-        # cosmology can't poison --transfer/--run-dirs for stage 3.
-        if OMP_NUM_THREADS=128 python transfer/transfer_function.py emulate \
-            --emulator "$OUT/emulator.pkl" \
-            --run-dir "$DATA/$c/run_0" \
-            --out "$OUT/transfer_${c}.npz"; then
+        # cosmology can't poison --transfer/--run-dirs for stage 3. Runs under
+        # sphereflow (uenv+venv) -- torch bundle, see stage 2's comment.
+        if uenv run pytorch/v2.9.1:v2 --view=default -- bash -c "
+            source ${SPHEREFLOW_VENV}/bin/activate
+            OMP_NUM_THREADS=$CPUS_PER_NODE python transfer/transfer_function.py emulate \
+                --emulator '$OUT/emulator.pkl' \
+                --run-dir '$DATA/$c/run_0' \
+                --out '$OUT/transfer_${c}.npz'
+        "; then
             TRANSFER_ARR+=("$OUT/transfer_${c}.npz")
             OK_COSMOS_ARR+=("$c")
         else
@@ -379,7 +419,7 @@ if [ "$N_NODES" -gt 1 ]; then
         srun --nodes=1 --ntasks=1 --exclusive \
             uenv run pytorch/v2.9.1:v2 --view=default -- bash -c "
                 source ${SPHEREFLOW_VENV}/bin/activate
-                OMP_NUM_THREADS=128 python transfer/apply_transfer.py \
+                OMP_NUM_THREADS=$CPUS_PER_NODE python transfer/apply_transfer.py \
                     --transfer ${BATCH_TRANSFERS[$i]} \
                     --run-dirs ${BATCH_RUN_DIRS[$i]} \
                     --nside 2048 --lmax $LMAX --ell-min-mpc $ELL_MIN_MPC \
@@ -420,7 +460,7 @@ done
 echo "[stage 3] apply_transfer.py: correction (--no-clip, ell_min_mpc=$ELL_MIN_MPC, hp_transition=$HP_TRANSITION) + diagnostics (incl. kappa), $((${#EVAL_COSMOS_ARR[@]} < DIAG_MAX_COSMOLOGIES ? ${#EVAL_COSMOS_ARR[@]} : DIAG_MAX_COSMOLOGIES)) held-out cosmologies"
 uenv run pytorch/v2.9.1:v2 --view=default -- bash -c "
     source ${SPHEREFLOW_VENV}/bin/activate
-    OMP_NUM_THREADS=128 python transfer/apply_transfer.py \
+    OMP_NUM_THREADS=$CPUS_PER_NODE python transfer/apply_transfer.py \
         --transfer $TRANSFER_FILES \
         --run-dirs $RUN_DIRS \
         --nside 2048 --lmax $LMAX --ell-min-mpc $ELL_MIN_MPC \

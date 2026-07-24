@@ -2,9 +2,9 @@
 #SBATCH --nodes=4
 #SBATCH --job-name=transfer-diag
 #SBATCH --partition=normal
-#SBATCH --account=sk037
+#SBATCH --account=a0158
 #SBATCH --ntasks-per-node=1
-#SBATCH --cpus-per-task=128
+#SBATCH --cpus-per-task=288
 #SBATCH --time=03:00:00
 #SBATCH --output=/capstor/scratch/cscs/damrein/outputs/logs/transfer/diag-%j.out
 #SBATCH --error=/capstor/scratch/cscs/damrein/outputs/logs/transfer/diag-%j.err
@@ -62,6 +62,9 @@ export OMP_NUM_THREADS=8
 # here only for this script's own cosmology-resolution bash/numpy logic below.
 export UENV_REPO_PATH=/capstor/scratch/cscs/damrein/.uenv-images
 SPHEREFLOW_VENV=/capstor/scratch/cscs/damrein/venvs/sphereflow
+# Single source of truth for node cpu count -- see run_transfer.sh's identical
+# comment (128 on Alps, 288 on Clariden; SLURM sets this from --cpus-per-task).
+CPUS_PER_NODE=${SLURM_CPUS_PER_TASK:-288}
 
 DATA=${DATA:-/capstor/scratch/cscs/damrein/grid}
 # Must match TRANSFER_JOB's own LMAX -- unlike run_transfer.sh (where raising
@@ -73,14 +76,18 @@ DATA=${DATA:-/capstor/scratch/cscs/damrein/grid}
 LMAX=${LMAX:-3000}
 N_NODES=${SLURM_JOB_NUM_NODES:-1}
 
-# Defaults currently point at the grid run_transfer.sh job 4215699 (10 held-out
-# grid cosmologies, MAX_COSMOLOGIES=10, ell_min_mpc=5.0) -- so plain
+# Defaults currently point at the grid run_transfer.sh job 2884508 (10 held-out
+# grid cosmologies, MAX_COSMOLOGIES=10, ell_min_mpc=5.0, lmax=3000) -- so plain
 # `sbatch transfer/run_diagnostic_only.sh` re-runs/recovers ITS diagnostics with no
 # --export needed. To target a DIFFERENT prior job (e.g. a cosmogridv1 run),
 # override at submission time -- see the header comment above for the full
 # --export= form (TRANSFER_JOB/DATA/ELL_MIN_MPC must all match together).
-TRANSFER_JOB=${TRANSFER_JOB:-4215699}
-TRANSFER_DIR="/capstor/scratch/cscs/damrein/outputs/transfer/${TRANSFER_JOB}_cos200"
+TRANSFER_JOB=${TRANSFER_JOB:-2884508}
+# No suffix (2026-07-24, was "${TRANSFER_JOB}_cos200"): current run_transfer.sh
+# writes OUT=.../transfer/${SLURM_JOB_ID} with no suffix -- the old "_cos200"
+# pattern was stale and silently broke TRANSFER_DIR resolution for every job
+# produced by the script as it exists today.
+TRANSFER_DIR="/capstor/scratch/cscs/damrein/outputs/transfer/${TRANSFER_JOB}"
 
 # ---- 0. Resolve held-out cosmologies + matching transfer file(s) from the prior job ----
 if ls "$TRANSFER_DIR"/transfer_cosmo_*.npz >/dev/null 2>&1; then
@@ -185,7 +192,7 @@ if [ "$N_NODES" -gt 1 ]; then
         srun --nodes=1 --ntasks=1 --exclusive \
             uenv run pytorch/v2.9.1:v2 --view=default -- bash -c "
                 source ${SPHEREFLOW_VENV}/bin/activate
-                OMP_NUM_THREADS=128 python transfer/apply_transfer.py \
+                OMP_NUM_THREADS=$CPUS_PER_NODE python transfer/apply_transfer.py \
                     --transfer ${BATCH_TRANSFERS[$i]} \
                     --run-dirs ${BATCH_RUN_DIRS[$i]} \
                     --nside 2048 --lmax $LMAX --ell-min-mpc $ELL_MIN_MPC \
@@ -209,7 +216,7 @@ done
 
 uenv run pytorch/v2.9.1:v2 --view=default -- bash -c "
     source ${SPHEREFLOW_VENV}/bin/activate
-    OMP_NUM_THREADS=128 python transfer/apply_transfer.py \
+    OMP_NUM_THREADS=$CPUS_PER_NODE python transfer/apply_transfer.py \
         --transfer $TRANSFER_FILES \
         --run-dirs $RUN_DIRS \
         --nside 2048 --lmax $LMAX --ell-min-mpc $ELL_MIN_MPC \
