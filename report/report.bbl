@@ -124,71 +124,6 @@
       \verb 10.1038/380603a0
       \endverb
     \endentry
-    \entry{defferrard_deepsphere_2020}{misc}{}{}
-      \name{author}{4}{}{%
-        {{hash=1c45ec3985cdb526e1b18bf4041b4c22}{%
-           family={Defferrard},
-           familyi={D\bibinitperiod},
-           given={Michaël},
-           giveni={M\bibinitperiod}}}%
-        {{hash=e7da8e9e881d032b5aa3a4ccc8a8ae95}{%
-           family={Milani},
-           familyi={M\bibinitperiod},
-           given={Martino},
-           giveni={M\bibinitperiod}}}%
-        {{hash=a856ec0579df5fd53258a9cdef4c4982}{%
-           family={Gusset},
-           familyi={G\bibinitperiod},
-           given={Frédérick},
-           giveni={F\bibinitperiod}}}%
-        {{hash=c9234fd9939a5272d2f2af705c9f908f}{%
-           family={Perraudin},
-           familyi={P\bibinitperiod},
-           given={Nathanaël},
-           giveni={N\bibinitperiod}}}%
-      }
-      \list{publisher}{1}{%
-        {arXiv}%
-      }
-      \strng{namehash}{08ab1a63b0c357f6c1df04bd4deec745}
-      \strng{fullhash}{7be09902bbaa62422119c3191e33c874}
-      \strng{fullhashraw}{7be09902bbaa62422119c3191e33c874}
-      \strng{bibnamehash}{08ab1a63b0c357f6c1df04bd4deec745}
-      \strng{authorbibnamehash}{08ab1a63b0c357f6c1df04bd4deec745}
-      \strng{authornamehash}{08ab1a63b0c357f6c1df04bd4deec745}
-      \strng{authorfullhash}{7be09902bbaa62422119c3191e33c874}
-      \strng{authorfullhashraw}{7be09902bbaa62422119c3191e33c874}
-      \field{sortinit}{D}
-      \field{sortinithash}{6f385f66841fb5e82009dc833c761848}
-      \field{labelnamesource}{author}
-      \field{labeltitlesource}{shorttitle}
-      \field{abstract}{Designing a convolution for a spherical neural network requires a delicate tradeoff between efficiency and rotation equivariance. {DeepSphere}, a method based on a graph representation of the sampled sphere, strikes a controllable balance between these two desiderata. This contribution is twofold. First, we study both theoretically and empirically how equivariance is affected by the underlying graph with respect to the number of vertices and neighbors. Second, we evaluate {DeepSphere} on relevant problems. Experiments show state-of-the-art performance and demonstrates the efficiency and flexibility of this formulation. Perhaps surprisingly, comparison with previous work suggests that anisotropic filters might be an unnecessary price to pay. Our code is available at https://github.com/deepsphere}
-      \field{day}{30}
-      \field{eprinttype}{arxiv}
-      \field{month}{12}
-      \field{number}{{arXiv}:2012.15000}
-      \field{shorttitle}{{DeepSphere}}
-      \field{title}{{DeepSphere}: a graph-based spherical {CNN}}
-      \field{urlday}{2}
-      \field{urlmonth}{7}
-      \field{urlyear}{2026}
-      \field{year}{2020}
-      \field{dateera}{ce}
-      \field{urldateera}{ce}
-      \verb{doi}
-      \verb 10.48550/arXiv.2012.15000
-      \endverb
-      \verb{eprint}
-      \verb 2012.15000 [cs.LG]
-      \endverb
-      \verb{urlraw}
-      \verb http://arxiv.org/abs/2012.15000
-      \endverb
-      \verb{url}
-      \verb http://arxiv.org/abs/2012.15000
-      \endverb
-      \keyw{Computer Science - Computer Vision and Pattern Recognition,Computer Science - Machine Learning,Statistics - Machine Learning}
-    \endentry
     \entry{dodelson_modern_2020}{article}{}{}
       \name{author}{2}{}{%
         {{hash=d3698fbc1727820bb2fd421387b59c1b}{%
@@ -599,7 +534,6 @@
       \strng{authornamehash}{3d6a9b37a01404a39f31f858d2369f4a}
       \strng{authorfullhash}{3d6a9b37a01404a39f31f858d2369f4a}
       \strng{authorfullhashraw}{3d6a9b37a01404a39f31f858d2369f4a}
-      \field{extraname}{1}
       \field{sortinit}{L}
       \field{sortinithash}{7c47d417cecb1f4bd38d1825c427a61a}
       \field{labelnamesource}{author}
@@ -634,61 +568,6 @@
       \verb http://arxiv.org/abs/astro-ph/0603494
       \endverb
       \keyw{Astrophysics,High Energy Physics - Experiment,High Energy Physics - Phenomenology,High Energy Physics - Theory}
-    \endentry
-    \entry{lesgourgues_neutrino_2012}{article}{}{}
-      \name{author}{2}{}{%
-        {{hash=b1d70423463e64684eea42af7f584996}{%
-           family={Lesgourgues},
-           familyi={L\bibinitperiod},
-           given={Julien},
-           giveni={J\bibinitperiod}}}%
-        {{hash=e9ebd9027c0c7396bb5415590e80b1c2}{%
-           family={Pastor},
-           familyi={P\bibinitperiod},
-           given={Sergio},
-           giveni={S\bibinitperiod}}}%
-      }
-      \strng{namehash}{3d6a9b37a01404a39f31f858d2369f4a}
-      \strng{fullhash}{3d6a9b37a01404a39f31f858d2369f4a}
-      \strng{fullhashraw}{3d6a9b37a01404a39f31f858d2369f4a}
-      \strng{bibnamehash}{3d6a9b37a01404a39f31f858d2369f4a}
-      \strng{authorbibnamehash}{3d6a9b37a01404a39f31f858d2369f4a}
-      \strng{authornamehash}{3d6a9b37a01404a39f31f858d2369f4a}
-      \strng{authorfullhash}{3d6a9b37a01404a39f31f858d2369f4a}
-      \strng{authorfullhashraw}{3d6a9b37a01404a39f31f858d2369f4a}
-      \field{extraname}{2}
-      \field{sortinit}{L}
-      \field{sortinithash}{7c47d417cecb1f4bd38d1825c427a61a}
-      \field{labelnamesource}{author}
-      \field{labeltitlesource}{title}
-      \field{abstract}{Neutrinos can play an important role in the evolution of the Universe, modifying some of the cosmological observables. In this contribution we summarize the main aspects of cosmological relic neutrinos and we describe how the precision of present cosmological data can be used to learn about neutrino properties, in particular their mass, providing complementary information to beta decay and neutrinoless double-beta decay experiments. We show how the analysis of current cosmological observations, such as the anisotropies of the cosmic microwave background or the distribution of large-scale structure, provides an upper bound on the sum of neutrino masses of order 1 {eV} or less, with very good perspectives from future cosmological measurements which are expected to be sensitive to neutrino masses well into the sub-{eV} range.}
-      \field{eprinttype}{arxiv}
-      \field{issn}{1687-7357, 1687-7365}
-      \field{journaltitle}{Advances in High Energy Physics}
-      \field{shortjournal}{Advances in High Energy Physics}
-      \field{title}{Neutrino mass from Cosmology}
-      \field{urlday}{7}
-      \field{urlmonth}{7}
-      \field{urlyear}{2026}
-      \field{volume}{2012}
-      \field{year}{2012}
-      \field{dateera}{ce}
-      \field{urldateera}{ce}
-      \field{pages}{1\bibrangedash 34}
-      \range{pages}{34}
-      \verb{doi}
-      \verb 10.1155/2012/608515
-      \endverb
-      \verb{eprint}
-      \verb 1212.6154 [hep-ph]
-      \endverb
-      \verb{urlraw}
-      \verb http://arxiv.org/abs/1212.6154
-      \endverb
-      \verb{url}
-      \verb http://arxiv.org/abs/1212.6154
-      \endverb
-      \keyw{Astrophysics - Cosmology and Nongalactic Astrophysics,High Energy Physics - Phenomenology}
     \endentry
     \entry{libeskind_tracing_2018}{article}{}{}
       \name{author}{30}{}{%
@@ -1004,6 +883,93 @@
       \verb https://arxiv.org/abs/1609.08621v1
       \endverb
     \endentry
+    \entry{schneider_matter_2015}{online}{}{}
+      \name{author}{10}{}{%
+        {{hash=b0bbc045c27bc983e70475c843a27564}{%
+           family={Schneider},
+           familyi={S\bibinitperiod},
+           given={Aurel},
+           giveni={A\bibinitperiod}}}%
+        {{hash=0587fd628442a39f33181dac51af9781}{%
+           family={Teyssier},
+           familyi={T\bibinitperiod},
+           given={Romain},
+           giveni={R\bibinitperiod}}}%
+        {{hash=ae4c75062c6fa1be503840ab43f4b576}{%
+           family={Potter},
+           familyi={P\bibinitperiod},
+           given={Doug},
+           giveni={D\bibinitperiod}}}%
+        {{hash=741a6dd67fd66374105bed2b3da45720}{%
+           family={Stadel},
+           familyi={S\bibinitperiod},
+           given={Joachim},
+           giveni={J\bibinitperiod}}}%
+        {{hash=7be1b3710719e66615552aff94ea8dc3}{%
+           family={Onions},
+           familyi={O\bibinitperiod},
+           given={Julian},
+           giveni={J\bibinitperiod}}}%
+        {{hash=282104c2450265d9d6833200d9f8f2ff}{%
+           family={Reed},
+           familyi={R\bibinitperiod},
+           given={Darren\bibnamedelima S.},
+           giveni={D\bibinitperiod\bibinitdelim S\bibinitperiod}}}%
+        {{hash=82a88d221c9c7f24d45363e241941f9d}{%
+           family={Smith},
+           familyi={S\bibinitperiod},
+           given={Robert\bibnamedelima E.},
+           giveni={R\bibinitperiod\bibinitdelim E\bibinitperiod}}}%
+        {{hash=d673f4b06bc18145fb87123390b4948f}{%
+           family={Springel},
+           familyi={S\bibinitperiod},
+           given={Volker},
+           giveni={V\bibinitperiod}}}%
+        {{hash=af1e01b464f048b25a6e9faeef362c72}{%
+           family={Pearce},
+           familyi={P\bibinitperiod},
+           given={Frazer\bibnamedelima R.},
+           giveni={F\bibinitperiod\bibinitdelim R\bibinitperiod}}}%
+        {{hash=6b1dbfc9f9a04d4a6c8eb39cf09d761b}{%
+           family={Scoccimarro},
+           familyi={S\bibinitperiod},
+           given={Roman},
+           giveni={R\bibinitperiod}}}%
+      }
+      \strng{namehash}{732876ff95be870c83538ca3794772dc}
+      \strng{fullhash}{7c5d52df04b626b4b0c6790120fd6ae9}
+      \strng{fullhashraw}{7c5d52df04b626b4b0c6790120fd6ae9}
+      \strng{bibnamehash}{732876ff95be870c83538ca3794772dc}
+      \strng{authorbibnamehash}{732876ff95be870c83538ca3794772dc}
+      \strng{authornamehash}{732876ff95be870c83538ca3794772dc}
+      \strng{authorfullhash}{7c5d52df04b626b4b0c6790120fd6ae9}
+      \strng{authorfullhashraw}{7c5d52df04b626b4b0c6790120fd6ae9}
+      \field{sortinit}{S}
+      \field{sortinithash}{b164b07b29984b41daf1e85279fbc5ab}
+      \field{labelnamesource}{author}
+      \field{labeltitlesource}{title}
+      \field{abstract}{Future galaxy surveys require one percent precision in the theoretical knowledge of the power spectrum over a large range including very nonlinear scales. While this level of accuracy is easily obtained in the linear regime with perturbation theory, it represents a serious challenge for small scales where numerical simulations are required. In this paper we quantify the precision of present-day \$N\$-body methods, identifying main potential error sources from the set-up of initial conditions to the measurement of the final power spectrum. We directly compare three widely used \$N\$-body codes, Ramses, Pkdgrav3, and Gadget3 which represent three main discretisation techniques: the particle-mesh method, the tree method, and a hybrid combination of the two. For standard run parameters, the codes agree to within one percent at \$k{\textbackslash}leq1\$ \$h{\textbackslash},{\textbackslash}rm Mpc{\textasciicircum}\{-1\}\$ and to within three percent at \$k{\textbackslash}leq10\$ \$h{\textbackslash},{\textbackslash}rm Mpc{\textasciicircum}\{-1\}\$. We also consider the bispectrum and show that the reduced bispectra agree at the sub-percent level for \$k{\textbackslash}leq 2\$ \$h{\textbackslash},{\textbackslash}rm Mpc{\textasciicircum}\{-1\}\$. In a second step, we quantify potential errors due to initial conditions, box size, and resolution using an extended suite of simulations performed with our fastest code Pkdgrav3. We demonstrate that the simulation box size should not be smaller than \$L=0.5\$ \$h{\textasciicircum}\{-1\}{\textbackslash}rm Gpc\$ to avoid systematic finite-volume effects (while much larger boxes are required to beat down the statistical sample variance). Furthermore, a maximum particle mass of \$M\_\{{\textbackslash}rm p\}=10{\textasciicircum}\{9\}\$ \$h{\textasciicircum}\{-1\}{\textbackslash}rm M\_\{{\textbackslash}odot\}\$ is required to conservatively obtain one percent precision of the matter power spectrum. As a consequence, numerical simulations covering large survey volumes of upcoming missions such as {DES}, {LSST}, and Euclid will need more than a trillion particles to reproduce clustering properties at the targeted accuracy.}
+      \field{day}{19}
+      \field{langid}{english}
+      \field{month}{3}
+      \field{title}{Matter power spectrum and the challenge of percent accuracy}
+      \field{titleaddon}{{arXiv}.org}
+      \field{urlday}{2}
+      \field{urlmonth}{7}
+      \field{urlyear}{2026}
+      \field{year}{2015}
+      \field{dateera}{ce}
+      \field{urldateera}{ce}
+      \verb{doi}
+      \verb 10.1088/1475-7516/2016/04/047
+      \endverb
+      \verb{urlraw}
+      \verb https://arxiv.org/abs/1503.05920v3
+      \endverb
+      \verb{url}
+      \verb https://arxiv.org/abs/1503.05920v3
+      \endverb
+    \endentry
     \entry{seljak_line_1996}{article}{}{}
       \name{author}{2}{}{%
         {{hash=c76e39a7a5b7abe3f3ac79aa8e07be53}{%
@@ -1059,7 +1025,632 @@
       \endverb
       \keyw{Astrophysics}
     \endentry
+    \entry{sgier_fast_2018}{online}{}{}
+      \name{author}{4}{}{%
+        {{hash=5fb41d6827c0912543b3af1bb2f1dd05}{%
+           family={Sgier},
+           familyi={S\bibinitperiod},
+           given={Raphael},
+           giveni={R\bibinitperiod}}}%
+        {{hash=87914eae1778be49ce60a30dcfabfa57}{%
+           family={Réfrégier},
+           familyi={R\bibinitperiod},
+           given={Alexandre},
+           giveni={A\bibinitperiod}}}%
+        {{hash=4d760f345ab4b1bbcef430f98aa3571e}{%
+           family={Amara},
+           familyi={A\bibinitperiod},
+           given={Adam},
+           giveni={A\bibinitperiod}}}%
+        {{hash=92216fd479254f61a0e8565132478197}{%
+           family={Nicola},
+           familyi={N\bibinitperiod},
+           given={Andrina},
+           giveni={A\bibinitperiod}}}%
+      }
+      \strng{namehash}{9804d27ffea8d12fd3c00b0bbc9a7ff9}
+      \strng{fullhash}{0f3b5a9d9fdb2e5f68459a019d6a2433}
+      \strng{fullhashraw}{0f3b5a9d9fdb2e5f68459a019d6a2433}
+      \strng{bibnamehash}{9804d27ffea8d12fd3c00b0bbc9a7ff9}
+      \strng{authorbibnamehash}{9804d27ffea8d12fd3c00b0bbc9a7ff9}
+      \strng{authornamehash}{9804d27ffea8d12fd3c00b0bbc9a7ff9}
+      \strng{authorfullhash}{0f3b5a9d9fdb2e5f68459a019d6a2433}
+      \strng{authorfullhashraw}{0f3b5a9d9fdb2e5f68459a019d6a2433}
+      \field{sortinit}{S}
+      \field{sortinithash}{b164b07b29984b41daf1e85279fbc5ab}
+      \field{labelnamesource}{author}
+      \field{labeltitlesource}{title}
+      \field{abstract}{Upcoming weak lensing surveys will probe large fractions of the sky with unprecedented accuracy. To infer cosmological constraints, a large ensemble of survey simulations are required to accurately model cosmological observables and their covariances. We develop a parallelized multi-lens-plane pipeline called {UFalcon}, designed to generate full-sky weak lensing maps from lightcones within a minimal runtime. It makes use of L-{PICOLA}, an approximate numerical code, which provides a fast and accurate alternative to cosmological \$N\$-Body simulations. The {UFalcon} maps are constructed by nesting 2 simulations covering a redshift-range from \$z=0.1\$ to \$1.5\$ without replicating the simulation volume. We compute the convergence and projected overdensity maps for L-{PICOLA} in the lightcone or snapshot mode. The generation of such a map, including the L-{PICOLA} simulation, takes about 3 hours walltime on 220 cores. We use the maps to calculate the spherical harmonic power spectra, which we compare to theoretical predictions and to {UFalcon} results generated using the full \$N\$-Body code {GADGET}-2. We then compute the covariance matrix of the full-sky spherical harmonic power spectra using 150 {UFalcon} maps based on L-{PICOLA} in lightcone mode. We consider the {PDF}, the higher-order moments and the variance of the smoothed field variance to quantify the accuracy of the covariance matrix, which we find to be a few percent for scales \${\textbackslash}ell {\textbackslash}sim 10{\textasciicircum}2\$ to \$10{\textasciicircum}3\$. We test the impact of this level of accuracy on cosmological constraints using an optimistic survey configuration, and find that the final results are robust to this level of uncertainty. The speed and accuracy of our developed pipeline provides a basis to also include further important features such as masking, varying noise and will allow us to compute covariance matrices for models beyond \${\textbackslash}Lambda\${CDM}. [abridged]}
+      \field{day}{17}
+      \field{langid}{english}
+      \field{month}{1}
+      \field{title}{Fast Generation of Covariance Matrices for Weak Lensing}
+      \field{titleaddon}{{arXiv}.org}
+      \field{urlday}{4}
+      \field{urlmonth}{7}
+      \field{urlyear}{2026}
+      \field{year}{2018}
+      \field{dateera}{ce}
+      \field{urldateera}{ce}
+      \verb{doi}
+      \verb 10.1088/1475-7516/2019/01/044
+      \endverb
+      \verb{urlraw}
+      \verb https://arxiv.org/abs/1801.05745v1
+      \endverb
+      \verb{url}
+      \verb https://arxiv.org/abs/1801.05745v1
+      \endverb
+    \endentry
+    \entry{thomsen_dark_2026}{article}{}{}
+      \name{author}{102}{}{%
+        {{hash=5f4f5aee6599305b71ed35cc01ada06d}{%
+           family={Thomsen},
+           familyi={T\bibinitperiod},
+           given={A.},
+           giveni={A\bibinitperiod}}}%
+        {{hash=8651c22be6ab6ec985f6522245ab6807}{%
+           family={Bucko},
+           familyi={B\bibinitperiod},
+           given={J.},
+           giveni={J\bibinitperiod}}}%
+        {{hash=c55aab02f9b80d4f2484b7cd19aed17e}{%
+           family={Kacprzak},
+           familyi={K\bibinitperiod},
+           given={T.},
+           giveni={T\bibinitperiod}}}%
+        {{hash=c0e54b6d3dbe00a624536020268004f8}{%
+           family={Ajani},
+           familyi={A\bibinitperiod},
+           given={V.},
+           giveni={V\bibinitperiod}}}%
+        {{hash=1c3efe8424e5c75fee03aa17f29a28fe}{%
+           family={Fluri},
+           familyi={F\bibinitperiod},
+           given={J.},
+           giveni={J\bibinitperiod}}}%
+        {{hash=a6adfbfdcc4ce6922a2e7c220b329edd}{%
+           family={Refregier},
+           familyi={R\bibinitperiod},
+           given={A.},
+           giveni={A\bibinitperiod}}}%
+        {{hash=d1aa702c22746752f56145d9b2cf9ed7}{%
+           family={Anbajagane},
+           familyi={A\bibinitperiod},
+           given={D.},
+           giveni={D\bibinitperiod}}}%
+        {{hash=522ab1e08cc5899dbac1ac68f95e7326}{%
+           family={Castander},
+           familyi={C\bibinitperiod},
+           given={F.\bibnamedelimi J.},
+           giveni={F\bibinitperiod\bibinitdelim J\bibinitperiod}}}%
+        {{hash=82783a387c1dfb6fcab7ccc9f10557d4}{%
+           family={Ferté},
+           familyi={F\bibinitperiod},
+           given={A.},
+           giveni={A\bibinitperiod}}}%
+        {{hash=11c9a4e3ac88336bcb065f1a8cf8ed82}{%
+           family={Gatti},
+           familyi={G\bibinitperiod},
+           given={M.},
+           giveni={M\bibinitperiod}}}%
+        {{hash=474f34ee24e0339184bab4bbf16db03e}{%
+           family={Jeffrey},
+           familyi={J\bibinitperiod},
+           given={N.},
+           giveni={N\bibinitperiod}}}%
+        {{hash=1b622354e1b8df2a7b3240ef6a31d9e3}{%
+           family={Alarcon},
+           familyi={A\bibinitperiod},
+           given={A.},
+           giveni={A\bibinitperiod}}}%
+        {{hash=89f9a5504c2ba9aeca5a35782a5266ef}{%
+           family={Amon},
+           familyi={A\bibinitperiod},
+           given={A.},
+           giveni={A\bibinitperiod}}}%
+        {{hash=1973b8b9947bff3c717c3749094bcc8d}{%
+           family={Bechtol},
+           familyi={B\bibinitperiod},
+           given={K.},
+           giveni={K\bibinitperiod}}}%
+        {{hash=8a08d7afb0fd1bd0bbbc15d3a2ba5396}{%
+           family={Becker},
+           familyi={B\bibinitperiod},
+           given={M.\bibnamedelimi R.},
+           giveni={M\bibinitperiod\bibinitdelim R\bibinitperiod}}}%
+        {{hash=919aaf88d81122ee69a4ace0fe1314c2}{%
+           family={Bernstein},
+           familyi={B\bibinitperiod},
+           given={G.\bibnamedelimi M.},
+           giveni={G\bibinitperiod\bibinitdelim M\bibinitperiod}}}%
+        {{hash=f210bec9d53a8382267f11c92af9ac38}{%
+           family={Campos},
+           familyi={C\bibinitperiod},
+           given={A.},
+           giveni={A\bibinitperiod}}}%
+        {{hash=db848d1e265b2f81dd73210b035645d6}{%
+           family={Rosell},
+           familyi={R\bibinitperiod},
+           given={A.\bibnamedelimi Carnero},
+           giveni={A\bibinitperiod\bibinitdelim C\bibinitperiod}}}%
+        {{hash=39df4de56d3cd222098658f388d75b46}{%
+           family={Chang},
+           familyi={C\bibinitperiod},
+           given={C.},
+           giveni={C\bibinitperiod}}}%
+        {{hash=ce2628fb5b7c5a6e9483a40e04abbb59}{%
+           family={Chen},
+           familyi={C\bibinitperiod},
+           given={R.},
+           giveni={R\bibinitperiod}}}%
+        {{hash=32587126e57362bdd88cb3b2daebd97c}{%
+           family={Choi},
+           familyi={C\bibinitperiod},
+           given={A.},
+           giveni={A\bibinitperiod}}}%
+        {{hash=18cd7a2826de13b05272f4aad8606c4e}{%
+           family={Crocce},
+           familyi={C\bibinitperiod},
+           given={M.},
+           giveni={M\bibinitperiod}}}%
+        {{hash=889324d12a8f22dcce9a614de547cdb3}{%
+           family={Davis},
+           familyi={D\bibinitperiod},
+           given={C.},
+           giveni={C\bibinitperiod}}}%
+        {{hash=00f59059242fda676e4e6083a4fbf212}{%
+           family={{DeRose}},
+           familyi={D\bibinitperiod},
+           given={J.},
+           giveni={J\bibinitperiod}}}%
+        {{hash=0a04b7b0eff3c29233106933e5934c3d}{%
+           family={Dodelson},
+           familyi={D\bibinitperiod},
+           given={S.},
+           giveni={S\bibinitperiod}}}%
+        {{hash=0e3a218edcfb5f96231b54a09536dc78}{%
+           family={Doux},
+           familyi={D\bibinitperiod},
+           given={C.},
+           giveni={C\bibinitperiod}}}%
+        {{hash=9514d0d85eab884065cd0ea99b4eaa12}{%
+           family={Eckert},
+           familyi={E\bibinitperiod},
+           given={K.},
+           giveni={K\bibinitperiod}}}%
+        {{hash=a8bc2404794e83275f0ad9d7dcd3fd0e}{%
+           family={Elvin-Poole},
+           familyi={E\bibinithyphendelim P\bibinitperiod},
+           given={J.},
+           giveni={J\bibinitperiod}}}%
+        {{hash=bf28e656b25b8cedc103c655e2772ef7}{%
+           family={Everett},
+           familyi={E\bibinitperiod},
+           given={S.},
+           giveni={S\bibinitperiod}}}%
+        {{hash=74f9cd03a10cd9a11a03c5cb4b6523f8}{%
+           family={Fosalba},
+           familyi={F\bibinitperiod},
+           given={P.},
+           giveni={P\bibinitperiod}}}%
+        {{hash=4a375aa5626de1561e0d5f0a9a12555a}{%
+           family={Gruen},
+           familyi={G\bibinitperiod},
+           given={D.},
+           giveni={D\bibinitperiod}}}%
+        {{hash=e90bfe5e674edeab30003153f086a7ca}{%
+           family={Harrison},
+           familyi={H\bibinitperiod},
+           given={I.},
+           giveni={I\bibinitperiod}}}%
+        {{hash=ea9ff29993485b8fecc178b376f9adf4}{%
+           family={Herner},
+           familyi={H\bibinitperiod},
+           given={K.},
+           giveni={K\bibinitperiod}}}%
+        {{hash=6336179cd30bae5b87a208eafb85a073}{%
+           family={Huff},
+           familyi={H\bibinitperiod},
+           given={E.\bibnamedelimi M.},
+           giveni={E\bibinitperiod\bibinitdelim M\bibinitperiod}}}%
+        {{hash=22dfbb616e282796068d6b18113792f0}{%
+           family={Jarvis},
+           familyi={J\bibinitperiod},
+           given={M.},
+           giveni={M\bibinitperiod}}}%
+        {{hash=95dda35f1d533b8b3e550b1b5b468599}{%
+           family={Kuropatkin},
+           familyi={K\bibinitperiod},
+           given={N.},
+           giveni={N\bibinitperiod}}}%
+        {{hash=536d334bdaec6a917c370573c8b5c738}{%
+           family={Leget},
+           familyi={L\bibinitperiod},
+           given={P.-F.},
+           giveni={P\bibinithyphendelim F\bibinitperiod}}}%
+        {{hash=9e09b2c8faf572a2035dac6e0e402939}{%
+           family={{MacCrann}},
+           familyi={M\bibinitperiod},
+           given={N.},
+           giveni={N\bibinitperiod}}}%
+        {{hash=925ca2519a6b77c1f4f0c24067705a10}{%
+           family={{McCullough}},
+           familyi={M\bibinitperiod},
+           given={J.},
+           giveni={J\bibinitperiod}}}%
+        {{hash=8e923ca75563dc51bc90435e14c0b794}{%
+           family={Myles},
+           familyi={M\bibinitperiod},
+           given={J.},
+           giveni={J\bibinitperiod}}}%
+        {{hash=337f68e35475b622456c08783324e1af}{%
+           family={Navarro-Alsina},
+           familyi={N\bibinithyphendelim A\bibinitperiod},
+           given={A.},
+           giveni={A\bibinitperiod}}}%
+        {{hash=3cbae24a4140e9142fa4525d4de3d2a8}{%
+           family={Pandey},
+           familyi={P\bibinitperiod},
+           given={S.},
+           giveni={S\bibinitperiod}}}%
+        {{hash=6379142a88b6dcd74fd01100c025c45c}{%
+           family={Porredon},
+           familyi={P\bibinitperiod},
+           given={A.},
+           giveni={A\bibinitperiod}}}%
+        {{hash=9956a51235a84bb7b10132fa5ed7b112}{%
+           family={Prat},
+           familyi={P\bibinitperiod},
+           given={J.},
+           giveni={J\bibinitperiod}}}%
+        {{hash=32cc2daa05c8d254c1784783fa0b102c}{%
+           family={Raveri},
+           familyi={R\bibinitperiod},
+           given={M.},
+           giveni={M\bibinitperiod}}}%
+        {{hash=313528ece7a4a717f22a3dc8c8b08425}{%
+           family={Rodriguez-Monroy},
+           familyi={R\bibinithyphendelim M\bibinitperiod},
+           given={M.},
+           giveni={M\bibinitperiod}}}%
+        {{hash=56d3e8d082149415d15128dfe0428827}{%
+           family={Rollins},
+           familyi={R\bibinitperiod},
+           given={R.\bibnamedelimi P.},
+           giveni={R\bibinitperiod\bibinitdelim P\bibinitperiod}}}%
+        {{hash=35c36da2bc6ac9dafba8048a3842df47}{%
+           family={Roodman},
+           familyi={R\bibinitperiod},
+           given={A.},
+           giveni={A\bibinitperiod}}}%
+        {{hash=eca29db28354531f17368213be9848a0}{%
+           family={Rykoff},
+           familyi={R\bibinitperiod},
+           given={E.\bibnamedelimi S.},
+           giveni={E\bibinitperiod\bibinitdelim S\bibinitperiod}}}%
+        {{hash=4380d22922adc3a4adbe59a22b30d9d2}{%
+           family={Sánchez},
+           familyi={S\bibinitperiod},
+           given={C.},
+           giveni={C\bibinitperiod}}}%
+        {{hash=cc9e16a2087111b11f065998213f5df0}{%
+           family={Secco},
+           familyi={S\bibinitperiod},
+           given={L.\bibnamedelimi F.},
+           giveni={L\bibinitperiod\bibinitdelim F\bibinitperiod}}}%
+        {{hash=f9f9c78d0997224a7bff71ac6bea7694}{%
+           family={Sheldon},
+           familyi={S\bibinitperiod},
+           given={E.},
+           giveni={E\bibinitperiod}}}%
+        {{hash=5ddff3f588fef28a104255ec0e022e0d}{%
+           family={Shin},
+           familyi={S\bibinitperiod},
+           given={T.},
+           giveni={T\bibinitperiod}}}%
+        {{hash=2aed2fc3b8f7263fd1b3dfd332c015d7}{%
+           family={Troxel},
+           familyi={T\bibinitperiod},
+           given={M.\bibnamedelimi A.},
+           giveni={M\bibinitperiod\bibinitdelim A\bibinitperiod}}}%
+        {{hash=aeeaf0c71844763c3ba8b8979d962415}{%
+           family={Tutusaus},
+           familyi={T\bibinitperiod},
+           given={I.},
+           giveni={I\bibinitperiod}}}%
+        {{hash=de47c7099cdd3dbb1d31fda71f64e2a9}{%
+           family={Varga},
+           familyi={V\bibinitperiod},
+           given={T.\bibnamedelimi N.},
+           giveni={T\bibinitperiod\bibinitdelim N\bibinitperiod}}}%
+        {{hash=9be6cefdbb4c2547f66352b6762bd02e}{%
+           family={Weaverdyck},
+           familyi={W\bibinitperiod},
+           given={N.},
+           giveni={N\bibinitperiod}}}%
+        {{hash=2579c911bf44c6e052a72ff3b1d776ff}{%
+           family={Wechsler},
+           familyi={W\bibinitperiod},
+           given={R.\bibnamedelimi H.},
+           giveni={R\bibinitperiod\bibinitdelim H\bibinitperiod}}}%
+        {{hash=96df245db17e8d1ba0c3c7bf2cb37c4e}{%
+           family={Yanny},
+           familyi={Y\bibinitperiod},
+           given={B.},
+           giveni={B\bibinitperiod}}}%
+        {{hash=544391e122bb1a4d6da8dcf64fc61781}{%
+           family={Yin},
+           familyi={Y\bibinitperiod},
+           given={B.},
+           giveni={B\bibinitperiod}}}%
+        {{hash=1f26f664835ac6c347db22001b657f1a}{%
+           family={Zhang},
+           familyi={Z\bibinitperiod},
+           given={Y.},
+           giveni={Y\bibinitperiod}}}%
+        {{hash=24e663eb01fd0665338c9a77cbaffc01}{%
+           family={Zuntz},
+           familyi={Z\bibinitperiod},
+           given={J.},
+           giveni={J\bibinitperiod}}}%
+        {{hash=cff701d30e6714527c1bdffb5ce3a1f7}{%
+           family={Aguena},
+           familyi={A\bibinitperiod},
+           given={M.},
+           giveni={M\bibinitperiod}}}%
+        {{hash=4e8192b04227c671669ddf219f544513}{%
+           family={Allam},
+           familyi={A\bibinitperiod},
+           given={S.},
+           giveni={S\bibinitperiod}}}%
+        {{hash=c378935f38423a7813b36600298207a1}{%
+           family={Andrade-Oliveira},
+           familyi={A\bibinithyphendelim O\bibinitperiod},
+           given={F.},
+           giveni={F\bibinitperiod}}}%
+        {{hash=94b037259382595141231092b0af16da}{%
+           family={Bacon},
+           familyi={B\bibinitperiod},
+           given={D.},
+           giveni={D\bibinitperiod}}}%
+        {{hash=f7a66a2ce7e5750e3f331ffdc496ff1c}{%
+           family={Blazek},
+           familyi={B\bibinitperiod},
+           given={J.},
+           giveni={J\bibinitperiod}}}%
+        {{hash=c57b0e0564307c47202de1d331e5f514}{%
+           family={Brooks},
+           familyi={B\bibinitperiod},
+           given={D.},
+           giveni={D\bibinitperiod}}}%
+        {{hash=b6bfb685fda801c5030f96bddc61141f}{%
+           family={Camilleri},
+           familyi={C\bibinitperiod},
+           given={R.},
+           giveni={R\bibinitperiod}}}%
+        {{hash=64e3a1a8a1f43366654f10310ece0965}{%
+           family={Carretero},
+           familyi={C\bibinitperiod},
+           given={J.},
+           giveni={J\bibinitperiod}}}%
+        {{hash=63c3cea8cbb9f61b2bd9f5b3ee9de7e6}{%
+           family={Cawthon},
+           familyi={C\bibinitperiod},
+           given={R.},
+           giveni={R\bibinitperiod}}}%
+        {{hash=af7d4f5a2809c8fcf37718e41a0186e9}{%
+           family={Costa},
+           familyi={C\bibinitperiod},
+           given={L.\bibnamedelimi N.\bibnamedelimi da},
+           giveni={L\bibinitperiod\bibinitdelim N\bibinitperiod\bibinitdelim d\bibinitperiod}}}%
+        {{hash=1db3442cde9a55ba04b84a834ba75988}{%
+           family={Pereira},
+           familyi={P\bibinitperiod},
+           given={M.\bibnamedelimi E.\bibnamedelimi da\bibnamedelima Silva},
+           giveni={M\bibinitperiod\bibinitdelim E\bibinitperiod\bibinitdelim d\bibinitperiod\bibinitdelim S\bibinitperiod}}}%
+        {{hash=36f9ceba36311e7a7920360d515410fe}{%
+           family={Davis},
+           familyi={D\bibinitperiod},
+           given={T.\bibnamedelimi M.},
+           giveni={T\bibinitperiod\bibinitdelim M\bibinitperiod}}}%
+        {{hash=ba593a31cd023e3b5a167ed073944a90}{%
+           family={Vicente},
+           familyi={V\bibinitperiod},
+           given={J.\bibnamedelimi De},
+           giveni={J\bibinitperiod\bibinitdelim D\bibinitperiod}}}%
+        {{hash=ca10b3905115b23a735f741a9476441b}{%
+           family={Desai},
+           familyi={D\bibinitperiod},
+           given={S.},
+           giveni={S\bibinitperiod}}}%
+        {{hash=269a7f74f9d53b2bd3f7b623e58ea1bb}{%
+           family={Doel},
+           familyi={D\bibinitperiod},
+           given={P.},
+           giveni={P\bibinitperiod}}}%
+        {{hash=6e951b68b85eaa13caa96f8eb8d5aa18}{%
+           family={García-Bellido},
+           familyi={G\bibinithyphendelim B\bibinitperiod},
+           given={J.},
+           giveni={J\bibinitperiod}}}%
+        {{hash=75009081233597977f20a5555f501378}{%
+           family={Gutierrez},
+           familyi={G\bibinitperiod},
+           given={G.},
+           giveni={G\bibinitperiod}}}%
+        {{hash=b97a543c65be2ee0bc4f795b20316a8a}{%
+           family={Hinton},
+           familyi={H\bibinitperiod},
+           given={S.\bibnamedelimi R.},
+           giveni={S\bibinitperiod\bibinitdelim R\bibinitperiod}}}%
+        {{hash=b0701033762099ff6f64e2f8952d2978}{%
+           family={Hollowood},
+           familyi={H\bibinitperiod},
+           given={D.\bibnamedelimi L.},
+           giveni={D\bibinitperiod\bibinitdelim L\bibinitperiod}}}%
+        {{hash=718a94344d72fa3464c4bbb433330746}{%
+           family={Honscheid},
+           familyi={H\bibinitperiod},
+           given={K.},
+           giveni={K\bibinitperiod}}}%
+        {{hash=5bd98e1df05b1f87d7ada0e7d15ba493}{%
+           family={James},
+           familyi={J\bibinitperiod},
+           given={D.\bibnamedelimi J.},
+           giveni={D\bibinitperiod\bibinitdelim J\bibinitperiod}}}%
+        {{hash=a5fbf1c79838f6182aefd7e4b29ffe85}{%
+           family={Kuehn},
+           familyi={K\bibinitperiod},
+           given={K.},
+           giveni={K\bibinitperiod}}}%
+        {{hash=3865819e552b81940d98fb15e9b8afbc}{%
+           family={Lahav},
+           familyi={L\bibinitperiod},
+           given={O.},
+           giveni={O\bibinitperiod}}}%
+        {{hash=aa5a7c8780167efaa3ed45566a0806a0}{%
+           family={Lee},
+           familyi={L\bibinitperiod},
+           given={S.},
+           giveni={S\bibinitperiod}}}%
+        {{hash=33912af916fcd8ea2afc456143ccb3f8}{%
+           family={Marshall},
+           familyi={M\bibinitperiod},
+           given={J.\bibnamedelimi L.},
+           giveni={J\bibinitperiod\bibinitdelim L\bibinitperiod}}}%
+        {{hash=69338aec5d0d03b672d8bddca8dfc247}{%
+           family={Mena-Fernández},
+           familyi={M\bibinithyphendelim F\bibinitperiod},
+           given={J.},
+           giveni={J\bibinitperiod}}}%
+        {{hash=63d705610e4aa0bf03b54356262f024e}{%
+           family={Menanteau},
+           familyi={M\bibinitperiod},
+           given={F.},
+           giveni={F\bibinitperiod}}}%
+        {{hash=3d2965dadeb3c281306bc6a44580afa7}{%
+           family={Miquel},
+           familyi={M\bibinitperiod},
+           given={R.},
+           giveni={R\bibinitperiod}}}%
+        {{hash=7470db61983dd9c2ea0618ceb14524bb}{%
+           family={Muir},
+           familyi={M\bibinitperiod},
+           given={J.},
+           giveni={J\bibinitperiod}}}%
+        {{hash=a1d141bff7cc162f3b362c14a7523fd1}{%
+           family={Ogando},
+           familyi={O\bibinitperiod},
+           given={R.\bibnamedelimi L.\bibnamedelimi C.},
+           giveni={R\bibinitperiod\bibinitdelim L\bibinitperiod\bibinitdelim C\bibinitperiod}}}%
+        {{hash=0319cd1eb850c719bc39fa6e4901e304}{%
+           family={Malagón},
+           familyi={M\bibinitperiod},
+           given={A.\bibnamedelimi A.\bibnamedelimi Plazas},
+           giveni={A\bibinitperiod\bibinitdelim A\bibinitperiod\bibinitdelim P\bibinitperiod}}}%
+        {{hash=ac75cf19041ffb2620080fe799a6daf2}{%
+           family={Sanchez},
+           familyi={S\bibinitperiod},
+           given={E.},
+           giveni={E\bibinitperiod}}}%
+        {{hash=5fe31a8fc784d679bcb0d23b9e40b51e}{%
+           family={Cid},
+           familyi={C\bibinitperiod},
+           given={D.\bibnamedelimi Sanchez},
+           giveni={D\bibinitperiod\bibinitdelim S\bibinitperiod}}}%
+        {{hash=3d3f6699cae735081051ea72d3196d31}{%
+           family={Sevilla-Noarbe},
+           familyi={S\bibinithyphendelim N\bibinitperiod},
+           given={I.},
+           giveni={I\bibinitperiod}}}%
+        {{hash=e44f09a2d84db823a77079697cf1a851}{%
+           family={Smith},
+           familyi={S\bibinitperiod},
+           given={M.},
+           giveni={M\bibinitperiod}}}%
+        {{hash=c45c109c70581f192b30068e2d65eba0}{%
+           family={Suchyta},
+           familyi={S\bibinitperiod},
+           given={E.},
+           giveni={E\bibinitperiod}}}%
+        {{hash=1d8ed1c081268999ad64b3040a66def2}{%
+           family={Swanson},
+           familyi={S\bibinitperiod},
+           given={M.\bibnamedelimi E.\bibnamedelimi C.},
+           giveni={M\bibinitperiod\bibinitdelim E\bibinitperiod\bibinitdelim C\bibinitperiod}}}%
+        {{hash=4b0505e06d2375e356680b909d055bc8}{%
+           family={Thomas},
+           familyi={T\bibinitperiod},
+           given={D.},
+           giveni={D\bibinitperiod}}}%
+        {{hash=df6d9b86a7835963340f43e7b88d3eef}{%
+           family={To},
+           familyi={T\bibinitperiod},
+           given={C.},
+           giveni={C\bibinitperiod}}}%
+        {{hash=d63b4c525da79a973c59cad5e88bb3e8}{%
+           family={Tucker},
+           familyi={T\bibinitperiod},
+           given={D.\bibnamedelimi L.},
+           giveni={D\bibinitperiod\bibinitdelim L\bibinitperiod}}}%
+      }
+      \strng{namehash}{322f4f3bf50d3585849c90fb1ba3ca54}
+      \strng{fullhash}{f74f85d26d3826d701af38e318718bc6}
+      \strng{fullhashraw}{f74f85d26d3826d701af38e318718bc6}
+      \strng{bibnamehash}{322f4f3bf50d3585849c90fb1ba3ca54}
+      \strng{authorbibnamehash}{322f4f3bf50d3585849c90fb1ba3ca54}
+      \strng{authornamehash}{322f4f3bf50d3585849c90fb1ba3ca54}
+      \strng{authorfullhash}{f74f85d26d3826d701af38e318718bc6}
+      \strng{authorfullhashraw}{f74f85d26d3826d701af38e318718bc6}
+      \field{sortinit}{T}
+      \field{sortinithash}{9af77f0292593c26bde9a56e688eaee9}
+      \field{labelnamesource}{author}
+      \field{labeltitlesource}{shorttitle}
+      \field{abstract}{Data-driven approaches using deep learning are emerging as powerful techniques to extract non-Gaussian information from cosmological large-scale structure. This work presents the first simulation-based inference ({SBI}) pipeline that combines weak lensing and galaxy clustering maps in a realistic Dark Energy Survey Year 3 ({DES} Y3) configuration and serves as preparation for a forthcoming analysis of the survey data. We develop a scalable forward model based on the {CosmoGridV}1 suite of N-body simulations to generate over one million self-consistent mock realizations of {DES} Y3 at the map level. Leveraging this large dataset, we train deep graph convolutional neural networks on the full survey footprint in spherical geometry to learn low-dimensional features that approximately maximize mutual information with target parameters. These learned compressions enable neural density estimation of the implicit likelihood via normalizing flows in a ten-dimensional parameter space spanning cosmological \$w\${CDM}, intrinsic alignment, and linear galaxy bias parameters, while marginalizing over baryonic, photometric redshift, and shear bias nuisances. To ensure robustness, we extensively validate our inference pipeline using synthetic observations derived from both systematic contaminations in our forward model and independent Buzzard galaxy catalogs. Our forecasts yield significant improvements in cosmological parameter constraints, achieving \$2-3{\textbackslash}times\$ higher figures of merit in the \$Ω\_m - S\_8\$ plane relative to our implementation of baseline two-point statistics and effectively breaking parameter degeneracies through probe combination. These results demonstrate the potential of {SBI} analyses powered by deep learning for upcoming Stage-{IV} wide-field imaging surveys.}
+      \field{day}{1}
+      \field{eprinttype}{arxiv}
+      \field{issn}{2470-0010, 2470-0029}
+      \field{journaltitle}{Physical Review D}
+      \field{month}{4}
+      \field{number}{8}
+      \field{shortjournal}{Phys. Rev. D}
+      \field{shorttitle}{Dark Energy Survey Year 3 results}
+      \field{title}{Dark Energy Survey Year 3 results: Simulation-based \$w\${CDM} inference from weak lensing and galaxy clustering maps with deep learning: Analysis design}
+      \field{urlday}{2}
+      \field{urlmonth}{7}
+      \field{urlyear}{2026}
+      \field{volume}{113}
+      \field{year}{2026}
+      \field{dateera}{ce}
+      \field{urldateera}{ce}
+      \field{pages}{083501}
+      \range{pages}{1}
+      \verb{doi}
+      \verb 10.1103/3sj1-1l9f
+      \endverb
+      \verb{eprint}
+      \verb 2511.04681 [astro-ph.CO]
+      \endverb
+      \verb{urlraw}
+      \verb http://arxiv.org/abs/2511.04681
+      \endverb
+      \verb{url}
+      \verb http://arxiv.org/abs/2511.04681
+      \endverb
+      \keyw{Astrophysics - Cosmology and Nongalactic Astrophysics,Computer Science - Machine Learning}
+    \endentry
   \enddatalist
+  \missing{cohen_spherical_2018}
+  \missing{feng_fastpm_2016}
+  \missing{garrison_improving_2016}
+  \missing{gorski_healpix_2005}
+  \missing{hoffman_constrained_1991}
+  \missing{karras_elucidating_2022}
+  \missing{li_fourier_2021}
+  \missing{lipman_flow_2023}
+  \missing{perraudin_deepsphere_2019}
+  \missing{ronneberger_u-net_2015}
 \endrefsection
 \endinput
 
