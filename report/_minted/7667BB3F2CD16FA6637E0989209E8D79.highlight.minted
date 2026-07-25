@@ -1,0 +1,21 @@
+\begin{MintedVerbatim}[commandchars=\\\{\}]
+\PYG{c+ch}{\PYGZsh{}!/bin/bash}
+
+\PYG{c+c1}{\PYGZsh{} =========== Job settings ===========}
+
+\PYG{c+c1}{\PYGZsh{} \PYGZhy{}\PYGZhy{}\PYGZhy{} Resources \PYGZhy{}\PYGZhy{}\PYGZhy{}}
+\PYG{c+c1}{\PYGZsh{}SBATCH \PYGZhy{}\PYGZhy{}nodes=2}
+\PYG{c+c1}{\PYGZsh{}SBATCH \PYGZhy{}\PYGZhy{}exclusive}
+\PYG{c+c1}{\PYGZsh{}SBATCH \PYGZhy{}\PYGZhy{}ntasks\PYGZhy{}per\PYGZhy{}node=1}
+\PYG{c+c1}{\PYGZsh{}SBATCH \PYGZhy{}\PYGZhy{}gres=gpu:4}
+\PYG{c+c1}{\PYGZsh{}SBATCH \PYGZhy{}\PYGZhy{}time=01:00:00}
+
+\PYG{c+c1}{\PYGZsh{} \PYGZhy{}\PYGZhy{}\PYGZhy{} Accounting \PYGZhy{}\PYGZhy{}\PYGZhy{}}
+\PYG{c+c1}{\PYGZsh{}SBATCH \PYGZhy{}\PYGZhy{}account=sk037}
+\PYG{c+c1}{\PYGZsh{}SBATCH \PYGZhy{}\PYGZhy{}partition=normal}
+
+\PYG{c+c1}{\PYGZsh{} \PYGZhy{}\PYGZhy{}\PYGZhy{} Bookkeeping \PYGZhy{}\PYGZhy{}\PYGZhy{}}
+\PYG{c+c1}{\PYGZsh{}SBATCH \PYGZhy{}\PYGZhy{}job\PYGZhy{}name=run\PYGZus{}disco}
+\PYG{c+c1}{\PYGZsh{}SBATCH \PYGZhy{}\PYGZhy{}output=../run\PYGZus{}disco\PYGZhy{}\PYGZpc{}j.out}
+\PYG{c+c1}{\PYGZsh{}SBATCH \PYGZhy{}\PYGZhy{}error=../run\PYGZus{}disco\PYGZhy{}\PYGZpc{}j.err}
+\end{MintedVerbatim}
