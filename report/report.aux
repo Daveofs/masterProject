@@ -276,16 +276,16 @@
 \@writefile{toc}{\contentsline {subsection}{\numberline {2.4.4}Diffusion Pipeline (EDM)}{23}{}\protected@file@percent }
 \newlabel{subsec:pipe-diffusion}{{2.4.4}{23}{}{subsection.2.4.4}{}}
 \@writefile{toc}{\contentsline {paragraph}{Preconditioned denoiser.}{23}{}\protected@file@percent }
-\newlabel{eq:edm_precond}{{2.21}{23}{}{equation.2.21}{}}
-\abx@aux@cite{0}{karras_elucidating_2022}
-\abx@aux@segm{0}{0}{karras_elucidating_2022}
-\@writefile{lof}{\contentsline {figure}{\numberline {2.8}{\ignorespaces Scalar conditioning in the shared U-Net (\texttt  {FlowUNet} / \texttt  {DenoiserUNet}). (a) The single scalar -- the flow time $t$ or the noise embedding $c_{\mathrm  {noise}}(\sigma )$ -- is lifted onto 64 sinusoids of geometrically spaced frequencies (plus their cosines) and expanded by a two-layer MLP into a 512-dimensional embedding: low frequencies encode coarse position along the trajectory, high frequencies fine position. (b) Inside every double-convolution block, a block-specific linear layer projects this shared embedding to one $(\gamma _c, \beta _c)$ pair per channel, applied as a feature-wise affine transform between the two convolutions -- FiLM changes what the channels \emph  {contain}, never how many there are. (c) The same embedding modulates every encoder, bottleneck, and decoder block, so one network represents the full trajectory-dependent map; the cosmology--redshift vector instead enters once, additively and zero-initialised, at the bottleneck.}}{24}{}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {2.8}{\ignorespaces Scalar conditioning in the shared U-Net (\texttt  {FlowUNet} / \texttt  {DenoiserUNet}). (a) The scalar -- flow time $t$ or noise level $c_{\mathrm  {noise}}(\sigma )$ -- is mapped to 64 geometrically spaced sinusoids (with their cosines) and expanded by a two-layer MLP to a 512-dimensional embedding, encoding position along the trajectory from coarse (low frequencies) to fine (high). (b) In each double-convolution block, a block-specific linear layer turns this embedding into a per-channel scale $\gamma _c$ and shift $\beta _c$ that modulate the $C$ feature maps $h_c\in \mathbb  {R}^{H\times W}$ between the two convolutions, $h_c(i,j)\DOTSB \mapstochar \rightarrow (1+\gamma _c)\,h_c(i,j)+\beta _c$, with the same $(\gamma _c,\beta _c)$ applied at every pixel. (c) This embedding modulates every encoder, bottleneck and decoder block, while the cosmology--redshift vector enters once, additively and zero-initialised, at the bottleneck.}}{24}{}\protected@file@percent }
 \newlabel{fig:film_unet}{{2.8}{24}{}{figure.2.8}{}}
-\newlabel{eq:edm_coeffs}{{2.22}{24}{}{equation.2.22}{}}
+\newlabel{eq:edm_precond}{{2.21}{24}{}{equation.2.21}{}}
 \abx@aux@cite{0}{karras_elucidating_2022}
 \abx@aux@segm{0}{0}{karras_elucidating_2022}
 \abx@aux@cite{0}{karras_elucidating_2022}
 \abx@aux@segm{0}{0}{karras_elucidating_2022}
+\abx@aux@cite{0}{karras_elucidating_2022}
+\abx@aux@segm{0}{0}{karras_elucidating_2022}
+\newlabel{eq:edm_coeffs}{{2.22}{25}{}{equation.2.22}{}}
 \@writefile{toc}{\contentsline {paragraph}{Training.}{25}{}\protected@file@percent }
 \newlabel{eq:edm_loss}{{2.23}{25}{}{equation.2.23}{}}
 \@writefile{toc}{\contentsline {paragraph}{Sampling.}{25}{}\protected@file@percent }
@@ -294,15 +294,15 @@
 \newlabel{fig:edm_sampling}{{2.9}{26}{}{figure.2.9}{}}
 \@writefile{toc}{\contentsline {section}{\numberline {2.5}Computational Infrastructure}{26}{}\protected@file@percent }
 \newlabel{sec:infrastructure}{{2.5}{26}{}{section.2.5}{}}
-\@writefile{lof}{\contentsline {figure}{\numberline {2.10}{\ignorespaces The three computing tiers. Each move to the right is forced by memory, not speed: the phase-space floor of Eq.~\eqref  {eq:phasespace_mem} already exceeds a workstation, and Disco-DJ's PM mesh grows the demand further with resolution.}}{26}{}\protected@file@percent }
-\newlabel{fig:infra_tiers}{{2.10}{26}{}{figure.2.10}{}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {2.5.1}Local Development}{27}{}\protected@file@percent }
-\newlabel{sec:local_dev}{{2.5.1}{27}{}{subsection.2.5.1}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {2.5.1}Local Development}{26}{}\protected@file@percent }
+\newlabel{sec:local_dev}{{2.5.1}{26}{}{subsection.2.5.1}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {2.10}{\ignorespaces The three computing tiers. Each move to the right is forced by memory, not speed: the phase-space floor of Eq.~\eqref  {eq:phasespace_mem} already exceeds a workstation, and Disco-DJ's PM mesh grows the demand further with resolution.}}{27}{}\protected@file@percent }
+\newlabel{fig:infra_tiers}{{2.10}{27}{}{figure.2.10}{}}
 \newlabel{eq:phasespace_mem}{{2.25}{27}{}{equation.2.25}{}}
 \@writefile{toc}{\contentsline {subsection}{\numberline {2.5.2}Euler (ETH Zurich)}{27}{}\protected@file@percent }
 \@writefile{toc}{\contentsline {subsection}{\numberline {2.5.3}CSCS (Alps)}{27}{}\protected@file@percent }
-\@writefile{toc}{\contentsline {section}{\numberline {2.6}Software Engineering}{27}{}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {2.6.1}Code and Data Layout}{27}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {2.6}Software Engineering}{28}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {2.6.1}Code and Data Layout}{28}{}\protected@file@percent }
 \@writefile{toc}{\contentsline {subsection}{\numberline {2.6.2}Job Scheduling and Submission}{28}{}\protected@file@percent }
 \newlabel{eq:node_hours}{{2.26}{28}{}{equation.2.26}{}}
 \@writefile{toc}{\contentsline {subsection}{\numberline {2.6.3}Version Control}{28}{}\protected@file@percent }

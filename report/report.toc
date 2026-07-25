@@ -43,11 +43,11 @@
 \contentsline {paragraph}{Training.}{25}{}%
 \contentsline {paragraph}{Sampling.}{25}{}%
 \contentsline {section}{\numberline {2.5}Computational Infrastructure}{26}{}%
-\contentsline {subsection}{\numberline {2.5.1}Local Development}{27}{}%
+\contentsline {subsection}{\numberline {2.5.1}Local Development}{26}{}%
 \contentsline {subsection}{\numberline {2.5.2}Euler (ETH Zurich)}{27}{}%
 \contentsline {subsection}{\numberline {2.5.3}CSCS (Alps)}{27}{}%
-\contentsline {section}{\numberline {2.6}Software Engineering}{27}{}%
-\contentsline {subsection}{\numberline {2.6.1}Code and Data Layout}{27}{}%
+\contentsline {section}{\numberline {2.6}Software Engineering}{28}{}%
+\contentsline {subsection}{\numberline {2.6.1}Code and Data Layout}{28}{}%
 \contentsline {subsection}{\numberline {2.6.2}Job Scheduling and Submission}{28}{}%
 \contentsline {subsection}{\numberline {2.6.3}Version Control}{28}{}%
 \contentsline {chapter}{\numberline {3}Results}{29}{}%
