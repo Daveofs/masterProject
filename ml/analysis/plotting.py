@@ -451,14 +451,12 @@ def plot_cosmo_param_matrix(pool: dict, held: dict, out_path,
                             held_label="held-out (validation)", suptitle=None):
     """Where do the VALIDATION cosmologies sit in parameter space, and what are
     their values? pool/held: dict cosmo_name -> dict of parameter values (from each
-    run's params.yml). Left: corner scatter of every pairwise parameter plane --
-    the full pool in gray, the held-out set highlighted (labelled with the cosmo
-    number in the first panel, e.g. the classic s8-Om plane). Right: a monospace
-    table of every held-out cosmology's parameters, so an outlier like
-    cosmo_000003 (sigma8=1.15) is identifiable at a glance."""
+    run's params.yml). Corner scatter of every pairwise parameter plane -- the
+    full pool in gray, the held-out set highlighted (labelled with the cosmo
+    number in the first panel, e.g. the classic s8-Om plane)."""
     k = len(params) - 1
-    fig = plt.figure(figsize=(2.9 * k + 5.2, max(2.7 * k, 0.22 * (len(held) + 4))))
-    gs = fig.add_gridspec(k, k + 2)
+    fig = plt.figure(figsize=(2.9 * k, max(2.7 * k, 0.22 * (len(held) + 4))))
+    gs = fig.add_gridspec(k, k)
     pool_v = {q: np.array([c[q] for c in pool.values()], dtype=float) for q in params}
     held_names = list(held.keys())
     held_v = {q: np.array([held[n][q] for n in held_names], dtype=float) for q in params}
@@ -480,19 +478,11 @@ def plot_cosmo_param_matrix(pool: dict, held: dict, out_path,
             (ax.set_xlabel(_PARAM_LABELS.get(xq, xq), fontsize=11)
              if i == k - 1 else ax.set_xticklabels([]))
             ax.tick_params(labelsize=7)
-    axt = fig.add_subplot(gs[:, k:])
-    axt.axis("off")
-    hdr = f"{'held-out cosmology':<19}" + "".join(f"{q:>8}" for q in params)
-    lines = [hdr, "-" * len(hdr)]
-    for nme in held_names:
-        lines.append(f"{nme:<19}" + "".join(f"{held[nme][q]:>8.4g}" for q in params))
-    axt.text(0.02, 1.0, "\n".join(lines), family="monospace", fontsize=7.5,
-             va="top", ha="left", transform=axt.transAxes)
     if suptitle:
         fig.suptitle(suptitle, fontsize=12, wrap=True)
     fig.tight_layout()
     out_path = Path(out_path); out_path.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(out_path, dpi=300); plt.close(fig)
+    fig.savefig(out_path, dpi=400); plt.close(fig)
     print(f"[plotting] cosmo parameter matrix ({len(held)} held-out of {len(pool)}) "
           f"-> {out_path}", flush=True)
     return out_path

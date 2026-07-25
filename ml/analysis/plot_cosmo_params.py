@@ -105,11 +105,7 @@ def main():
 
     plot_cosmo_param_matrix(
         pool, held, args.out, params=tuple(args.params),
-        pool_label=f"pool ({len(pool)} cosmologies, {data_root.name})",
-        held_label=f"held-out / validation ({len(held)})",
-        suptitle=f"Validation cosmologies in parameter space -- {data_root.name}: "
-                 f"{len(held)} held out of {len(pool)} "
-                 f"(whole-cosmology split, val_frac={args.val_frac}, seed={args.seed})")
+        pool_label="pool", held_label="held-out")
 
 
 if __name__ == "__main__":
