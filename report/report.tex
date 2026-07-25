@@ -54,58 +54,7 @@
     \vspace{2mm}
     {\large \today\\}
     \vspace{6mm}
-    % ----- cover picture: the thesis in one diagram (assets: plots/cover/) -----
-    \resizebox{0.88\linewidth}{!}{%
-    \begin{tikzpicture}[x=1cm, y=1cm]
-      % --- cosmologies ---
-      \node[box, minimum width=38mm] (cos) at (3.0,16.1) {\textbf{Cosmologies}\\ \scriptsize $\Omega_{cdm},\ \Omega_b,\ \sigma_8,\ n_s,\ w_0,\ H_0$};
-      % --- initial conditions snapshot ---
-      \node[inner sep=0pt, draw=hairc, semithick] (ic) at (3.0,12.7) {\includegraphics[width=26mm]{plots/cover/snapshots_000.png}};
-      \node[note, anchor=south east] at (ic.north west) {$z = 99$};
-      \draw[flowacc] (cos.south) -- (ic.north) node[midway, right=1.5mm, note, align=left] {IC generation\\ Sec.~\ref{sec:ic_generation}};
-      % --- evolved box (PM branch) ---
-      \node[inner sep=0pt, draw=hairc, semithick] (z0) at (1.7,8.2) {\includegraphics[width=30mm]{plots/cover/snapshot_140.png}};
-      \node[note, anchor=south east] at (z0.north west) {$z = 0$};
-      \draw[flow] (ic.south) to[bend right=14]
-          node[pos=0.5, left=1.5mm, note, align=right] {PM: Disco-DJ\\ Sec.~\ref{sec:discodj}} (z0.north);
-      % --- DISCO lightcone (Mollweide, clipped to the ellipse) ---
-      \begin{scope}
-        \clip (2.6,3.4) ellipse [x radius=2.46, y radius=1.22];
-        \node at (2.6,3.4) {\includegraphics[width=50mm]{plots/cover/lightcone.png}};
-      \end{scope}
-      \draw[hairc, semithick] (2.6,3.4) ellipse [x radius=2.46, y radius=1.22];
-      % zoom funnel: the evolved box is one patch of the full lightcone
-      \draw[fill=hairc, fill opacity=0.28, draw=inkc!50, semithick]
-          (z0.south west) -- (z0.south east) -- (3.10,4.32) -- (2.72,4.32) -- cycle;
-      \draw[inkc!60, semithick] (2.72,4.02) rectangle (3.10,4.32);
-      \draw[flowacc] (z0.west) to[bend right=30]
-          node[pos=0.45, left=1.5mm, note, align=right] {shell builder\\ Sec.~\ref{sec:shell_builder}} (0.55,4.05);
-      \node[note] at (2.6,1.85) {\textsc{Disco-DJ} lightcone (low)};
-      % --- CosmoGrid lightcone (FMM branch) ---
-      \begin{scope}
-        \clip (8.1,3.4) ellipse [x radius=2.46, y radius=1.22];
-        \node at (8.1,3.4) {\includegraphics[width=50mm]{plots/cover/lightcone.png}};
-      \end{scope}
-      \draw[hairc, semithick] (8.1,3.4) ellipse [x radius=2.46, y radius=1.22];
-      \draw[flow] (ic.east) to[bend left=32]
-          node[pos=0.45, right=1.5mm, note, align=left] {FMM: \textsc{PkdGrav3}\\ Sec.~\ref{sec:pkdgrav}} (8.1,4.75);
-      \node[note] at (8.1,1.85) {CosmoGridV1 lightcone (high)};
-      % --- angular power spectrum sketch: the correction closes the gap ---
-      \begin{scope}[shift={(4.35,-1.15)}]
-        \draw[flow, color=mutedc] (0,0) -- (2.7,0) node[below left=0mm, note] {$\ell$};
-        \draw[flow, color=mutedc] (0,0) -- (0,1.55) node[left, note] {$C_\ell$};
-        \draw[dashed, mutedc] (0.05,1.25) -- (2.55,1.25);
-        \draw[inkc, semithick]  plot[smooth] coordinates {(0.1,1.24) (1.1,1.2) (1.7,1.05) (2.1,0.75) (2.4,0.35)};
-        \draw[accentc, semithick] plot[smooth] coordinates {(0.1,1.24) (1.3,1.23) (1.9,1.18) (2.3,1.05) (2.5,0.9)};
-        \node[tinylabel, text=inkc] at (2.15,0.18) {low};
-        \node[tinylabel, text=accentc] at (3.05,0.9) {corrected};
-      \end{scope}
-      \draw[flowacc] (2.9,1.6) to[bend right=25] (4.6,-0.15);
-      \draw[flow] (7.8,1.6) to[bend left=25] (7.15,-0.35);
-      \node[note, align=left, anchor=east] at (4.3,-0.55)
-          {correction pipelines, Sec.~\ref{sec:correction-pipelines}:\\
-           \textcolor{ctrans}{$\bullet$ transfer} \; \textcolor{cunet}{$\bullet$ unet-flow} \; \textcolor{cdiff}{$\bullet$ diffusion}};
-    \end{tikzpicture}}
+    \includegraphics[width=0.9\textwidth]{plots/cover/Cover.png}
     \vfill
     {\large Master Thesis \\ Department of Physics \\ ETH Zurich}  % adjust as needed
 \end{titlepage}
@@ -184,26 +133,22 @@ with $n_s$ the scalar spectral index \cite{eisenstein_baryonic_1998, huterer_gro
   % ---- baryons: parallel to cdm, lower amplitude ----
   \draw[cdiff, thin] plot[smooth] coordinates
     {(2.95,0) (4.7,2.3) (6.29,4.1) (7.0,4.45) (8.0,4.6) (9.0,4.5) (9.6,4.3) (10,4.17)};
-  % ---- Lambda: steep late-time rise ----
-  \draw[accentc, semithick, dashdotted] plot[smooth] coordinates
-    {(8.2,0.2) (8.8,2.2) (9.4,4.3) (9.8,5.4) (10,5.78)};
   % ---- neutrinos (red): radiation-like early; massive states peel off ----
   \draw[red!75!black, very thick] plot[smooth] coordinates
-    {(0,4.83) (6.29,4.58) (7.6,3.35) (8.3,2.6) (9.0,2.35) (9.6,2.25) (10,1.9)};
+    {(0,4.83) (6.29,4.7) (7.6,3.35) (8.3,2.6) (9.0,2.35) (9.6,2.25) (10,1.9)};
   \draw[red!75!black, semithick] plot[smooth] coordinates
-    {(6.29,4.58) (7.6,3.3) (8.3,2.5) (8.9,1.7) (9.5,1.35) (10,1.1)};
+    {(7.6,3.35) (7.6,3.3) (8.3,2.5) (8.9,1.7) (9.6,1.4) (10,1.1)};
   \draw[red!75!black, thin] plot[smooth] coordinates
-    {(6.29,4.55) (7.8,2.7) (9.0,1.0) (9.7,0.1)};
-  \node[note, text=red!75!black] at (9.0,2.85) {$\nu_3$};
-  \node[note, text=red!75!black] at (9.35,1.0) {$\nu_2$};
-  \node[note, text=red!75!black] at (8.55,0.55) {$\nu_1$};
+    {(7.6,3.35) (9.0,1.0) (9.6,0.0)};
+  \node[note, text=red!75!black] at (9.5,2.5) {$\nu_3$};
+  \node[note, text=red!75!black] at (9.35,1.75) {$\nu_2$};
+  \node[note, text=red!75!black] at (8.75,0.9) {$\nu_1$};
   % ---- legend (empty lower-left region) ----
   \begin{scope}[shift={(0.45,3.0)}]
     \draw[ctrans, semithick, dotted] (0,1.6) -- (0.7,1.6); \node[note, anchor=west] at (0.8,1.6) {cdm};
     \draw[cdiff, thin] (0,1.2) -- (0.7,1.2); \node[note, anchor=west] at (0.8,1.2) {b};
     \draw[cunet, semithick, dashed] (0,0.8) -- (0.7,0.8); \node[note, anchor=west] at (0.8,0.8) {$\gamma$};
-    \draw[accentc, semithick, dashdotted] (0,0.4) -- (0.7,0.4); \node[note, anchor=west] at (0.8,0.4) {$\Lambda$};
-    \draw[red!75!black, semithick] (0,0.0) -- (0.7,0.0); \node[note, anchor=west] at (0.8,0.0) {$\nu_{1,2,3}$};
+    \draw[red!75!black, semithick] (0,0.0) -- (0.7,0.0); \node[note, anchor=west] at (0.8,0.4) {$\nu_{1,2,3}$};
   \end{scope}
 \end{tikzpicture}
 \caption{Evolution of the density parameters $\Omega_i(a)$ for photons ($\gamma$), cold dark matter, baryons, a cosmological constant, and three neutrino mass states $m_{\nu_1}=0$, $m_{\nu_2}=0.009$, $m_{\nu_3}=0.05$~eV (red curves; schematic redraw after \cite{lesgourgues_massive_2006}). Radiation dominates early, matter after the equality epoch $a_{\mathrm{eq}}$, and $\Lambda$ today. Each massive neutrino state tracks radiation until its non-relativistic transition and dilutes like matter afterwards -- the scale-dependent change in the energy budget that imprints the neutrino mass on $T(k)$.}
@@ -291,26 +236,24 @@ This accuracy is not free: particles in different regions of a cosmological box 
   % ---- time axis ----
   \draw[-{Stealth[length=2.4mm]}, semithick, inkc] (0,0) -- (12.9,0);
   \node[note] at (6.3,-0.4) {time};
-  % ---- rung 0: one base step (large drift arch) ----
-  \draw[inkc, semithick] (0.3,0) .. controls (3.3,4.6) and (9.3,4.6) .. (12.3,0);
-  \draw[flow, color=inkc] (0.3,4.35) -- (0.3,3.55) node[pos=0, above, font=\small] {Kick};
-  % ---- rung 1: two arches, half the step ----
-  \draw[inkc, semithick] (0.3,0) .. controls (1.8,3.1) and (4.8,3.1) .. (6.3,0);
-  \draw[inkc, semithick] (6.3,0) .. controls (7.8,3.1) and (10.8,3.1) .. (12.3,0);
-  \draw[flow, color=inkc] (6.3,3.3) -- (6.3,2.6) node[pos=0, above, font=\small] {Kick};
+  % ---- rung 0: one base step ----
+  \draw[inkc, semithick] (0.3,0) arc (180:0:6 and 3);
+  % ---- rung 1: two arches, half the step (half width, half height of rung 0) ----
+  \draw[inkc, semithick] (0.3,0) arc (180:0:3 and 1.5);
+  \draw[inkc, semithick] (6.3,0) arc (180:0:3 and 1.5);
+  \draw[flow, color=inkc] (6.3,4.0) -- (6.3,3.3) node[pos=0, above, font=\small] {Kick};
   % ---- rungs 2+3 ("very active", frequently rebuilt small tree) ----
   \foreach \s in {0.3, 3.3, 6.3, 9.3}{
-    \draw[red!75!black, semithick] (\s,0) .. controls (\s+0.75,1.45) and (\s+2.25,1.45) .. (\s+3,0);}
+    \draw[red!75!black, semithick] (\s,0) arc (180:0:1.5 and 0.75);}
   \foreach \s in {0.3, 1.8, 3.3, 4.8, 6.3, 7.8, 9.3, 10.8}{
-    \draw[red!75!black, thin] (\s,0) .. controls (\s+0.37,0.75) and (\s+1.13,0.75) .. (\s+1.5,0);}
-  \node[note, rotate=90, text=red!75!black] at (-0.45,0.9) {very active};
+    \draw[red!75!black, thin] (\s,0) arc (180:0:0.75 and 0.375);}
+  \node[note, rotate=90, text=red!75!black] at (-0.45,0.55) {very active};
   % ---- inactive-tree arrows: the big tree is reused across the small sub-steps ----
-  \foreach \c in {3.3, 9.3}{
-    \draw[flow, color=ctrans] (\c,2.55) -- (\c-1.5,1.25);
-    \draw[flow, color=ctrans] (\c,2.55) -- (\c,1.35);
-    \draw[flow, color=ctrans] (\c,2.55) -- (\c+1.5,1.25);}
-  \node[font=\small, text=ctrans] at (3.3,2.85) {inactive tree};
-  \node[font=\small, text=ctrans] at (9.3,2.85) {inactive tree};
+  \foreach \c in {6.3}{
+    \draw[flow, color=ctrans] (\c,1.8) -- (\c-1.5,0.85);
+    \draw[flow, color=ctrans] (\c,1.8) -- (\c,0.85);
+    \draw[flow, color=ctrans] (\c,1.8) -- (\c+1.5,0.85);}
+  \node[font=\small, text=ctrans] at (6.3,2.05) {inactive tree};
 \end{tikzpicture}
 \caption{Kick--drift--kick ``umbrella'' diagram of \textsc{PkdGrav3}'s hierarchical multi-stepping over one base time step (schematic redraw after \cite{potter_pkdgrav3_2016}). Each lower rung halves the step size, and only the particles active on that rung are advanced at its sub-steps (red arches). The tree built for the slow, inactive particles is reused across many of these short sub-steps (blue arrows); only the small ``very active'' subset gets its own frequently-rebuilt tree, which keeps tree construction from dominating the runtime.}
 \label{fig:pkd_rungs}
@@ -913,9 +856,9 @@ The output head is likewise zero-initialised, so the untrained model predicts $v
 \resizebox{\textwidth}{!}{%
 \begin{tikzpicture}[x=1cm, y=1cm]
   % ================= (a) sinusoidal embedding of the scalar =================
-  \node[note, anchor=west] at (-0.6,3.6) {\textbf{(a)} sinusoidal embedding: one scalar $\to$ 64 frequencies};
+  \node[note, anchor=west] at (-0.6,4.0) {\textbf{(a)} sinusoidal embedding: one scalar $\to$ 64 frequencies};
   \node[databox, minimum width=17mm] (tval) at (0.1,2.0) {$t$ (flow) /\\ $c_{\mathrm{noise}}(\sigma)$ (diff.)};
-  \begin{scope}[shift={(1.85,1.05)}]
+  \begin{scope}[shift={(2.0,1.05)}]
     \draw[hairc, rounded corners=2pt, fill=white] (-0.15,-0.45) rectangle (2.45,2.35);
     \draw[ctrans, semithick] plot[domain=0:2.2, samples=60]  (\x, {1.85+0.28*sin(\x*180)});
     \draw[ctrans, semithick] plot[domain=0:2.2, samples=90]  (\x, {0.95+0.28*sin(\x*540)});
@@ -924,10 +867,10 @@ The output head is likewise zero-initialised, so the untrained model predicts $v
     \node[tinylabel, anchor=west] at (2.5,0.95) {$\sin(\omega_k t)$};
     \node[tinylabel, anchor=west] at (2.5,0.05) {$\sin(\omega_{64} t)$};
   \end{scope}
-  \draw[flow] (tval.east) -- (1.7,2.0);
-  \node[box, minimum width=14mm] (mlp) at (6.6,2.0) {MLP\\ \scriptsize $128 \to 512$};
+  \draw[flow] (tval.east) -- (1.8,2.0);
+  \node[box, minimum width=14mm] (mlp) at (7.8,2.0) {MLP\\ \scriptsize $128 \to 512$};
   \draw[flow] (5.75,2.0) -- (mlp.west) node[midway, above=0.5mm, note] {$\oplus\ \cos$};
-  \node[keybox, minimum width=19mm] (emb) at (9.3,2.0) {$\mathrm{emb} \in \mathbb{R}^{512}$};
+  \node[keybox, minimum width=19mm] (emb) at (10.7,2.0) {$\mathrm{emb} \in \mathbb{R}^{512}$};
   \draw[flow] (mlp) -- (emb);
   % ================= (b) FiLM inside one block =================
   \node[note, anchor=west] at (-0.6,0.15) {\textbf{(b)} one \texttt{FiLMDoubleConv} block: the embedding rescales and shifts each of the $C$ channels};
@@ -946,12 +889,12 @@ The output head is likewise zero-initialised, so the untrained model predicts $v
     \node[unetbox, anchor=west] (c2) at (8.15,0) {conv $3{\times}3$\\ \scriptsize GN(8) $+$ SiLU};
     \draw[flow] (film.east) -- (c2.west);
     % per-block projection from the shared embedding
-    \node[box, minimum height=6mm, font=\scriptsize] (proj) at (5.95,1.5) {per-block \texttt{Linear}: $512 \to 2C$ \;$\Rightarrow$\; $(\gamma, \beta)$};
-    \draw[flowacc] (emb.south) .. controls (9.3,0.9) and (8.3,1.5) .. (proj.east);
+    \node[box, minimum height=6mm, font=\scriptsize] (proj) at (5.95,1.2) {per-block \texttt{Linear}: $512 \to 2C$ \;$\Rightarrow$\; $(\gamma, \beta)$};
+   \draw[flowacc] (emb.south) .. controls (10.8,0.9) and (10.8,1.5) .. (proj.east);
     \draw[flowacc] (proj.south) -- (film.north);
   \end{scope}
   % ================= (c) where the modulation enters the U-Net =================
-  \node[note, anchor=west] at (-0.6,-3.6) {\textbf{(c)} the same shared embedding modulates \emph{every} block; cosmology enters once, at the bottleneck};
+  \node[note, anchor=west] at (-0.6,-3.3) {\textbf{(c)} the same shared embedding modulates \emph{every} block; cosmology enters once, at the bottleneck};
   \begin{scope}[shift={(0,-5.4)}]
     \node[unetbox, font=\scriptsize] (in) at (0.1,0) {in\\ \tiny 1/2 ch};
     \node[unetbox, font=\scriptsize] (b1) at (1.35,0) {32};
@@ -1054,20 +997,18 @@ integrated with Heun's second-order method over $N = 32$ steps from $x_T \sim \m
   \node[box, font=\scriptsize] (cn) at (2.15,-1.75) {$c_{\mathrm{noise}} = \tfrac14 \ln\sigma$};
   \draw[skiparrow] (sig) -- (cn);
   \draw[skiparrow] (cn.east) .. controls (3.6,-1.75) and (5.35,-0.9) .. (unet.south)
-      node[pos=0.55, right=1mm, note] {FiLM, Fig.~\ref{fig:film_unet}};
-  \node[note, anchor=west] at (6.6,-1.75) {$\sigma$ also sets $c_{\mathrm{in}},\,c_{\mathrm{skip}},\,c_{\mathrm{out}}$ (Eq.~\ref{eq:edm_coeffs})};
+      node[pos=0.75, right=1mm, note] {FiLM, Fig.~\ref{fig:film_unet}};
+  \node[note, anchor=west] at (6.6,-2.0) {$\sigma$ also sets $c_{\mathrm{in}},\,c_{\mathrm{skip}},\,c_{\mathrm{out}}$ (Eq.~\ref{eq:edm_coeffs})};
   % ================= the sampling loop =================
   \node[diffbox, minimum width=26mm] (start) at (0.9,-4.6) {$x_T \sim \mathcal{N}(0, \sigma_{\max}^2 I)$\\ \scriptsize shared sphere noise};
   \node[diffbox, minimum width=30mm] (loop) at (4.75,-4.6) {Heun step $\sigma_i \to \sigma_{i+1}$\\ \scriptsize $\le 2$ calls of $D_\theta$ per step};
   \draw[flow] (start) -- (loop);
   \draw[flow] (loop.north) .. controls (4.15,-3.75) and (5.35,-3.75) .. (loop.70)
-      node[pos=0.5, above, note] {$\times\,32$ down the Karras ladder (Eq.~\ref{eq:karras_schedule}): $\sigma\!: 80 \to \cdots \to 0.002 \to 0$};
-  \node[diffbox] (res) at (7.85,-4.6) {sample $=$\\ high-pass residual};
+      node[pos=0.4, above, note] {$\times\,32$ down the Karras ladder (Eq.~\ref{eq:karras_schedule}): $\sigma\!: 80 \to \cdots \to 0.002 \to 0$};
+  \node[diffbox] (res) at (8.4,-4.6) {sample $=$\\ high-pass residual};
   \draw[flow] (loop) -- (res);
-  \node[keybox] (comp) at (10.3,-4.6) {$\delta_{\mathrm{low}} + \mathrm{HP}(\cdot)$};
-  \draw[flow] (res) -- (comp);
-  \node[databox, minimum width=15mm] (out) at (12.35,-4.6) {corrected\\ patch};
-  \draw[flowacc] (comp) -- (out);
+  \node[keybox, minimum width=25mm] (comp) at (11.6,-4.6) {$\delta_{\mathrm{low}} + \mathrm{HP}(\cdot)$\\ \scriptsize corrected patch};
+  \draw[flowacc] (res) -- (comp);
 \end{tikzpicture}}
 \caption{The diffusion pipeline (\texttt{ml/diffusion/model.py}). Top: the EDM denoiser is the U-Net of Figure~\ref{fig:film_unet} wrapped in the four preconditioning coefficients of Eq.~\eqref{eq:edm_coeffs} -- the input is variance-normalised by $c_{\mathrm{in}}$ and concatenated with the (never-noised) low patch; the output blends an identity path ($c_{\mathrm{skip}}\,x_t$) with the network's contribution ($c_{\mathrm{out}} F_\theta$), shifting smoothly from ``pass through'' at low $\sigma$ to ``generate'' at high $\sigma$; $c_{\mathrm{noise}}$ feeds $\sigma$ to the FiLM conditioning. Bottom: sampling starts from pure noise and applies 32 Heun steps down the Karras schedule, each invoking $D_\theta$ up to twice; the final sample is the high-pass residual, composed onto the low map so the large scales remain Disco-DJ's exactly.}
 \label{fig:edm_sampling}
