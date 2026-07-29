@@ -220,7 +220,7 @@ def main():
                                    drop_last=True, **loader_kwargs)
         val_loader = DataLoader(val_ds, batch_size=args.batch_size, shuffle=False, **loader_kwargs)
 
-    lr = args.lr if args.no_lr_scaling else args.lr * world_size
+    lr = args.lr if args.no_lr_scaling else args.lr * world_size # scale LR linearly with world size
     model = FlowUNet(in_channels=1, out_channels=1, base_channels=args.base_channels,
                       time_emb_dim=args.time_emb_dim,
                       use_cosmo_cond=args.use_cosmo_cond).to(device)

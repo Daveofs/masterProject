@@ -2,7 +2,7 @@
 #SBATCH --nodes=4
 #SBATCH --job-name=unet-flow
 #SBATCH --partition=normal
-#SBATCH --account=sk037
+#SBATCH --account=a0158
 #SBATCH --ntasks-per-node=1
 #SBATCH --gres=gpu:4
 #SBATCH --cpus-per-task=128
@@ -56,7 +56,7 @@ DATA_ROOT="${DATA_ROOT:-/capstor/scratch/cscs/damrein/grid}"
 METAINFO_DIR="/capstor/scratch/cscs/damrein/cosmogridv1"
 UNET=/users/damrein/masterProject/ml/unet
 
-NSIDE=${NSIDE:-512}
+NSIDE=${NSIDE:-1024}
 PATCH_SIZE=${PATCH_SIZE:-256}
 NPATCH=${NPATCH:-100000}
 EPOCHS=${EPOCHS:-200}
