@@ -868,9 +868,9 @@ The output head is likewise zero-initialised, so the untrained model predicts $v
     \node[tinylabel, anchor=west] at (2.5,0.05) {$\sin(\omega_{64} t)$};
   \end{scope}
   \draw[flow] (tval.east) -- (1.8,2.0);
-  \node[box, minimum width=14mm] (mlp) at (7.8,2.0) {MLP\\ \scriptsize $128 \to 512$};
-  \draw[flow] (5.75,2.0) -- (mlp.west) node[midway, above=0.5mm, note] {$\oplus\ \cos$};
-  \node[keybox, minimum width=19mm] (emb) at (10.7,2.0) {$\mathrm{emb} \in \mathbb{R}^{512}$};
+  \node[box, minimum width=14mm] (mlp) at (8.2,2.0) {MLP\\ \scriptsize $128 \to 512$};
+  \draw[flow] (5.75,2.0) -- (mlp.west) node[midway, above=0.5mm, note] {$\oplus\cos(\omega_kt)$};
+  \node[keybox, minimum width=19mm] (emb) at (10.5,2.0) {$\mathrm{emb} \in \mathbb{R}^{512}$};
   \draw[flow] (mlp) -- (emb);
   % ================= (b) FiLM inside one block =================
   \node[note, anchor=west] at (-0.6,0.15) {\textbf{(b)} one \texttt{FiLMDoubleConv} block: the embedding rescales and shifts each of the $C$ channels};
@@ -919,7 +919,17 @@ The output head is likewise zero-initialised, so the untrained model predicts $v
     \draw[flowacc] (cosmo.north) -- (bot.south) node[midway, right=0.5mm, note] {$+$};
   \end{scope}
 \end{tikzpicture}}
-\caption{Scalar conditioning in the shared U-Net (\texttt{FlowUNet} / \texttt{DenoiserUNet}). (a) The single scalar -- the flow time $t$ or the noise embedding $c_{\mathrm{noise}}(\sigma)$ -- is lifted onto 64 sinusoids of geometrically spaced frequencies (plus their cosines) and expanded by a two-layer MLP into a 512-dimensional embedding: low frequencies encode coarse position along the trajectory, high frequencies fine position. (b) Inside every double-convolution block, a block-specific linear layer projects this shared embedding to one $(\gamma_c, \beta_c)$ pair per channel, applied as a feature-wise affine transform between the two convolutions -- FiLM changes what the channels \emph{contain}, never how many there are. (c) The same embedding modulates every encoder, bottleneck, and decoder block, so one network represents the full trajectory-dependent map; the cosmology--redshift vector instead enters once, additively and zero-initialised, at the bottleneck.}
+\caption{Scalar conditioning in the shared U-Net (\texttt{FlowUNet} / \texttt{DenoiserUNet}).
+(a) The scalar -- flow time $t$ or noise level $c_{\mathrm{noise}}(\sigma)$ -- is mapped to 64
+geometrically spaced sinusoids (with their cosines) and expanded by a two-layer MLP to a
+512-dimensional embedding, encoding position along the trajectory from coarse (low
+frequencies) to fine (high). (b) In each double-convolution block, a block-specific linear
+layer turns this embedding into a per-channel scale $\gamma_c$ and shift $\beta_c$ that
+modulate the $C$ feature maps $h_c\in\mathbb{R}^{H\times W}$ between the two convolutions,
+$h_c(i,j)\mapsto(1+\gamma_c)\,h_c(i,j)+\beta_c$, with the same $(\gamma_c,\beta_c)$ applied at
+every pixel. (c) This embedding modulates every encoder, bottleneck and decoder block, while
+the cosmology--redshift vector enters once, additively and zero-initialised, at the bottleneck.}
+
 \label{fig:film_unet}
 \end{figure}
 
@@ -928,10 +938,10 @@ The output head is likewise zero-initialised, so the untrained model predicts $v
 
 The third pipeline (\texttt{ml/diffusion/}) replaces the low$\to$high bridge with a genuinely generative process in the EDM formulation of \citeauthor{karras_elucidating_2022} (Sec.~\ref{sssec:diffusion-theory}): every sample starts from pure Gaussian noise, and the low map enters only as \emph{conditioning}. What is diffused is again not the full field but the high-pass residual $x_1 = \mathrm{HP}(\delta_{\mathrm{high}} - \delta_{\mathrm{low}})$, for the reasons of Sec.~\ref{sec:correction-pipelines}; the conditioning, by contrast, is the \emph{full} low patch at all scales, channel-concatenated to the noisy input -- the denoiser needs the large-scale context to know which small-scale structure to synthesise, even though its output is band-limited.
 
-\paragraph{Preconditioned denoiser.} The network is the two-channel variant of Figure~\ref{fig:film_unet}, wrapped in the EDM preconditioning (\texttt{model.EDMPrecond}):
+\paragraph{Preconditioned denoiser.} The network is the two-channel variant of Figure~\ref{fig:film_unet}, wrapped in the EDM preconditioning (\texttt{model.EDMPrecond}). Here $x$ (analogous to $x_t$ in flow matching) is the noisy high-pass residual whose clean target is $x_1 = \mathrm{HP}(\delta_{high}-\delta_{low})$, and $\delta_{low}$ is the low-resolution conditioning map (used at all scales) that steers the denoiser.
 \begin{equation}
   D_\theta(x, \sigma, \mathrm{cond}) = c_{\mathrm{skip}}(\sigma)\,x
-    + c_{\mathrm{out}}(\sigma)\, F_\theta\!\big(\,[\,c_{\mathrm{in}}(\sigma)\,x \,\oplus\, \mathrm{cond}\,],\ c_{\mathrm{noise}}(\sigma),\ \mathbf{c}\big),
+    + c_{\mathrm{out}}(\sigma)\, F_\theta\!\big(\,[\,c_{\mathrm{in}}(\sigma)\,x \,\oplus\, \delta_\mathrm{low}\,],\ c_{\mathrm{noise}}(\sigma),\ \mathbf{c}\big),
   \label{eq:edm_precond}
 \end{equation}
 with the standard coefficients
@@ -948,7 +958,7 @@ with the standard coefficients
   \item $c_{\mathrm{skip}}$ and $c_{\mathrm{out}}$ blend an identity path with the network output. At small $\sigma$, $c_{\mathrm{skip}} \to 1$ and $c_{\mathrm{out}} \to 0$: the noisy input is already almost the answer, and the network only supplies a small correction. At large $\sigma$, $c_{\mathrm{skip}} \to 0$ and $c_{\mathrm{out}} \to \sigma_d$: the input is essentially pure noise, and the network must synthesise the answer outright. The denoiser thus interpolates \emph{continuously} between ``pass through'' and ``generate'', instead of one set of weights having to learn both regimes unaided.
   \item $c_{\mathrm{noise}}$ log-compresses $\sigma \in [0.002, 80]$ into an $\mathcal{O}(1)$ scalar, which is what the sinusoidal embedding of Figure~\ref{fig:film_unet}(a) receives -- the diffusion counterpart of the flow time $t$.
 \end{itemize}
-The conditioning channel is neither noised nor rescaled by $c_{\mathrm{in}}$ -- it is not part of the diffusion process, it only steers it. One EDM default is deliberately \emph{not} adopted: the data scale $\sigma_d$, tuned to $0.5$ for 8-bit natural images in \cite{karras_elucidating_2022}, is instead \emph{measured} as the standard deviation of the actual training target -- the high-pass residual, whose variance differs materially from a natural image's -- over a few real batches at start-up (\texttt{estimate\_sigma\_data}); using the wrong $\sigma_d$ would mis-scale all four coefficients of Eq.~\eqref{eq:edm_coeffs} at once.
+The conditioning channel ($\delta_{low}$) is neither noised nor rescaled by $c_{\mathrm{in}}$ -- it is not part of the diffusion process, it only steers it. One EDM default is deliberately \emph{not} adopted: the data scale $\sigma_d$, tuned to $0.5$ for 8-bit natural images in \cite{karras_elucidating_2022}, is instead \emph{measured} as the standard deviation of the actual training target -- the high-pass residual, whose variance differs materially from a natural image's -- over a few real batches at start-up (\texttt{estimate\_sigma\_data}); using the wrong $\sigma_d$ would mis-scale all four coefficients of Eq.~\eqref{eq:edm_coeffs} at once.
 
 \paragraph{Training.} Per example, a noise level is drawn as $\ln\sigma \sim \mathcal{N}(-1.2, 1.2^2)$, the target is noised to $x_t = x_1 + \sigma\varepsilon$, and the denoising error is weighted per noise level and normalised per patch:
 \begin{equation}

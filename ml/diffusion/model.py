@@ -160,10 +160,10 @@ class FiLMDoubleConv(nn.Module):
         self.act2 = nn.SiLU(inplace=True)
 
     def forward(self, x, emb):
-        h = self.act1(self.norm1(self.conv1(x)))
-        scale, shift = self.film(emb).chunk(2, dim=1)
-        h = h * (1 + scale[:, :, None, None]) + shift[:, :, None, None]
-        return self.act2(self.norm2(self.conv2(h)))
+        h = self.act1(self.norm1(self.conv1(x))) # (1) conv1: spatial change of features
+        scale, shift = self.film(emb).chunk(2, dim=1) # (2) from σ
+        h = h * (1 + scale[:, :, None, None]) + shift[:, :, None, None] # (3) FiLM: per-channel content (feature maps) rescale/offset
+        return self.act2(self.norm2(self.conv2(h))) # (4) conv2: another spatial change
 
 
 class Down(nn.Module):
