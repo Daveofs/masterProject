@@ -18,17 +18,19 @@ SCRATCH_DIR=/capstor/scratch/cscs/damrein
 CONDA_ROOT=/users/damrein/miniforge3
 CONDA_ENV=disco-dj
 
-DISCO_FILE="/capstor/scratch/cscs/damrein/grid/cosmo_000176/run_0/disco_sim/gpu_grid_2746373/disco_shells_nside=2048.npz"
+DISCO_FILE="/capstor/scratch/cscs/damrein/cosmogridv1/cosmo_000001/run_0/disco_sim/gpu_grid_3827689/disco_shells_nside=2048.npz"
 # Set to "None" or leave empty to make it optional
 DISCO_FILE_1664=None
-COSMOGRID_FILE="/capstor/scratch/cscs/damrein/grid/cosmo_000176/run_0/compressed_shells.npz"
-PARAMS_YML="/capstor/scratch/cscs/damrein/grid/cosmo_000176/run_0/params.yml"
-OUT_DIR="${SCRATCH_DIR}/outputs/cl_ratio"
+COSMOGRID_FILE="/capstor/scratch/cscs/damrein/cosmogridv1/cosmo_000001/run_0/compressed_shells.npz"
+# must match the cosmology of the two shell files above (it seeds the CCL theory
+# curve): this pointed at grid/cosmo_000176 while the data is cosmo_000001
+PARAMS_YML="/capstor/scratch/cscs/damrein/cosmogridv1/cosmo_000001/run_0/params.yml"
+OUT_DIR="${SCRATCH_DIR}/outputs/plots/cl_ratio"
 
 PY_SCRIPT=/users/damrein/masterProject/vis/plot_cl_ratio.py
 
 # Shell indices to plot: 5 evenly spaced across the 69 shells (0-based)
-SHELL_INDICES="3 26 65"
+SHELL_INDICES="5 20 40 60"
 
 # Maximum multipole (default: 3*2048-1 = 6143, can reduce for speed)
 LMAX=3000
@@ -40,7 +42,10 @@ SHOW_RESID=false
 # Custom legend labels
 LABEL_DISCO="Disco"
 LABEL_DISCO_1664="Ignore"
-LABEL_COSMOGRID="Cosmogridv1 - cosmo_203356"
+# NB: this label read "Cosmogridv1 - cosmo_203356", but every input path above is
+# cosmo_000176 -- a stale name that would have put the wrong cosmology on a thesis
+# figure. The cosmology now goes in the figure caption instead of the axis label.
+LABEL_COSMOGRID="CosmoGridV1"
 LABEL_THEORY="CCL theory"
 LABEL_RESID="DRF - CosmoGrid (resid)"
 LABEL_RESID_1664="Ignore - CosmoGrid (resid)"
