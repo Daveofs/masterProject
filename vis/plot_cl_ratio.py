@@ -32,6 +32,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
+from matplotlib.lines import Line2D
 
 
 # ---------------------------------------------------------------------------
@@ -109,11 +110,29 @@ def compute_cl(count_map: np.ndarray, lmax: int) -> np.ndarray:
 
 
 # Physical scale -> multipole (Limber flat-sky: ell ~ chi / r)
+# Only the 5 cMpc/h scale is marked: it is the comoving scale at which the
+# transfer-function correction is switched on (run_transfer.sh --ell-min-mpc 5),
+# so this one line ties the validation figures to the correction. The 1 cMpc/h,
+# box-size, PM-cell and 2*nside markers were dropped -- five vertical lines per
+# panel obscured the curve they were meant to annotate.
 _SCALE_LINES = [
-    (1.0,   "1 cMpc/h",    "#e07b39"),  # 1 comoving Mpc/h
-    (5.0,   "5 cMpc/h",    "#3a9e6f"),  # 5 comoving Mpc/h
-    (900.0, "900 cMpc/h\n(box size)", "#2979ff"),  # simulation box size
-]
+    (5.0, "5 cMpc/h", "#4f8a76"),   # muted sage-teal: legible, but calmer than a
+]                                    # saturated green next to the data colours
+# An annotation, not a data series: a long clean dash at moderate weight, drawn
+# UNDER the curves, reads as a reference marker rather than competing with them.
+_SCALE_LW = 1.7
+_SCALE_DASH = (0, (7, 4))
+_SCALE_ZORDER = 1.0                  # above the grid, below the Line2D data (2.0)
+
+# Typography. These figures are embedded in the thesis at roughly \textwidth, so
+# every label has to survive that downscaling -- hence sizes well above the
+# matplotlib defaults. No axes carry a title: the shell index, redshift range,
+# resolution and cosmology are stated in the LaTeX caption instead, which keeps
+# that information in one place and out of the rasterised image.
+_SCALE_FONTSIZE = 15
+_AXIS_FONTSIZE = 17
+_TICK_FONTSIZE = 14
+_LEGEND_FONTSIZE = 13
 
 
 def ell_from_scale(r_cmpch: float, chi_cmpch: float) -> float:
@@ -126,12 +145,70 @@ def ell_from_scale(r_cmpch: float, chi_cmpch: float) -> float:
     return chi_cmpch / r_cmpch
 
 
+def tight_ylim(ax, curves, ells, lmax, ell_min=2, log=False,
+               must_include=None, pad=0.08, robust=True):
+    """Set y-limits from the data actually drawn over [ell_min, lmax].
+
+    Matplotlib's autoscale sees the whole array, including the ell < 2
+    monopole/dipole entries that are never plotted and the high-ell tail where a
+    ratio's denominator approaches zero and the curve diverges -- either of which
+    stretches the axis so far that the interesting range collapses into a thin
+    band. Limits are therefore taken from the plotted window only, on a log or
+    linear footing to match the axis, and (for ratios) from robust percentiles
+    rather than the extremes.
+
+    must_include forces a reference value into view (ratio = 1).
+    """
+    mask = (ells >= ell_min) & (ells <= lmax)
+    vals = []
+    for c in curves:
+        if c is None:
+            continue
+        v = np.asarray(c, dtype=float)[mask]
+        v = v[np.isfinite(v)]
+        if log:
+            v = v[v > 0]
+        if v.size:
+            vals.append(v)
+    if not vals:
+        return
+    v = np.concatenate(vals)
+
+    if log:
+        lo, hi = np.log10(v.min()), np.log10(v.max())
+        d = max(hi - lo, 0.2) * pad
+        ax.set_ylim(10.0 ** (lo - d), 10.0 ** (hi + d))
+        return
+
+    if robust:
+        # Show the WHOLE curve by default. On the distant shells the ratio swings
+        # hard at low ell -- few independent modes per band -- and those swings
+        # are signal, not outliers, so clipping them at a percentile cut the
+        # curve off at the frame. The percentile range is therefore used only as
+        # a sanity bound: it takes over when the extremes are genuinely
+        # pathological (a near-zero denominator sending the ratio to infinity),
+        # detected as a full range several times wider than the robust one.
+        lo_r, hi_r = np.percentile(v, [0.05, 99.95])
+        lo_f, hi_f = v.min(), v.max()
+        span_r = hi_r - lo_r
+        if span_r > 0 and (hi_f - lo_f) > 4.0 * span_r:
+            lo, hi = lo_r, hi_r
+        else:
+            lo, hi = lo_f, hi_f
+    else:
+        lo, hi = v.min(), v.max()
+    if must_include is not None:
+        lo, hi = min(lo, must_include), max(hi, must_include)
+    d = max(hi - lo, 1e-3) * pad
+    ax.set_ylim(lo - d, hi + d)
+
+
 def add_scale_vlines(ax, chi: float, nside: int, lmax: int,
-                     alpha: float = 0.8, label_ypos: float = 0.97,
+                     alpha: float = 0.8, label_ypos: float = 0.02,
                      colors_override: dict | None = None,
                      grid_size: float | None = None):
-    """Draw vertical lines at 1 cMpc/h, 5 cMpc/h scales, at ell=2*nside,
-    and optionally at the PM grid cell size Lbox/res_pm.
+    """Draw the comoving-scale marker(s) of _SCALE_LINES -- currently 5 cMpc/h
+    only -- projected onto this shell's distance.
 
     Parameters
     ----------
@@ -142,40 +219,30 @@ def add_scale_vlines(ax, chi: float, nside: int, lmax: int,
     alpha     : line opacity
     label_ypos: y-position of text label in axes fraction
     colors_override : optional dict {r_cmpch: color} to override default colours
-    grid_size : Lbox/res_pm in cMpc/h; draws an extra vline when provided
+    grid_size : accepted but no longer drawn (the PM-cell marker was dropped with
+                the other vlines); still reported in the per-shell plot title
     """
     trans = ax.get_xaxis_transform()  # x in data, y in axes fraction
 
-    # ---- comoving scale lines ----
+    # ---- comoving scale line(s): only 5 cMpc/h, see _SCALE_LINES ----
     for r, txt, col in _SCALE_LINES:
         if colors_override and r in colors_override:
             col = colors_override[r]
         ell = ell_from_scale(r, chi)
         if np.isnan(ell) or ell < 2 or ell > lmax:
             continue
-        ax.axvline(ell, color=col, lw=0.9, linestyle=":", alpha=alpha)
+        ax.axvline(ell, color=col, lw=_SCALE_LW, linestyle=_SCALE_DASH,
+                   alpha=0.85, zorder=_SCALE_ZORDER)
+        # anchored at the BOTTOM of the panel: at the top it sat on the curves,
+        # which in both panel types run near their upper edge over most of the
+        # ell range (C_ell falls from the left, the ratio hugs 1 from below).
+        # The label box is opaque and sits above the line, so the dashes stop
+        # cleanly at the text instead of striking through it.
         ax.text(ell, label_ypos, txt, transform=trans,
-                fontsize=6.5, color=col, ha="center", va="top",
-                rotation=90, clip_on=True)
-
-    # ---- PM grid cell size line ----
-    if grid_size is not None and grid_size > 0:
-        ell_grid = ell_from_scale(grid_size, chi)
-        if not np.isnan(ell_grid) and 2 <= ell_grid <= lmax:
-            _col_grid = "#c62828"
-            ax.axvline(ell_grid, color=_col_grid, lw=0.9, linestyle="--", alpha=alpha)
-            ax.text(ell_grid, label_ypos,
-                    f"$L_{{\\rm box}}/N_{{\\rm pm}}$\n({grid_size:.2f} cMpc/h)",
-                    transform=trans, fontsize=6.5, color=_col_grid,
-                    ha="center", va="top", rotation=90, clip_on=True)
-
-    # ---- 2*nside line ----
-    ell_ns = 2 * nside
-    if 2 <= ell_ns <= lmax:
-        ax.axvline(ell_ns, color="#555555", lw=0.9, linestyle="-.", alpha=alpha)
-        ax.text(ell_ns, label_ypos, r"$2\times N_{{\rm side}}$", transform=trans,
-                fontsize=6.5, color="#555555", ha="center", va="top",
-                rotation=90, clip_on=True)
+                fontsize=_SCALE_FONTSIZE, color=col,
+                ha="center", va="bottom", rotation=90, clip_on=True,
+                zorder=_SCALE_ZORDER + 0.1,
+                bbox=dict(boxstyle="round,pad=0.3", fc="white", ec="none"))
 
 
 # ---------------------------------------------------------------------------
@@ -272,6 +339,10 @@ def main():
     fig_ratio, ax_ratio = plt.subplots(figsize=(10, 5))
     fig_cl,    ax_cl    = plt.subplots(figsize=(10, 5))
 
+    # every curve drawn on the two summary panels, kept so the axes can be scaled
+    # to the plotted window rather than to the full arrays (see tight_ylim)
+    summary_ratio_curves, summary_cl_curves = [], []
+
     for color, idx in zip(colors, shell_indices):
         if idx < 0 or idx >= n_shells:
             print(f"  [WARN] shell index {idx} out of range [0, {n_shells-1}], skipping.")
@@ -304,7 +375,8 @@ def main():
             ratio     = np.where(cl_c != 0, cl_d    / cl_c, np.nan)
             ratio1664 = np.where(cl_c != 0, cl_d1664 / cl_c, np.nan) if cl_d1664 is not None else None
 
-        ax_cl.plot(ells, cl_d, color=color, lw=1.0, label=f"{args.label_disco}  {label}")
+        # colour identifies the shell; the separate style key names the simulation
+        ax_cl.plot(ells, cl_d, color=color, lw=1.0, label=label)
         if cl_d1664 is not None:
             ax_cl.plot(ells, cl_d1664, color=color, lw=1.0, linestyle=":", alpha=0.9,
                        label=f"{args.label_disco_1664} {label}")
@@ -313,47 +385,42 @@ def main():
             ax_cl.plot(ells, cl_th, color=color, lw=1.2, linestyle="-.", alpha=0.8,
                        label=f"{args.label_theory} {label}")
 
-        ax_ratio.plot(ells, ratio,     color=color, lw=1.0,
-                      label=f"{args.label_disco} / {args.label_cosmogrid}  {label}")
+        # the y-axis already names the ratio, so the legend carries only the shell
+        # identity -- at the enlarged font the full string covered the curves
+        ax_ratio.plot(ells, ratio,     color=color, lw=1.0, label=label)
         if ratio1664 is not None:
             ax_ratio.plot(ells, ratio1664, color=color, lw=1.0, linestyle=":", alpha=0.9,
                           label=f"{args.label_disco_1664} / {args.label_cosmogrid}  {label}")
 
+        summary_ratio_curves += [ratio, ratio1664]
+        summary_cl_curves += [cl_d, cl_c, cl_d1664, cl_th]
+
         # Per-shell scale lines on summary plots (subtle dotted, shell colour)
         chi = float(info_d[idx]["shell_com"])
-        scale_vals = [r for r, _, _ in _SCALE_LINES]
-        if grid_size is not None:
-            scale_vals.append(grid_size)
-        for r in scale_vals:
+        # one line per shell, at that shell's own projection of 5 cMpc/h (the PM
+        # cell and 2*nside markers were dropped -- see _SCALE_LINES)
+        for r, _, _ in _SCALE_LINES:
             ell_s = ell_from_scale(r, chi)
             if not np.isnan(ell_s) and 2 <= ell_s <= lmax:
                 for _ax in (ax_cl, ax_ratio):
-                    _ax.axvline(ell_s, color=color, lw=0.6, linestyle=":", alpha=0.5)
-
-    # ell = 2*nside line on summary plots (same for all shells)
-    ell_ns = 2 * nside
-    if 2 <= ell_ns <= lmax:
-        for _ax, _yp in ((ax_ratio, 0.97), (ax_cl, 0.97)):
-            _ax.axvline(ell_ns, color="#555555", lw=0.9, linestyle="-.", alpha=0.8)
-            _ax.text(ell_ns, _yp, r"$2\times N_{{\rm side}}$",
-                     transform=_ax.get_xaxis_transform(),
-                     fontsize=6.5, color="#555555", ha="center", va="top",
-                     rotation=90, clip_on=True)
+                    _ax.axvline(ell_s, color=color, lw=_SCALE_LW,
+                                linestyle=_SCALE_DASH, alpha=0.55,
+                                zorder=_SCALE_ZORDER)
 
     # Ratio plot formatting
     ax_ratio.axhline(1.0, color="k", lw=0.8, linestyle="--", label="ratio = 1")
-    ax_ratio.set_xlabel(r"Multipole $\ell$", fontsize=13)
+    ax_ratio.set_xlabel(r"Multipole $\ell$", fontsize=_AXIS_FONTSIZE)
     ax_ratio.set_ylabel(
         rf"$C_\ell^{{\rm {args.label_disco}}}\,/\,C_\ell^{{\rm {args.label_cosmogrid}}}$",
-        fontsize=13,
+        fontsize=_AXIS_FONTSIZE,
     )
-    ax_ratio.set_title(
-        f"Angular power spectrum ratio: {args.label_disco} / {args.label_cosmogrid}",
-        fontsize=13,
-    )
+    ax_ratio.tick_params(labelsize=_TICK_FONTSIZE)
     ax_ratio.set_xscale("log")
     ax_ratio.set_xlim(2, lmax)
-    ax_ratio.legend(fontsize=8, loc="upper right")
+    tight_ylim(ax_ratio, summary_ratio_curves, ells, lmax, log=False, must_include=1.0)
+    # lower left: the curves all approach 1 from below, so the upper right (the
+    # matplotlib default) is exactly where they live
+    ax_ratio.legend(fontsize=_LEGEND_FONTSIZE, loc="lower left", ncol=2)
     ax_ratio.grid(True, which="both", alpha=0.3)
     fig_ratio.tight_layout()
 
@@ -362,16 +429,25 @@ def main():
     print(f"Saved ratio plot -> {out_ratio}")
 
     # Cl comparison plot formatting
-    ax_cl.set_xlabel(r"Multipole $\ell$", fontsize=13)
-    ax_cl.set_ylabel(r"$C_\ell$", fontsize=13)
-    ax_cl.set_title(
-        f"Angular power spectra: {args.label_disco} (solid) vs {args.label_cosmogrid} (dashed)",
-        fontsize=13,
-    )
+    ax_cl.set_xlabel(r"Multipole $\ell$", fontsize=_AXIS_FONTSIZE)
+    ax_cl.set_ylabel(r"$C_\ell$", fontsize=_AXIS_FONTSIZE)
+    ax_cl.tick_params(labelsize=_TICK_FONTSIZE)
     ax_cl.set_xscale("log")
     ax_cl.set_yscale("log")
     ax_cl.set_xlim(2, lmax)
-    ax_cl.legend(fontsize=7, loc="upper right")
+    tight_ylim(ax_cl, summary_cl_curves, ells, lmax, log=True)
+    # Two legends: colour = which shell, line style = which simulation. The style
+    # key used to live in the axes title; with titles dropped it has to stay
+    # inside the figure, since the two curve families overlap and are otherwise
+    # impossible to tell apart.
+    _leg_shells = ax_cl.legend(fontsize=_LEGEND_FONTSIZE, loc="upper right")
+    ax_cl.add_artist(_leg_shells)
+    _style_key = [
+        Line2D([], [], color="0.35", lw=1.4, ls="-", label=args.label_disco),
+        Line2D([], [], color="0.35", lw=1.4, ls="--", alpha=0.6,
+               label=args.label_cosmogrid),
+    ]
+    ax_cl.legend(handles=_style_key, fontsize=_LEGEND_FONTSIZE, loc="lower left")
     ax_cl.grid(True, which="both", alpha=0.3)
     fig_cl.tight_layout()
 
@@ -422,14 +498,10 @@ def main():
             if cl_resid1664 is not None:
                 axes[0].plot(ells, cl_resid1664, label=args.label_resid_1664, lw=1.0,
                          color="navy", linestyle=(0, (3, 1, 1, 1)))
-        axes[0].set_ylabel(r"$C_\ell$", fontsize=12)
+        axes[0].set_ylabel(r"$C_\ell$", fontsize=_AXIS_FONTSIZE)
+        axes[0].tick_params(labelsize=_TICK_FONTSIZE)
         axes[0].set_yscale("log")
-        _grid_str = f"  |  grid={grid_size:.3f} cMpc/h" if grid_size is not None else ""
-        axes[0].set_title(
-            f"Shell {idx}  |  z = [{z_lo:.4f}, {z_hi:.4f}]  |  nside={nside}{_grid_str}",
-            fontsize=12
-        )
-        axes[0].legend(fontsize=9)
+        axes[0].legend(fontsize=_LEGEND_FONTSIZE)
         axes[0].grid(True, which="both", alpha=0.3)
 
         # Ratio panel: DISCO / CosmoGrid (and DISCO_1664 / CosmoGrid if present)
@@ -445,10 +517,13 @@ def main():
             axes[1].plot(ells, ratio_c_th, lw=1.0, color="red", linestyle="--",
                          label=f"{args.label_cosmogrid} / {args.label_theory}")
         axes[1].axhline(1.0, color="k", lw=0.8, linestyle="--")
-        axes[1].set_xlabel(r"Multipole $\ell$", fontsize=12)
-        #axes[1].set_ylabel(r"$C_\ell^{\rm DISCO}\,/\,C_\ell^{\rm CosmoGrid}$", fontsize=12)
-        axes[1].set_ylim(0.7, 1.3)  # fixed y-limits for ratio plot
-        axes[1].legend(fontsize=9)
+        axes[1].set_xlabel(r"Multipole $\ell$", fontsize=_AXIS_FONTSIZE)
+        # with the title gone, the ratio panel names its own quantity on the axis
+        axes[1].set_ylabel(
+            rf"$C_\ell^{{\rm {args.label_disco}}}\,/\,C_\ell^{{\rm {args.label_cosmogrid}}}$",
+            fontsize=_AXIS_FONTSIZE)
+        axes[1].tick_params(labelsize=_TICK_FONTSIZE)
+        axes[1].legend(fontsize=_LEGEND_FONTSIZE)
         axes[1].grid(True, which="both", alpha=0.3)
 
         # Scale vertical lines on both panels
@@ -459,6 +534,21 @@ def main():
         for ax in axes:
             ax.set_xscale("log")
             ax.set_xlim(2, lmax)
+
+        # y-limits LAST, and locked: set_xscale() above re-runs autoscale_view(),
+        # which silently discards any y-limits set before it -- which is what put
+        # the C_ell panel back to a ~14-decade range (driven by the C_0/C_1
+        # entries that are never plotted) and left the ratio panel at its old
+        # fixed window. Data-driven limits are needed here because the useful
+        # ratio range varies by an order of magnitude between the near and far
+        # shells, so any single hard-coded window either wastes most of the panel
+        # or clips the curve.
+        tight_ylim(axes[1], [ratio, ratio1664, ratio_d_th, ratio_c_th],
+                   ells, lmax, log=False, must_include=1.0)
+        tight_ylim(axes[0], [cl_d, cl_c, cl_d1664, cl_th, cl_resid, cl_resid1664],
+                   ells, lmax, log=True)
+        for ax in axes:
+            ax.autoscale(enable=False, axis="y")
 
         fig.tight_layout()
         out_single = Path(args.out_dir) / f"cl_ratio_shell{idx:03d}_z{z_lo:.3f}-{z_hi:.3f}.png"
