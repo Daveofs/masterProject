@@ -56,7 +56,7 @@ def gnomonic_index_maps(nside: int, nside_centers: int, patch_size: int,
 
     def build(c: int) -> np.ndarray:
         proj = hp.projector.GnomonicProj(rot=(lon[c], lat[c], 0.0), xsize=patch_size,
-                                         ysize=patch_size, reso=reso_arcmin)
+                                         ysize=patch_size, reso=reso_arcmin) # rotation
         v = proj.xy2vec(proj.ij2xy())
         return hp.vec2pix(nside, v[0], v[1], v[2], nest=False).ravel().astype(np.int32)
 
@@ -159,9 +159,9 @@ def tile_and_predict(predict_batch: Callable[[np.ndarray], np.ndarray], low_shel
 
         for k in range(end - start):
             idx_map = batch_idx[k]
-            np.add.at(accum_pred, idx_map, pred_counts[k].ravel() * taper)
+            np.add.at(accum_pred, idx_map, pred_counts[k].ravel() * taper)  # Σ  pred·taper
             if build_weight:
-                np.add.at(weight, idx_map, taper)
+                np.add.at(weight, idx_map, taper)                           # Σ  taper
         if (start // batch_size) % log_every == 0 or end == n_centers:
             print(f"[patch_tiling]   {end}/{n_centers} patches", flush=True)
 

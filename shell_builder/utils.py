@@ -61,7 +61,7 @@ def compute_replica_offsets(chi_max_Mpch: float, boxsize: float) -> np.ndarray:
                 nearest_sq = (max(0.0, abs(cx) - boxsize / 2) ** 2 +
                               max(0.0, abs(cy) - boxsize / 2) ** 2 +
                               max(0.0, abs(cz) - boxsize / 2) ** 2)
-                if nearest_sq <= chi_max_Mpch ** 2:
+                if nearest_sq <= chi_max_Mpch ** 2: # keep only tiles within χ_max
                     offsets.append((nx, ny, nz))
     return np.array(offsets, dtype=np.float32)  # shape (N_rep, 3)
 

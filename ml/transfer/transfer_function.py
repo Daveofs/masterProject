@@ -201,7 +201,7 @@ def build_features(ell: np.ndarray, z: float, cosmo: np.ndarray,
     n = ell.shape[0]
     cl = np.log10(np.clip(cl_low, 1e-30, None))
     X = np.empty((n, 2 + len(COSMO_KEYS) + 1), dtype=np.float64)
-    X[:, 0] = np.log10(ell.astype(np.float64) + 1.0)   # l
+    X[:, 0] = np.log10(ell.astype(np.float64) + 1.0)     # l
     X[:, 1] = z                                          # z
     X[:, 2:2 + len(COSMO_KEYS)] = cosmo                  # H0, O_cdm, Ob, Om, ns, s8
     X[:, -1] = cl                                        # Cl_low

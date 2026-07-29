@@ -218,6 +218,7 @@ def apply(args, run: Path, transfer_path, out_path=None):
             noise_map = hp.alm2map(alm_noise, nside=args.nside, lmax=lmax)
             delta_map = signal_map + noise_map
         else:
+            # RECOMMENDED STANDARD PATH: apply the transfer function as a RESIDUAL on top of the native
             tvec = (Ti - 1.0)[ell]                    # per-mode DELTA scale (N_alm,)
             alm_delta = (v[:N_alm] * tvec + 1j * v[N_alm:] * tvec)
             delta_map = hp.alm2map(alm_delta, nside=args.nside, lmax=lmax)
