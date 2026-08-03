@@ -41,6 +41,7 @@ from datetime import timedelta
 from pathlib import Path
 
 import numpy as np
+import healpy as hp
 import torch
 import matplotlib
 matplotlib.use("Agg")
@@ -63,6 +64,8 @@ from analysis.plotting import (plot_example_patch_grid, plot_pctile_band_ratio, 
 from analysis.moments import moments                      # noqa: E402
 from analysis.patch_tiling import auto_nside_centers, reconstruct_shell  # noqa: E402
 from analysis.full_sky import od_cl, zbin_shell_samples, shell_redshifts    # noqa: E402
+from analysis.example_patches import patch_plan, extract_patch      # noqa: E402
+from analysis.transforms import log1p_delta_pair                    # noqa: E402
 from analysis import weak_lensing                          # noqa: E402
 
 
@@ -111,6 +114,13 @@ def main():
     p.add_argument("--out-dir", required=True)
     p.add_argument("--val-frac", type=float, default=0.15)
     p.add_argument("--seed", type=int, default=0)
+    # Shells / size for the SHARED example-patch figure (analysis/example_patches.py).
+    # Defaults match transfer/apply_transfer.py so all three pipelines draw the same
+    # rows; changing them here alone would desynchronise the comparison.
+    p.add_argument("--patch-shells", type=int, nargs="*", default=[5, 10, 15, 30, 50],
+                   help="Shells for example_patches.png (shared across pipelines).")
+    p.add_argument("--patch-size", type=int, default=256,
+                   help="Gnomonic patch size in px for example_patches.png.")
     p.add_argument("--n-eval", type=int, default=512, help="held-out patches to evaluate")
     p.add_argument("--eval-batch", type=int, default=256,
                    help="mini-batch size for the ODE sampling pass (memory control). "
@@ -432,14 +442,9 @@ def main():
         rows = [(f"shell {example_shells[i]}", ex_low_f[i, 0].cpu().numpy(),
                 ex_corr_f[i, 0].cpu().numpy(), ex_high_f[i, 0].cpu().numpy())
                for i in range(ns)]
-        # crop=64: these patches are cut at nside=512, where 256 px spans 29.3 deg
-        # of sky and the display grid beats against the HEALPix lattice into streaky
-        # moire fringes (present in low/corrected/high alike -- see
-        # plot_example_patch_grid's `crop`). 64 px restores the same 7.33 deg field
         # of view the nside=2048 transfer figures use, making them comparable.
         plot_example_patch_grid(rows, out_dir / "example_patches.png",
                                 corrected_label="flow-corrected",
-                                crop=64,
                                 suptitle=f"held-out test patches ({space} overdensity) + "
                                          "per-patch power ratio")
 
@@ -534,6 +539,46 @@ def main():
             return reconstruct_shell(predict_batch, low_shell, nside_centers,
                                      args.fullsky_patch_size, args.eval_batch,
                                      taper_power=args.taper_power)
+
+
+        # --- example_patches.png, REDRAWN from the full sky so that all three
+        # pipelines show the SAME patches (analysis/example_patches.patch_plan).
+        # Overwrites the patch-dataset version written earlier in this script: that
+        # one indexed arbitrary tiles out of the training dataset, so its rows showed
+        # different cosmologies and different sky positions than transfer's figure and
+        # the three could not be compared row by row. Drawing from the reconstructed
+        # sphere at the plan's (cosmology, centre pixel, rotation) fixes that, and is
+        # also the more honest picture: it is the tiled+blended product a user of this
+        # pipeline actually gets, not a single isolated network input.
+        if rank == 0:
+            try:
+                ep_plan = patch_plan(args.seed, args.patch_shells, 1,
+                                     val_cosmos, nside)
+                reso_arcmin = hp.nside2resol(nside, arcmin=True)
+                ep_rows = []
+                for s, cname, cipix, psi in ep_plan:
+                    c_dir = Path(args.data_root) / cname / args.run
+                    lo_all = np.load(c_dir / f"low_shells_nside={nside}.npy", mmap_mode="r")
+                    hi_all = np.load(c_dir / f"high_shells_nside={nside}.npy", mmap_mode="r")
+                    lo_sh = np.asarray(lo_all[s], np.float32)
+                    print(f"[eval] example patch: reconstructing {cname} shell {s}...",
+                          flush=True)
+                    co_sh = reconstruct(lo_sh, cname, s)
+                    hi_sh = np.asarray(hi_all[s], np.float32)
+                    lo_p = extract_patch(lo_sh.astype(np.float64), nside, cipix, psi,
+                                         args.patch_size, reso_arcmin)
+                    co_p = extract_patch(np.asarray(co_sh, np.float64), nside, cipix, psi,
+                                         args.patch_size, reso_arcmin)
+                    hi_p = extract_patch(hi_sh.astype(np.float64), nside, cipix, psi,
+                                         args.patch_size, reso_arcmin)
+                    lo_l, hi_l = log1p_delta_pair(lo_p, hi_p)
+                    co_l, _ = log1p_delta_pair(co_p, hi_p)
+                    ep_rows.append((f"shell {s} ({cname})", lo_l, co_l, hi_l))
+                plot_example_patch_grid(ep_rows, out_dir / "example_patches.png",
+                                        corrected_label='flow-corrected')
+            except Exception as e:
+                print(f"[eval] full-sky example patches FAILED ({type(e).__name__}: {e}); "
+                      f"keeping the patch-dataset version", flush=True)
 
         # --- single-cosmology diagnostics: standalone cl_shell*.png + full-sky
         # moments/histograms (--cosmo, default: first held-out cosmology). Modest cost
@@ -856,10 +901,17 @@ def main():
                     with np.errstate(divide="ignore", invalid="ignore"):
                         k_lo_stack = np.array([lo / hi for lo, hi in zip(a["cl_low"], a["cl_high"])])
                         k_co_stack = np.array([co / hi for co, hi in zip(a["cl_corr"], a["cl_high"])])
+                    # Persist the kappa Cl stacks behind this figure. Without them a plot-only
+                    # change (y-range, fonts, labels) costs a full inference rerun -- exactly what
+                    # the missing cl_ratio_by_zbin_data.npz cost once already.
+                    np.savez(out_dir / f"kappa_cl_data_{tag}.npz", ells=kappa_ells,
+                             cl_low=np.asarray(a["cl_low"]), cl_corr=np.asarray(a["cl_corr"]),
+                             cl_high=np.asarray(a["cl_high"]),
+                             cosmo_labels=np.array([str(c) for c in kappa_cosmo_labels]))
                     plot_pctile_band_ratio(
                         kappa_ells[1:], {"low / high (baseline, no model)": k_lo_stack[:, 1:],
                                          "flow-corrected / high": k_co_stack[:, 1:]},
-                        out_dir / f"kappa_cl_pctile_band_{tag}.png", xlabel=r"$\ell$", ylim=(0.4, 1.6),
+                        out_dir / f"kappa_cl_pctile_band_{tag}.png", xlabel=r"$\ell$", ylim=None,
                         title=f"weak-lensing kappa Cl ratio to truth ({tag}) -- median + 16-84th "
                               f"pctile band ACROSS {len(kappa_cosmo_labels)} held-out cosmologies")
 

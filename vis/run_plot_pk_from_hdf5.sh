@@ -12,10 +12,10 @@ cd "$(dirname "$0")"
 PKDGRAV_FILE="/capstor/store/cscs/ska/sk037/grid_000001/CosmoML.00140.hdf5"
 PKDGRAV_KEY="PartType1/Coordinates"
 
-DISCO_BASE="/capstor/scratch/cscs/damrein/outputs/disco_custom/disco_sim/gpu_grid_3783890"
+DISCO_BASE="/capstor/scratch/cscs/damrein/outputs/disco_custom/disco_sim/gpu_grid_2992169"
 DISCO_KEY="PartType1/Coordinates"
 # Number of DISCO-DJ shards (depends on number of GPUS used in the run)
-DISCO_NSHARD=8 
+DISCO_NSHARD=4
 
 LBOX=900.0
 NGRID=832

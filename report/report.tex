@@ -410,8 +410,8 @@ The correction $f$ of Eq.~\eqref{eq:correction_goal} is only well-defined if the
 \begin{tikzpicture}[node distance=4mm and 6mm]
   \node[databox] (h5) {CosmoGrid run\\ \scriptsize \texttt{params.yml} + $\delta_{cdm+b}(k,a)$};
   \node[box, right=of h5] (tf) {extract $T_{cdm+b}(k)$ at $a{=}1$};
-  \node[box, below=of tf] (class) {\textsc{class} solve\\ $\sigma_8,\ \Omega_r$};
-  \node[keybox, right=of tf] (par) {patched \texttt{cosmology.par}\\ \scriptsize \texttt{achTfFile}, $\Omega_0$, $w_0$, $\sigma_8$, $\Omega_r$};
+  \node[box, below=of tf] (class) {\textsc{class} solve\\ $\sigma_{8,cb},\ \Omega_r$};
+  \node[keybox, right=of tf] (par) {patched \texttt{cosmology.par}\\ \scriptsize \texttt{achTfFile}, $\Omega_0$, $w_0$, $\sigma_{8,cb}$, $\Omega_r$};
   \node[box, right=of par] (pkdic) {\textsc{PkdGrav3}\\ IC generation\\ \scriptsize backscaled, $832^3$};
   \node[databox, right=of pkdic] (tipsy) {\texttt{CosmoML.tipsy}};
   \node[box, above right=4mm and 5mm of tipsy] (pkdrun) {\textsc{PkdGrav3} run\\ \scriptsize $\to$ high shells};
@@ -429,92 +429,151 @@ The correction $f$ of Eq.~\eqref{eq:correction_goal} is only well-defined if the
 \label{fig:ic_flow}
 \end{figure}
 
-\subsection{Why a Tabulated Transfer Function is Needed}
+\subsection{Reconstructing the Linear Input and Handing It Over}
+\label{subsec:ic_linear}
 \label{subsec:ic_why_tk}
+\label{subsec:ic_neutrinos}
+\label{subsec:ic_handoff}
 
 CosmoGridV1 does not distribute initial conditions, and the way its own runs were
-started cannot be reused here. Understanding why is what motivates the entire
-reconstruction of Sec.~\ref{subsec:ic_linear}.
+started cannot be reused here. Recovering a starting point that both solvers can share
+therefore takes three steps: establishing what has to be rebuilt, rebuilding it, and
+checking that the two codes really do start from the same thing.
 
-\paragraph{How CosmoGridV1 starts its runs.} The published configuration drives
-\textsc{PkdGrav3} in its \texttt{bClass=1} mode, in which the cosmology is not
-specified through parameters at all but read wholesale from an HDF5 file produced
-by \textsc{concept} \cite{dakin_concept_2022}, a cosmological simulation framework
-that calls \textsc{class} internally and tabulates the full linear perturbation
-history $\delta_i(k,a)$ of every species. In this mode \textsc{PkdGrav3} does more
-than draw an initial particle load: it carries selected species as \emph{linear}
-fields alongside the nonlinear particles for the whole run. The CosmoGridV1
-parameter file requests
-\begin{center}
-\texttt{achLinSpecies = "g+ncdm[0]+fld+metric"}, \qquad \texttt{nGridLin = 208},
-\end{center}
-that is, photons, the massive-neutrino species, the dark-energy fluid and the
-metric perturbations are evolved on their own $208^3$ linear grid and their
-gravitational effect is added to the $832^3$ nonlinear particles at every step.
-The linear cosmology is thus an active ingredient throughout the simulation, not
-merely a boundary condition at the start.
+\paragraph{Why a tabulated transfer function is needed at all.} The published
+configuration drives \textsc{PkdGrav3} in its \texttt{bClass=1} mode, in which the
+cosmology is not specified through parameters but read wholesale from an HDF5 file
+produced by \textsc{concept} \cite{dakin_concept_2022}, which calls \textsc{class}
+internally and tabulates the full linear perturbation history of every species. In that
+mode \textsc{PkdGrav3} does more than draw a particle load: it carries photons, the
+massive-neutrino species, the dark-energy fluid and the metric perturbations as
+\emph{linear} fields on their own $208^3$ grid
+(\texttt{achLinSpecies = "g+ncdm[0]+fld+metric"}, \texttt{nGridLin = 208}) and adds
+their gravitational effect to the $832^3$ nonlinear particles at every step. The linear
+cosmology is an active ingredient throughout the run, not a boundary condition at the
+start.
 
-\paragraph{Why that mode cannot be used here.} The obstacle is structural rather
-than technical. Disco-DJ is a pure particle-mesh code (Sec.~\ref{sec:discodj}): it
-evolves particles under the Poisson equation and has no counterpart to
-\textsc{PkdGrav3}'s linear-species machinery. Were \textsc{PkdGrav3} run with
-\texttt{achLinSpecies} active while Disco-DJ was not, the two lightcones would
-differ through the treatment of photons, neutrinos and dark energy \emph{in
-addition} to the force solver -- and the correction $f$ of
-Eq.~\eqref{eq:correction_goal} would be learning that difference too, defeating
-the controlled comparison the whole thesis rests on. The requirement that the two
-runs differ \emph{only} through gravity therefore forces both to be started from
-one plain particle load, with no linear species carried afterwards.
+Disco-DJ has no counterpart to that machinery: it is a pure particle-mesh code
+(Sec.~\ref{sec:discodj}) and evolves particles under the Poisson equation alone. Were
+\textsc{PkdGrav3} run with its linear species active while Disco-DJ was not, the two
+lightcones would differ through the treatment of photons, neutrinos and dark energy
+\emph{in addition} to the force solver, and the correction of
+Eq.~\eqref{eq:correction_goal} would be learning that difference too -- defeating the
+controlled comparison the whole thesis rests on. Both runs must therefore start from
+one plain particle load with no linear species carried afterwards, which forces
+\textsc{PkdGrav3} into \texttt{bClass=0} and replaces the HDF5 reference by
+\texttt{achTfFile}, a static tabulated transfer function. CosmoGridV1 ships no such
+table, so it has to be reconstructed. The file itself is minimal: \textsc{PkdGrav3}
+parses two whitespace-separated columns per line, $k$ and $-T(k)/k^2$, and takes the
+logarithm of both (\texttt{master.c}), so the tabulated values must be strictly
+positive. This is neither \textsc{class}'s nor \textsc{camb}'s multi-column transfer
+output -- the $-T/k^2$ normalisation follows \textsc{camb}'s convention, while the
+two-column layout is \textsc{PkdGrav3}'s own.
 
-\paragraph{What this forces.} \texttt{IC\_preparation.py} accordingly switches
-\textsc{PkdGrav3} to \texttt{bClass=0}, removes the linear-species keys, and
-replaces the HDF5 reference by \texttt{achTfFile}, a \emph{static} tabulated
-transfer function. In this mode \textsc{PkdGrav3} draws a backscaled particle load
-from that single table (Sec.~\ref{subsec:ic_handoff}) and writes it to a
-\texttt{tipsy} file, which both solvers then consume identically. But CosmoGridV1
-ships no such table -- it ships \textsc{concept}'s perturbation HDF5. The table
-must therefore be reconstructed from it, which is precisely what
-Sec.~\ref{subsec:ic_linear} does. The file itself is minimal: \textsc{PkdGrav3}
-parses two whitespace-separated columns per line, $k$ and $-T(k)/k^2$, and takes
-the logarithm of both (\texttt{master.c}), so the tabulated values must be
-strictly positive. This is neither \textsc{class}'s nor \textsc{camb}'s
-multi-column transfer output -- the $-T/k^2$ normalisation follows \textsc{camb}'s
-convention, while the two-column layout is \textsc{PkdGrav3}'s own.
-
-\paragraph{The consequence.} Because the linear input is compressed into one
-static table at a single epoch and then backscaled with a scale-independent growth
-factor, the initial conditions reconstructed here are \emph{not} identical to
-CosmoGridV1's native ones: \textsc{concept}'s forward evolution treats radiation
-and massive neutrinos as separate, scale-dependent species, which a single growth
-factor cannot reproduce at every redshift simultaneously. The two agree by
-construction where the table is anchored, at $z=0$, and drift slowly away from it
-towards higher redshift. This is not a hidden approximation -- it is measurable,
-and Sec.~\ref{sec:shell_validation} quantifies it as a sub-percent, monotonically
-redshift-dependent offset in the large-scale amplitude of the resulting lightcone.
-
-\subsection{Matching the CosmoGridV1 Linear Input}
-\label{subsec:ic_linear}
-
-Each CosmoGridV1 run ships the linear perturbations its own initial conditions were built from, as tabulated CDM+baryon density contrasts $\delta_{cb}(k, a)$. From the $a=1$ slice, the dimensional matter power spectrum is reconstructed as
+\paragraph{Rebuilding it.} Each CosmoGridV1 run ships the linear perturbations its own
+initial conditions were built from, as tabulated CDM+baryon density contrasts
+$\delta_{cb}(k, a)$. From the $a=1$ slice the dimensional power spectrum is
+reconstructed as
 \begin{equation}
   P_{cb}(k) \;=\; \frac{2\pi^2}{k^3}\, P_{\mathrm{prim}}(k)\, \delta_{cb}^2(k)\, h^3,
   \qquad P_{\mathrm{prim}}(k) = A_s \left(\frac{k}{k_{\mathrm{pivot}}}\right)^{n_s - 1},
   \label{eq:pk_reconstruct}
 \end{equation}
-with $k_{\mathrm{pivot}} = 0.05\,\mathrm{Mpc}^{-1}$ and $(A_s, n_s, h)$ read from the run's parameter file (\texttt{get\_transfer\_function.py}). The corresponding transfer function is exported in the \textsc{class} table \jozef{CAMB} convention $-\delta_m/k^2$ that \textsc{PkdGrav3}'s IC generator reads directly (\texttt{achTfFile}), so the particle load is drawn from \emph{exactly} the linear spectrum CosmoGridV1 used -- massive neutrinos included, as required by Sec.~\ref{sec:power_spectrum}.
-
-Two derived quantities complete the parameter file. The clustering amplitude is obtained from the reconstructed spectrum through the standard top-hat integral \jozef{I would denote this as $\sigma_{8,cb}$ or similar, to make the distinction between the full-field $\sigma_8$ and the one derived only from baryons and DM}
+with $k_{\mathrm{pivot}} = 0.05\,\mathrm{Mpc}^{-1}$ and $(A_s, n_s, h)$ read from the
+run's parameter file (\texttt{get\_transfer\_function.py}), and exported in the
+\textsc{class} table \jozef{CAMB} convention that \textsc{PkdGrav3} reads directly. Two
+derived quantities complete the configuration file. The clustering amplitude follows
+from the same spectrum through the standard top-hat integral \jozef{I would denote this as $\sigma_{8,cb}$ or similar, to make the distinction between the full-field $\sigma_8$ and the one derived only from baryons and DM}
 \begin{equation}
-  \sigma_8^2 \;=\; \int \frac{k^2\,P_{cb}(k)}{2\pi^2}\, W^2(kR)\;\mathrm{d}k,
+  \sigma_{8,cb}^2 \;=\; \int \frac{k^2\,P_{cb}(k)}{2\pi^2}\, W^2(kR)\;\mathrm{d}k,
   \qquad W(x) = \frac{3\,(\sin x - x\cos x)}{x^{3}},\quad R = 8\,\mathrm{Mpc}/h,
   \label{eq:sigma8}
 \end{equation}
-and the radiation density $\Omega_r$ is computed by a \textsc{class} solver of the same cosmology with three degenerate massive neutrino states of $m_\nu = 0.02$~eV each, matching the fixed total neutrino mass of the CosmoGridV1 grid (Sec.~\ref{sec:cosmogrid}). \texttt{IC\_preparation.py} patches these values -- together with $\Omega_0 = \Omega_{cdm} + \Omega_\nu + \Omega_b$ and $w_0$ -- into each run's \texttt{cosmology.par}, idempotently, so a re-run only changes what is still inconsistent. \jozef{here, the whole CONCEPT vs. PKDGRAV discussion is missing - i.e. why we need to use the cb T(k) in the first place, instead of the full field. Massive vs. massless neutrinos and the whole investigation we made. You can make a plot showing the difference between the 'old treatment' producing the 3\% wrong large scale P(k) - I would show the 3D power spectrum - vs. the fixed one. Spend more time on explaining why and how the $\Omega_{\rm rad}$ changes,... }
+and the radiation density $\Omega_r$ from a \textsc{class} solve of the same cosmology,
+with the neutrino sector declared as \textsc{concept} declares it: one species of three
+degenerate states at the grid's fixed mass, at the temperature that reproduces
+$N_{\rm eff} = 3.046$, with the cold dark matter density reduced accordingly so that
+$\Omega_m$ is preserved. \texttt{IC\_preparation.py} writes these values -- together
+with $\Omega_0$ and $w_0$ -- into each run's \texttt{cosmology.par}, idempotently, so a
+re-run only changes what is still inconsistent. \jozef{here, the whole CONCEPT vs. PKDGRAV discussion is missing - i.e. why we need to use the cb T(k) in the first place, instead of the full field. Massive vs. massless neutrinos and the whole investigation we made. You can make a plot showing the difference between the 'old treatment' producing the 3\% wrong large scale P(k) - I would show the 3D power spectrum - vs. the fixed one. Spend more time on explaining why and how the $\Omega_{\rm rad}$ changes,... }
 
-\subsection{Backscaled Initial Conditions and Hand-Off}
-\label{subsec:ic_handoff}
+\paragraph{Getting the two codes to agree.} None of this was got right first time, and
+the route to it is the most useful part of the story. Figure~\ref{fig:ic_error_budget}
+is that history: four simulations of the same cosmology, each divided by the
+\textsc{PkdGrav3} run started from the same initial conditions. Every curve is a run
+that was actually performed, and each stage fixes one ingredient.
 
-From this patched configuration \jozef{Please, avoid unclear formulations - patched configuration - not clear what that means - whether the configuration above, or whether this is some technical term introduced before or so}, \textsc{PkdGrav3} generates \emph{backscaled} initial conditions: the $a=1$ linear spectrum of Eq.~\eqref{eq:pk_reconstruct} is scaled back to the starting redshift with the linear growth factor, and particles are displaced accordingly at the CosmoGridV1 resolution of $832^3$ particles in the $900\,\mathrm{Mpc}/h$ box. The resulting particle positions and velocities are exported in the \texttt{tipsy} format (\texttt{CosmoML.tipsy}) and used, \emph{unmodified}, as the initial state of the corresponding Disco-DJ run: Disco-DJ evolves this state forward to $a=1$ and accumulates the lightcone with the shell builder of Sec.~\ref{sec:shell_builder} over the same redshift range ($z_{\max}=3.5$ down to $z=0$) at the same HEALPix resolution $N_{\mathrm{side}}=2048$. Both solvers thus share one particle realisation down to the byte level, and Eq.~\eqref{eq:correction_goal} isolates the solver difference by construction. \jozef{here, the correct statement, as I mentioned above, is slightly different, they have the same IC phases, but slightly renormalized such that they produce the same large-scale power spectrum despite the differences in neutrino treatment.}
+Two features of the figure matter before the stages themselves. The offsets are
+essentially \emph{flat} across the largest scales the box represents: a wrong
+ingredient displaces the whole ratio bodily rather than bending it, which is the
+fingerprint of a mis-set growth normalisation rather than of physics at any particular
+scale -- and it is why these were so easily mistaken for a genuine difference between
+the two force solvers. And the improvement is not monotonic in the obvious way, because
+several of the errors partly cancelled one another.
+
+Stage~(1) is Disco-DJ with no radiation density in its background at all: early
+versions offered no input for it, even though \textsc{PkdGrav3} was being handed its
+own. Radiation is negligible today but not at the starting redshift, where it
+contributes at the percent level to the expansion rate and hence to the growth factor
+that carries the initial conditions forward -- and the run sits $5.7\%$ high. Supplying
+it, stage~(2), removes most of that but leaves $3.1\%$. Stage~(3) is the decisive one:
+Disco-DJ is no longer started from \textsc{concept}'s linear input at all, but from the
+particle load \textsc{PkdGrav3} itself produces by backscaling. Backscaling carries a
+$z=0$ spectrum to the starting redshift with one growth factor that is the same at
+every scale, and with massive neutrinos the growth of the CDM+baryon field is not
+scale-independent -- the neutrinos are exactly what the procedure cannot transport, so
+handing both codes the same \emph{theory} is not the same as handing them the same
+\emph{initial conditions}. That brings the offset to $-0.8\%$. Stage~(4) closes the
+last of it: the table, and the $\sigma_8$ it is normalised to, must describe the
+CDM+baryon field rather than the total matter field, because in both codes the
+particles carry cold dark matter and baryons only and neutrinos never become particles.
+A table built from the total matter field imprints the neutrinos' free-streaming
+suppression on a field containing no neutrinos, and \textsc{PkdGrav3} normalises the
+load to a $\sigma_8$ in the same file that must refer to the same field.
+\texttt{get\_transfer\_function.py} writes out both variants, so the pairing is a real
+choice; making it consistently leaves $-0.2\%$.
+
+\begin{figure}[h!]
+    \centering
+    \includegraphics[width=\textwidth]{plots/ic/ic_error_budget.png}
+    \caption{Getting Disco-DJ onto \textsc{PkdGrav3}, one fix at a time
+    (\texttt{vis/plot\_ic\_error\_budget.py}). Each curve is a $z=0$ matter power
+    spectrum divided by the \textsc{PkdGrav3} run started from the same initial
+    conditions; percentages are medians over $k \in [0.01, 0.02]\,h/$Mpc, the largest
+    scales the $900\,\mathrm{Mpc}/h$ box represents. All four are simulations performed
+    during setup validation, so this is the actual debugging history rather than an
+    illustration of it. Each ratio uses its own matched reference -- the quantity
+    compared is always ``Disco-DJ against the reference started from the same ICs'' --
+    so the references are not interchangeable between stages. The steep common decline
+    beyond $k \approx 0.2\,h/$Mpc is Disco-DJ's particle-mesh force resolution in these
+    deliberately cheap validation runs, not an initial-condition effect; the deficit the
+    correction pipelines actually face is measured on the production lightcones in
+    Sec.~\ref{sec:shell_validation}.}
+    \label{fig:ic_error_budget}
+\end{figure}
+
+\paragraph{The hand-off.} With the configuration settled \jozef{Please, avoid unclear formulations - patched configuration - not clear what that means - whether the configuration above, or whether this is some technical term introduced before or so}, \textsc{PkdGrav3} generates the
+backscaled initial conditions: the $a=1$ spectrum of Eq.~\eqref{eq:pk_reconstruct} is
+scaled back to the starting redshift with the linear growth factor, and particles are
+displaced accordingly at CosmoGridV1's resolution of $832^3$ particles in the
+$900\,\mathrm{Mpc}/h$ box. The resulting positions and velocities are exported in the
+\texttt{tipsy} format (\texttt{CosmoML.tipsy}) and used \emph{unmodified} as the initial
+state of the corresponding Disco-DJ run, which evolves them to $a=1$ and accumulates
+the lightcone with the shell builder of Sec.~\ref{sec:shell_builder} over the same
+redshift range and at the same HEALPix resolution. Both solvers thus share one particle
+realisation down to the byte level, and Eq.~\eqref{eq:correction_goal} isolates the
+solver difference by construction. \jozef{here, the correct statement, as I mentioned above, is slightly different, they have the same IC phases, but slightly renormalized such that they produce the same large-scale power spectrum despite the differences in neutrino treatment.}
+
+This load is deliberately \emph{not} a reproduction of CosmoGridV1's own native initial
+conditions, which came from \textsc{concept}'s forward evolution rather than from
+backscaling a static table. The two share phases and are normalised to agree on the
+large-scale power spectrum, but a single scale-independent growth factor cannot
+reproduce a scale-dependent forward evolution at every redshift at once: the
+construction is anchored where the table is taken, at $z=0$, and drifts slowly away
+from it towards higher redshift. That drift is not a hidden approximation -- it is
+measurable, and Sec.~\ref{sec:shell_validation} quantifies it shell by shell as a
+sub-percent, monotonically redshift-dependent offset in the large-scale amplitude of
+the resulting lightcone.
 
 \subsection{Validation against CosmoGridV1}
 \label{sec:shell_validation}
@@ -540,10 +599,15 @@ a missing periodic replica (Eq.~\ref{eq:replica_set}), a wrong shell assignment
 (Eq.~\ref{eq:shell_filter}), or a HEALPix ordering mismatch -- would misplace or
 double-count particles on the sphere and corrupt the spectrum at every
 multipole, most conspicuously at the largest scales. No such corruption is
-present: on all four shells the ratio sits on unity to better than half a percent
-for $\ell \lesssim 100$. The streaming accumulation of
-Sec.~\ref{sec:shell_builder_core} therefore reproduces \textsc{PkdGrav3}'s
-lightcone geometry to the precision this test can resolve.  \jozef{the end of the last sentence is kind of redundant. Either change or skip, now it does not tell us much.}
+present: for $\ell \lesssim 100$ all four shells scatter about unity with no
+systematic offset. The scatter is not uniform across that range, and its structure
+is itself the expected one -- it grows towards low $\ell$, reaching a few percent
+below $\ell \approx 20$ on the two most distant shells, where only a handful of
+independent modes contribute to each multipole and the ratio of two finite
+realisations is correspondingly noisy. The nearer shells, which carry many more
+modes per multipole, stay within a few tenths of a percent over the same range. A
+geometric defect would show up as a coherent offset rather than as noise that
+shrinks with mode count, and none is present.  \jozef{the end of the last sentence is kind of redundant. Either change or skip, now it does not tell us much.}
 
 \begin{figure}[h!]
     \centering
@@ -564,9 +628,12 @@ lightcone geometry to the precision this test can resolve.  \jozef{the end of th
     \includegraphics[width=0.7\textwidth]{plots/cl_ratio/cl_ratio.png}
     \caption{The same four shells as Figure~\ref{fig:cl_comparison}, shown as the
     ratio of Eq.~\eqref{eq:shell_validation_ratio}, which resolves differences
-    invisible on a six-decade logarithmic axis. All four shells agree with the
-    reference to better than half a percent  \jozef{are we sure? for some ells maybe but there are for sure some with larger difference. Just to phrase correctly - either 0.5\% at most ls or similar} at $\ell \lesssim 100$ -- the result
-    that validates the shell builder -- while the small-scale deficit sets in at a
+    invisible on a six-decade logarithmic axis. At $\ell \lesssim 100$ all four shells
+    scatter about unity with no systematic offset -- within a few tenths of a
+    percent on the nearer shells, degrading to a few percent below $\ell \approx 20$
+    on the most distant ones, where few independent modes contribute per multipole.
+    That this residual is noise shrinking with mode count, rather than a coherent
+    offset, is the result that validates the shell builder \jozef{are we sure? for some ells maybe but there are for sure some with larger difference. Just to phrase correctly - either 0.5\% at most ls or similar} -- while the small-scale deficit sets in at a
     fixed comoving scale and therefore at a higher multipole for each more distant
     shell. The upturn at the highest multipoles on shells~5 and~60 is the common
     shot-noise floor of the two runs, not recovered structure.}
@@ -969,9 +1036,10 @@ which by construction matches the target power spectrum while preserving the (co
     correlation $r(\ell, s)$ (right), for six shells spanning the lightcone of the
     held-out cosmology \texttt{cosmo\_000176}, coloured by shell redshift
     (\texttt{vis/plot\_transfer\_function.py}, run
-    \texttt{2884508\_final}). $T$ is shown as the emulator predicts it, before the
+    \texttt{2986895}, the same $\ell_{\max}=1500$ emulator that produces the results
+    of Sec.~\ref{sec:res-transfer}). $T$ is shown as the emulator predicts it, before the
     per-shell raised-cosine ramp of Eq.~\eqref{eq:ell_min} is applied at correction
-    time. Thin grey lines are the same two quantities predicted for the other nine
+    time. Thin grey lines are the same two quantities predicted for the other 29
     held-out cosmologies at the same six shells: on the left they fan out visibly,
     showing that $T$ is genuinely cosmology-dependent and largest where the
     correction itself is largest; on the right they are invisible, coincident with
@@ -994,20 +1062,24 @@ Eq.~\eqref{eq:ell_min} is imposed only later at apply time -- and rises only onc
 the multipole reaches the scale where the particle-mesh solver has begun to lose
 power. Where that happens tracks the shell's comoving distance, in the same way
 the validation of Sec.~\ref{sec:shell_validation} showed the deficit itself
-tracking it: the nearest shell shown ($z \approx 0.09$) needs a boost of almost a
-factor two in $C_\ell$ by $\ell \sim 2000$, the intermediate shells progressively
-less and later, and the most distant shell ($z \approx 2.2$) stays within a
-percent of unity across the entire measured range. The correction the emulator
+tracking it: the nearest shell shown ($z \approx 0.09$) needs a gain of $T = 1.12$
+at $\ell = 500$, $1.46$ at $\ell = 1000$ and $1.75$ at $\ell = 1500$ -- close to a
+factor $3$ in $C_\ell$, since the correction enters as $T^2$ -- the intermediate
+shells progressively less and later ($T = 1.15$, $1.05$ and $1.02$ at $\ell = 1500$
+for $z \approx 0.26$, $0.49$ and $0.77$), and the most distant shell
+($z \approx 2.2$) stays within half a percent of unity across the entire measured
+range. The correction the emulator
 applies to a shell is thus set almost entirely by how far away that shell is.
 
 The phase correlation $r(\ell, s)$ in the right-hand panel is what licenses this
 whole approach, and it also marks its limit. On the shells that carry most of the
-signal it stays at unity far into the nonlinear regime -- $r \approx 1.00$ out to
-$\ell = 3000$ on the shell at $z \approx 0.95$ -- meaning Disco-DJ has placed the
+signal it stays at unity far into the nonlinear regime -- $r = 0.996$ at
+$\ell = 1500$ on the shell at $z \approx 0.77$, and $0.999$ at $z \approx 2.2$ --
+meaning Disco-DJ has placed the
 structure correctly and only mis-weighted it, which is precisely the regime in
 which rescaling mode amplitudes and keeping their phases is the right operation.
-On the nearest, sparsest shells it decays instead ($r = 0.82$ at $\ell = 1000$,
-$0.37$ at $\ell = 2000$, $0.13$ at $\ell = 3000$ for $z \approx 0.09$), and there
+On the nearest, sparsest shells it decays instead ($r = 0.79$ at $\ell = 1000$ and
+$0.51$ at $\ell = 1500$ for $z \approx 0.09$), and there
 the two maps no longer describe the same structures at all: multiplying by
 $T$ still restores the correct power, but the small-scale pattern it
 produces is amplified Disco-DJ noise rather than recovered structure. That is the
@@ -1378,7 +1450,7 @@ The choice is not free, and it costs the transfer function rather than the learn
 \section{Transfer-Function Pipeline}
 \label{sec:res-transfer}
 
-\paragraph{Configuration and training.} The emulator was trained on the 168 training cosmologies with $\ell_{\max}=3000$, spectra smoothed with a 21-point boxcar (Sec.~\ref{subsec:pipe-transfer}), and the per-shell correction onset fixed at $5\,\mathrm{Mpc}/h$ with a raised-cosine transition of width $0.10\,\ell_{\max}$; the MLP ($256$--$256$--$128$, Adam, learning rate $10^{-4}$, batch $4096$, $L_2$ decay $10^{-4}$) is summarised in Table~\ref{tab:training}. Figure~\ref{fig:transfer_loss} shows its loss: training and validation losses coincide throughout -- with only nine features and millions of rows, the emulator cannot memorise -- and converge within the first $\sim 10^4$ gradient steps to a best validation loss of $\tfrac12\mathrm{MSE} = 9.9\times10^{-5}$, corresponding to an RMS error on the predicted transfer function of $\sqrt{2 \times 9.9\times10^{-5}} \approx 1.4\%$ per $(\ell, s)$ sample.
+\paragraph{Configuration and training.} The emulator was trained on the 168 training cosmologies with $\ell_{\max}=1500$ -- the band limit of the common $N_{\mathrm{side}}=512$ footing (Sec.~\ref{sec:res-protocol}) -- spectra smoothed with a 21-point boxcar (Sec.~\ref{subsec:pipe-transfer}), and the per-shell correction onset fixed at $5\,\mathrm{Mpc}/h$ with a raised-cosine transition of width $0.10\,\ell_{\max}$; the MLP ($256$--$256$--$128$, Adam, learning rate $10^{-4}$, batch $4096$, $L_2$ decay $10^{-4}$) is summarised in Table~\ref{tab:training}. Figure~\ref{fig:transfer_loss} shows its loss: training and validation track each other throughout, separated by a constant $\approx 9\%$ that never widens -- with only nine features and millions of rows there is far too little capacity per sample to memorise -- and they converge within the first $\sim 10^4$ gradient steps to a best validation loss of $\tfrac12\mathrm{MSE} = 1.26\times10^{-4}$, corresponding to an RMS error on the predicted transfer function of $\sqrt{2 \times 1.26\times10^{-4}} \approx 1.6\%$ per $(\ell, s)$ sample.
 
 \begin{table}[h!]
 \centering
@@ -1387,9 +1459,9 @@ The choice is not free, and it costs the transfer function rather than the learn
 \toprule
  & \textcolor{ctrans}{\textbf{transfer}} & \textcolor{cunet}{\textbf{unet-flow}} & \textcolor{cdiff}{\textbf{diffusion}} \\
 \midrule
-Training data & smoothed $C_\ell$ of 168 cosmologies, $\ell \le 3000$ & \multicolumn{2}{p{7.6cm}}{$10^5$ paired $256^2$ patches at $N_{\mathrm{side}}=512$, drawn from the same 168 training cosmologies (15\% of cosmologies held out)} \\
+Training data & smoothed $C_\ell$ of 168 cosmologies, $\ell \le 1500$ & \multicolumn{2}{p{7.6cm}}{$10^5$ paired $256^2$ patches at $N_{\mathrm{side}}=512$, drawn from the same 168 training cosmologies (15\% of cosmologies held out)} \\
 Model size & MLP $256$--$256$--$128$ & \multicolumn{2}{p{7.6cm}}{4-level FiLM U-Net, base width 32 (Fig.~\ref{fig:film_unet})} \\
-Epochs & $\le 200$, early stop (patience 10) & 200 (best epoch 109) & 200 (best epoch 165) \\
+Epochs & $\le 200$, early stop (patience 10) & 200 (best epoch 95) & 200 (best epoch 165) \\
 Optimiser / LR & Adam, $10^{-4}$, batch 4096 & Adam, $3\times10^{-5}$ $\times$ 16 ranks $= 4.8\times10^{-4}$, cosine-annealed, batch 32/rank & Adam, $3\times10^{-5}$ (unscaled), cosine-annealed, batch 32/rank \\
 Hardware & 1 GH200 & \multicolumn{2}{p{7.6cm}}{16-rank DDP: 4 Alps nodes $\times$ 4 GH200 (\texttt{torchrun}, Appendix~\ref{app:slurm})} \\
 Key settings & smooth window 21; $\ell_{\min}$: $5$ Mpc$/h$; transition $0.1\,\ell_{\max}$; $L_2$ $\alpha=10^{-4}$ & HP cutoff/transition $0.05/0.20$ of Nyquist; grad clip 1; Eq.~\eqref{eq:flow_loss} & HP $0.05/0.20$; $\sigma_d = 1.006$ (measured); $\ln\sigma \sim \mathcal{N}(-1.2, 1.2^2)$; Eq.~\eqref{eq:edm_loss} \\
@@ -1402,17 +1474,19 @@ Inference & closed form & 8 Euler steps & 32 Heun steps; shared noise; taper $p=
 
 \begin{figure}[h!]
     \centering
-    \includegraphics[width=0.78\linewidth]{plots/results/transfer/emulator_loss.png}
-    \caption{Training and validation loss of the transfer-function emulator (squared error on $T$, without the $L_2$ term; 15-step rolling mean). Both curves coincide and plateau within the first $\sim 10^4$ steps; the best validation loss corresponds to an RMS emulation error of $\approx 1.4\%$ on $T(\ell, s)$.\jozef{I would remove title and use 'MSE loss' on the y-axis.}}
+    \includegraphics[width=0.78\linewidth]{plots/results/transfer/emulator.loss.png}
+    \caption{Training and validation loss of the transfer-function emulator (squared error on $T$, without the $L_2$ term; 15-step rolling mean). Both curves plateau within the first $\sim 2.5\times10^4$ steps and stay separated by only $\approx 9\%$ ($1.16\times10^{-4}$ train against $1.26\times10^{-4}$ validation), a gap far too small to indicate memorisation; the best validation loss corresponds to an RMS emulation error of $\approx 1.6\%$ on $T(\ell, s)$.\jozef{I would remove title and use 'MSE loss' on the y-axis.}}
     \label{fig:transfer_loss}
 \end{figure}
 
-\paragraph{Full-sky $C_\ell$.} Figure~\ref{fig:transfer_cl} is the pipeline's core result. Before correction, the low maps lose up to half the power in the nearest redshift bin ($C_\ell/C_\ell^{\mathrm{true}} \approx 0.5$ at $\ell \sim 3000$) and several percent in the middle bin. After correction, the median ratio stays within $\approx 2\%$ of unity at every multipole out to $\ell = 3000$ in all three bins, with a mild residual dip near the correction onset of the nearest shells. The most distant bin shows the physically expected behaviour built into Eq.~\eqref{eq:ell_min}: the fixed $5\,\mathrm{Mpc}/h$ scale is unresolvable there within $\ell_{\max}$, the deficit is absent, and the pipeline correctly applies (almost) no correction -- the ratio stays within $\sim 1\%$, drifting to $\approx +1.5\%$ only in the last, noise-dominated multipole bins.
+\paragraph{Full-sky $C_\ell$.} Figure~\ref{fig:transfer_cl} is the pipeline's core result, and at the common $N_{\mathrm{side}}=512$ footing it is a result about the \emph{nearest} redshift bin only. There, Disco-DJ's deficit is large and the correction is active: the median ratio to truth rises from $0.975 \to 0.981$ over $\ell \in [300, 700]$, from $0.904 \to 0.971$ over $[700, 1100]$, and from $0.798 \to 0.989$ over $[1100, 1500]$. The correction is thus worth $\approx 19$ percentage points exactly where the fast solver is worst, and the residual is around one percent.
+
+In the two more distant bins the corrected curve lies \emph{exactly} on the uncorrected one -- in Figure~\ref{fig:transfer_cl} the grey line is hidden beneath the blue -- because $\ell_{\min}(s)$ there exceeds $\ell_{\max}=1500$ and the transfer function is switched off by construction (Sec.~\ref{sec:res-protocol}). This is not a failure to correct but a refusal to: the middle bin's uncorrected deficit is only $2.3\%$ at $\ell \in [1100,1500]$ and $\lesssim 0.5\%$ below that, and the far bin sits at $1.000 \pm 0.003$ throughout. Nothing there needs repairing at this resolution, and the pipeline correctly leaves it alone -- the behaviour Eq.~\eqref{eq:ell_min} was designed to produce. The corresponding native-resolution result, where the correction remains active across the full lightcone out to $\ell = 3000$, is the one this common footing deliberately gives up.
 
 \begin{figure}[h!]
     \centering
     \includegraphics[width=\textwidth]{plots/results/transfer/cl_ratio_by_zbin_grid.png}
-    \caption{Full-sky shell $C_\ell$ ratio to truth for the transfer pipeline, pooled per redshift bin (10 cosmologies $\times$ 5 shells; median and 16--84\% band, Sec.~\ref{sec:res-protocol}). Gray: uncorrected Disco-DJ; blue: corrected. The correction holds the ratio within a few percent out to $\ell = 3000$ wherever a deficit exists, and correctly leaves the already-accurate distant bin (right) untouched. \jozef{increase label size, remove title, add text into each panel showing the redshift range of the shells, thus each panel having $z\in(x,y)$ or similar. All the details on which shells and how many cosmologies will go into main text.}}
+    \caption{Full-sky shell $C_\ell$ ratio to truth for the transfer pipeline, pooled per redshift bin (30 cosmologies $\times$ 5 shells; median and 16--84\% band, Sec.~\ref{sec:res-protocol}). Gray: uncorrected Disco-DJ; blue: corrected. Note the differing $y$-scales: the nearest bin (left) spans a $20\%$ deficit, the others $\lesssim 3\%$ and $\lesssim 1\%$. The correction acts only in the nearest bin, lifting the ratio from $0.80$ to $0.99$ at $\ell \sim 1500$; in the middle and right panels the grey curve is invisible because it lies exactly beneath the blue one -- $\ell_{\min}(s) > \ell_{\max}$ there, so the transfer function is inactive by construction and the already-accurate distant shells are left untouched. \jozef{increase label size, remove title, add text into each panel showing the redshift range of the shells, thus each panel having $z\in(x,y)$ or similar. All the details on which shells and how many cosmologies will go into main text.}}
     \label{fig:transfer_cl}
 \end{figure}
 
@@ -1430,17 +1504,17 @@ Inference & closed form & 8 Euler steps & 32 Heun steps; shared noise; taper $p=
 \begin{figure}[h!]
     \centering
     \includegraphics[width=\textwidth]{plots/results/transfer/moments_vs_shell.png}
-    \caption{Full-sky one-point moments versus shell depth for the transfer pipeline (median and 16--84\% band across the 10 evaluation cosmologies). The corrected variance (left) matches the truth, but skewness (middle) and excess kurtosis (right) stay at the uncorrected level -- a power-spectrum correction leaves the higher moments untouched. \jozef{increase axis- and tick-labels, and plot y-axis in log, which will show in greater detail the properties,  especially the variance. One could also add bottom panels, showing the ratio plots.}}
+    \caption{Full-sky one-point moments versus shell depth for the transfer pipeline (median and 16--84\% band across the 30 evaluation cosmologies). The bottom row gives the ratio to truth. The correction recovers most of the variance deficit (from $0.70$ to $0.92$ on the shallowest shell, reaching unity by shell~30) but only nudges skewness ($0.69 \to 0.73$) and excess kurtosis ($0.50 \to 0.57$) there: rescaling mode amplitudes cannot create the phase correlations the higher moments measure, so most of that gap survives. \jozef{increase axis- and tick-labels, and plot y-axis in log, which will show in greater detail the properties,  especially the variance. One could also add bottom panels, showing the ratio plots.}}
     \label{fig:transfer_moments}
 \end{figure}
 
-\paragraph{Weak lensing.} At the convergence-map level (Figure~\ref{fig:transfer_kappa}), the uncorrected lightcones underestimate the $\kappa$ power by up to $\approx 47\%$ (bin 1) and $\approx 26\%$ (bin 4) at $\ell \approx 2000$. The corrected maps stay within $\approx 5\%$ of the truth at all multipoles in both bins -- a shallow $\approx 0.95$ dip around $\ell \approx 300$--$500$ in bin 1, recovering to unity by $\ell \approx 1000$, and a flat $\approx 0.97$ plateau in bin 4 -- with percentile bands of only a few percent width across cosmologies. The $\kappa$ moments (Figure~\ref{fig:transfer_kappa_moments}) repeat the shell-level pattern: variance is recovered, while skewness and kurtosis are lifted only part of the way to the truth.
+\paragraph{Weak lensing.} At the convergence-map level (Figure~\ref{fig:transfer_kappa}), the uncorrected lightcones underestimate the $\kappa$ power by up to $\approx 44\%$ (bin 1) and $\approx 21\%$ (bin 4) near $\ell \approx 1800$. Up to $\ell = 1500$ the corrected maps stay within $\approx 5\%$ of the truth in both bins -- a shallow $\approx 0.95$ dip around $\ell \approx 300$--$500$ in bin 1 recovering to $\approx 0.99$ by $\ell \approx 1200$, and a flat $\approx 0.97$ plateau in bin 4 -- with percentile bands only a few percent wide. At $\ell = 1500$, however, both curves fall off a cliff, dropping abruptly to $\approx 0.60$ (bin 1) and $\approx 0.81$ (bin 4) before partially recovering by $\ell = 2048$. The discontinuity is not a modelling failure but the edge of the correction band: the $\kappa$ integration runs to $\ell = 2048$ while the transfer function is defined only to $\ell_{\max} = 1500$, so beyond that the corrected map \emph{is} the uncorrected one and the ratio collapses back onto the grey baseline. It is the clearest single illustration of what the common $N_{\mathrm{side}}=512$ footing costs this pipeline, and it would move to $\ell = 3000$ if the correction were applied at native resolution. The $\kappa$ moments (Figure~\ref{fig:transfer_kappa_moments}) repeat the shell-level pattern: variance is recovered, while skewness and kurtosis are lifted only part of the way to the truth.
 
 \begin{figure}[h!]
     \centering
     \begin{minipage}{0.49\textwidth}\includegraphics[width=\linewidth]{plots/results/transfer/kappa_cl_pctile_band_bin1.png}\end{minipage}\hfill
     \begin{minipage}{0.49\textwidth}\includegraphics[width=\linewidth]{plots/results/transfer/kappa_cl_pctile_band_bin4.png}\end{minipage}
-    \caption{Weak-lensing convergence $C_\ell$ ratio to truth for the transfer pipeline (UFalcon integration \cite{sgier_fast_2018}; DES-Y3 source bins 1, left, and 4, right; median and 16--84\% band across the 10 evaluation cosmologies). The corrected lightcones (blue) stay within $\approx 5\%$ of the reference at all $\ell \le 2048$, where the uncorrected baseline (gray) loses up to half the power. \jozef{larger labels+legend, remove title and reduce the y-range (0.45 - 1.05 or similar), now only a small fraction of panel's are actually showing something, most of it is blank. }}
+    \caption{Weak-lensing convergence $C_\ell$ ratio to truth for the transfer pipeline (UFalcon integration \cite{sgier_fast_2018}; DES-Y3 source bins 1, left, and 4, right; median and 16--84\% band across the 30 evaluation cosmologies). The corrected lightcones (blue) stay within $\approx 5\%$ of the reference out to $\ell = 1500$, where the uncorrected baseline (gray) has lost up to $44\%$ of the power. The abrupt drop at $\ell = 1500$ is the edge of the correction band, not a model failure: the $\kappa$ integration extends to $\ell = 2048$ but the transfer function is only defined to $\ell_{\max}=1500$, so past that point the corrected map is identical to the uncorrected one. \jozef{larger labels+legend, remove title and reduce the y-range (0.45 - 1.05 or similar), now only a small fraction of panel's are actually showing something, most of it is blank. }}
     \label{fig:transfer_kappa}
 \end{figure}
 
@@ -1455,12 +1529,12 @@ Inference & closed form & 8 Euler steps & 32 Heun steps; shared noise; taper $p=
 \section{U-Net Flow-Matching Pipeline}
 \label{sec:res-flow}
 
-\paragraph{Configuration and training.} The flow was trained for 200 epochs on the $10^5$-patch dataset (Table~\ref{tab:training}), distributed over 16 DDP ranks (4 Alps nodes $\times$ 4 GH200), with the base learning rate $3\times10^{-5}$ scaled linearly to $4.8\times10^{-4}$ and cosine-annealed; the high-pass residual formulation used cutoff $0.05$ and transition $0.20$ of the patch Nyquist frequency. Figure~\ref{fig:flow_loss} shows the variance-normalised flow-matching loss of Eq.~\eqref{eq:flow_loss}: validation improves until epoch $\approx 110$ (best $0.166$ at epoch 109 -- the checkpoint used for everything below) and then drifts slowly upward while the training loss continues to fall, i.e.\ mild but genuine overfitting past that point. The residual plateau is expected rather than alarming: at intermediate $t$ the target velocity is not uniquely determined by the network's input, so the regression loss is bounded below by this irreducible conditional variance.
+\paragraph{Configuration and training.} The flow was trained for 200 epochs on the $10^5$-patch dataset (Table~\ref{tab:training}), distributed over 16 DDP ranks (4 Alps nodes $\times$ 4 GH200), with the base learning rate $3\times10^{-5}$ scaled linearly to $4.8\times10^{-4}$ and cosine-annealed; the high-pass residual formulation used cutoff $0.05$ and transition $0.20$ of the patch Nyquist frequency. Figure~\ref{fig:flow_loss} shows the variance-normalised flow-matching loss of Eq.~\eqref{eq:flow_loss}: validation improves until epoch $\approx 95$ (best $0.139$ at epoch 95 -- the checkpoint used for everything below) and then drifts slowly upward while the training loss continues to fall, i.e.\ mild but genuine overfitting past that point. The residual plateau is expected rather than alarming: at intermediate $t$ the target velocity is not uniquely determined by the network's input, so the regression loss is bounded below by this irreducible conditional variance.
 
 \begin{figure}[h!]
     \centering
     \includegraphics[width=0.78\linewidth]{plots/results/flow/loss_curve.png}
-    \caption{Training and validation loss of the flow-matching U-Net (Eq.~\ref{eq:flow_loss}; 5-epoch rolling mean). Validation is best at epoch 109 and drifts upward afterwards while training continues to fall; the best-validation checkpoint is used for all evaluation.}
+    \caption{Training and validation loss of the flow-matching U-Net (Eq.~\ref{eq:flow_loss}; 5-epoch rolling mean). Validation is best at epoch 95 ($0.139$) and drifts upward afterwards while training continues to fall; the best-validation checkpoint is used for all evaluation.}
     \label{fig:flow_loss}
 \end{figure}
 
@@ -1510,7 +1584,7 @@ Inference & closed form & 8 Euler steps & 32 Heun steps; shared noise; taper $p=
 \section{Diffusion Pipeline}
 \label{sec:res-diffusion}
 
-\paragraph{Configuration and training.} The diffusion model shares the flow's data, architecture width, schedule length, and high-pass formulation (Table~\ref{tab:training}); it differs in the objective (Eq.~\ref{eq:edm_loss}, with the measured $\sigma_d = 1.006$), the unscaled learning rate of $3\times10^{-5}$, and the 32-step Heun sampler with shared sphere noise and $p=32$ blending at inference. Its loss curve (Figure~\ref{fig:diff_loss}) looks qualitatively different from the flow's: the EDM-weighted denoising loss collapses from $\approx 5.9$ to $\approx 0.9$ within the first $\sim 15$ epochs and is then almost flat, with training and validation coinciding to the end (best validation $0.80$ at epoch 165) -- no overfitting is observed. This is characteristic of the objective: every example is presented at a freshly drawn noise level and noise realisation, an implicit augmentation that makes memorisation far harder than for the flow's fixed low$\to$high pairs.
+\paragraph{Configuration and training.} The diffusion model shares the flow's data, architecture width, schedule length, and high-pass formulation (Table~\ref{tab:training}); it differs in the objective (Eq.~\ref{eq:edm_loss}, with the measured $\sigma_d = 1.006$), the unscaled learning rate of $3\times10^{-5}$, and the 32-step Heun sampler with shared sphere noise and $p=32$ blending at inference. Its loss curve (Figure~\ref{fig:diff_loss}) looks qualitatively different from the flow's: the EDM-weighted denoising loss collapses from $\approx 5.9$ to $\approx 0.6$ within the first $\sim 20$ epochs and is then almost flat, with training and validation coinciding to the end (best validation $0.514$ at epoch 165) -- no overfitting is observed. This is characteristic of the objective: every example is presented at a freshly drawn noise level and noise realisation, an implicit augmentation that makes memorisation far harder than for the flow's fixed low$\to$high pairs.
 
 \begin{figure}[h!]
     \centering
@@ -1519,7 +1593,7 @@ Inference & closed form & 8 Euler steps & 32 Heun steps; shared noise; taper $p=
     \label{fig:diff_loss}
 \end{figure}
 
-\paragraph{Full-sky $C_\ell$.} The reconstructed shell spectra (Figure~\ref{fig:diff_cl}) match the flow's picture closely: sub-percent agreement over most of the corrected range, a slightly larger mid-band overshoot ($\lesssim +1\%$ around $\ell \approx 400$--$900$ in the nearest bin), and a shallower end-of-band dip -- in the middle bin the diffusion correction returns to unity at the band edge where the flow dips to $\approx 0.993$. That a 32-step stochastic sampler, stitched from thousands of tiles sharing one global noise field, reproduces full-sky spectra at this level is the central validation of the tiling scheme of Sec.~\ref{subsec:pipe-patches}.
+\paragraph{Full-sky $C_\ell$.} The reconstructed shell spectra (Figure~\ref{fig:diff_cl}) match the flow's picture closely over most of the corrected range. In the nearest bin the two are indistinguishable up to $\ell \approx 1300$ -- both overshoot by the same $+0.5\%$ over $\ell \approx 400$--$900$, against an uncorrected deficit that has already fallen to $0.95$ there -- and they separate only in the last multipole bins, where the diffusion dips to $0.944$ against the flow's $0.959$. In the middle bin the ordering reverses: the diffusion holds $1.000$ at the band edge where the flow has drifted to $0.996$. Neither difference is large, and the honest summary is that the two generative pipelines reproduce the shell spectra equally well, with the flow marginally better where the correction works hardest. That a 32-step stochastic sampler, stitched from thousands of tiles sharing one global noise field, reproduces full-sky spectra at this level is the central validation of the tiling scheme of Sec.~\ref{subsec:pipe-patches}.
 
 \begin{figure}[h!]
     \centering
@@ -1544,7 +1618,7 @@ Inference & closed form & 8 Euler steps & 32 Heun steps; shared noise; taper $p=
     \label{fig:diff_moments}
 \end{figure}
 
-\paragraph{Weak lensing.} At the $\kappa$ level (Figure~\ref{fig:diff_kappa}), the diffusion correction is the best of the three at high multipoles in bin 1: it remains within $\approx 5\%$ of the truth out to $\ell = 2048$, where the flow has declined to $\approx 0.90$, and bin 4 sits at $\approx 0.97$ at the same scales. Its percentile bands are somewhat wider than the flow's -- the price of a genuinely stochastic sampler. The $\kappa$ moments (Figure~\ref{fig:diff_kappa_moments}) improve strongly on the uncorrected maps across all 30 cosmologies -- bin~1 ratios of $0.935 \pm 0.010$, $0.885 \pm 0.019$ and $0.773 \pm 0.056$, bin~4 ratios of $0.983/0.959/0.902$ -- but sit consistently below the flow on every moment, the gap widening from variance to kurtosis.
+\paragraph{Weak lensing.} At the $\kappa$ level (Figure~\ref{fig:diff_kappa}), the diffusion correction holds $\approx 0.95$ out to $\ell \approx 400$ and then declines to $0.90$ by $\ell = 2048$ in bin 1. The two generative pipelines end at the same place -- the flow finishes at $0.894$, the diffusion at $0.903$ -- but they do not get there together: over the mid-range the flow is clearly ahead, $0.977$ against $0.943$ at $\ell = 500$ and $0.949$ against $0.897$ at $\ell = 1000$. The diffusion catches up only where both are dominated by the band limit of the $N_{\mathrm{side}}=512$ reconstruction feeding them. Neither generative model shows the transfer pipeline's discontinuity, because both correct in real space on patches rather than within a fixed harmonic band, so their accuracy degrades smoothly rather than stopping at an edge. The diffusion's percentile bands are somewhat wider than the flow's -- the price of a genuinely stochastic sampler. The $\kappa$ moments (Figure~\ref{fig:diff_kappa_moments}) improve strongly on the uncorrected maps across all 30 cosmologies -- bin~1 ratios of $0.935 \pm 0.010$, $0.885 \pm 0.020$ and $0.772 \pm 0.059$, bin~4 ratios of $0.983/0.959/0.901$ -- but sit consistently below the flow on every moment, the gap widening from variance to kurtosis.
 
 \begin{figure}[h!]
     \centering
@@ -1567,9 +1641,9 @@ Inference & closed form & 8 Euler steps & 32 Heun steps; shared noise; taper $p=
 
 Figure~\ref{fig:method_comparison} reduces all three pipelines to a single view: for each held-out cosmology the ratio of a $\kappa$-map moment to its reference value, averaged over the 30 cosmologies, with the cosmology-to-cosmology scatter as an errorbar. Because every method is scored at the same $N_{\mathrm{side}}=512$, $\ell_{\max}=1500$ footing, the vertical ordering is a statement about the corrections themselves rather than about the resolutions they were given.
 
-Three consistent messages emerge. First, every pipeline repairs the two-point statistics on the scales it acts on: the uncorrected variance ratio of $0.803 \pm 0.018$ (bin~1) is lifted to $0.941 \pm 0.010$ by the transfer function, $0.935 \pm 0.010$ by the diffusion model and $0.954 \pm 0.009$ by the flow, all three at a small fraction of the $N$-body cost. Second, the higher moments cleanly separate the deterministic from the generative route. A pure amplitude rescale cannot manufacture the phase correlations that skew a distribution, and the transfer function accordingly moves skewness only from $0.733 \pm 0.020$ to $0.789 \pm 0.027$ and excess kurtosis from $0.537 \pm 0.042$ to $0.636 \pm 0.058$ -- a real but modest gain, inherited from the reweighting of scales rather than from any new structure. Both generative models go substantially further, the flow reaching $0.959 \pm 0.014$ in skewness and $0.921 \pm 0.045$ in kurtosis and the diffusion $0.885 \pm 0.019$ and $0.773 \pm 0.056$. Third, the recovery is not complete: even the flow leaves a $\approx 8\%$ kurtosis deficit in bin~1, and the residual is systematically one-sided -- every method undershoots. The generative models close most of the non-Gaussian gap the transfer function cannot touch, but they do not close it entirely.
+Three consistent messages emerge. First, every pipeline repairs the two-point statistics on the scales it acts on: the uncorrected variance ratio of $0.803 \pm 0.018$ (bin~1) is lifted to $0.941 \pm 0.010$ by the transfer function, $0.935 \pm 0.010$ by the diffusion model and $0.954 \pm 0.009$ by the flow, all three at a small fraction of the $N$-body cost. Second, the higher moments cleanly separate the deterministic from the generative route. A pure amplitude rescale cannot manufacture the phase correlations that skew a distribution, and the transfer function accordingly moves skewness only from $0.733 \pm 0.020$ to $0.789 \pm 0.027$ and excess kurtosis from $0.537 \pm 0.042$ to $0.636 \pm 0.058$ -- a real but modest gain, inherited from the reweighting of scales rather than from any new structure. Both generative models go substantially further, the flow reaching $0.959 \pm 0.014$ in skewness and $0.921 \pm 0.045$ in kurtosis and the diffusion $0.885 \pm 0.020$ and $0.772 \pm 0.059$. Third, the recovery is not complete: even the flow leaves a $\approx 8\%$ kurtosis deficit in bin~1, and the residual is systematically one-sided -- every method undershoots. The generative models close most of the non-Gaussian gap the transfer function cannot touch, but they do not close it entirely.
 
-The same ordering holds in bin~4 with uniformly smaller gaps (flow $0.986/0.983/0.963$, diffusion $0.983/0.959/0.902$, transfer $0.960/0.884/0.773$), which is expected: the distant shells are the ones Disco-DJ already gets nearly right, so less has to be repaired. The errorbars are informative in their own right -- the flow's are the tightest of the three on every moment, so its correction is not only the most accurate on average but also the most uniform across cosmologies.
+The same ordering holds in bin~4 with uniformly smaller gaps (flow $0.986/0.983/0.963$, diffusion $0.983/0.959/0.901$, transfer $0.960/0.884/0.773$), which is expected: the distant shells are the ones Disco-DJ already gets nearly right, so less has to be repaired. The errorbars are informative in their own right -- the flow's are the tightest of the three on every moment, so its correction is not only the most accurate on average but also the most uniform across cosmologies.
 
 \begin{figure}[h!]
     \centering
@@ -1588,7 +1662,7 @@ This thesis set out to answer a practical question at the heart of map-level, si
 
 The foundation was infrastructural. By reconstructing each CosmoGridV1 cosmology's exact linear input -- transfer function, $\sigma_8$, and radiation density, massive neutrinos included -- and letting \textsc{PkdGrav3} generate one backscaled initial condition consumed byte-identically by both solvers (Sec.~\ref{sec:ic_generation}), and by embedding a shell builder into Disco-DJ's time integration that reproduces \textsc{PkdGrav3}'s moving-lightcone crossing condition on CosmoGridV1's radial shell grid within constant memory (Sec.~\ref{sec:shell_builder}), the learning problem was reduced to its irreducible core: paired full-sky lightcones differing only through the force solver. Every result in Chapter~\ref{ch:results} rests on this controlled setup.
 
-On these pairs, three corrections were built (Sec.~\ref{sec:correction-pipelines}), sharing one measured insight -- Disco-DJ's small-scale deficit is primarily one of \emph{amplitude}, its phases remaining correlated with the truth deep into the nonlinear regime -- and one shared guarantee, the high-pass residual formulation that pins the already-correct large scales to the fast simulation exactly. The deterministic transfer-function pipeline holds shell and weak-lensing convergence spectra within a few percent of the reference out to the native $\ell = 3000$, at essentially zero inference cost; it is the method of choice wherever two-point statistics suffice. What it cannot do -- by construction, not by failure -- is generate the one-point non-Gaussianity of the missing structure. The two generative pipelines close exactly that gap: both the flow-matching U-Net and the EDM diffusion model restore skewness and excess kurtosis at shell and convergence level on cosmologies they never saw, the flow essentially exactly and with the tightest cosmology-to-cosmology scatter, the diffusion slightly conservatively but with the flattest high-multipole convergence spectra. That a 32-step stochastic sampler, evaluated on thousands of overlapping tiles sharing a single global noise field, reassembles into consistent full-sky maps also validates the overlap-tile machinery itself as a general route for applying patch-based generative models to the sphere.
+On these pairs, three corrections were built (Sec.~\ref{sec:correction-pipelines}), sharing one measured insight -- Disco-DJ's small-scale deficit is primarily one of \emph{amplitude}, its phases remaining correlated with the truth deep into the nonlinear regime -- and one shared guarantee, the high-pass residual formulation that pins the already-correct large scales to the fast simulation exactly. The deterministic transfer-function pipeline holds shell and weak-lensing convergence spectra within a few percent of the reference out to the native $\ell = 3000$, at essentially zero inference cost; it is the method of choice wherever two-point statistics suffice. What it cannot do -- by construction, not by failure -- is generate the one-point non-Gaussianity of the missing structure. The two generative pipelines close exactly that gap: both the flow-matching U-Net and the EDM diffusion model restore skewness and excess kurtosis at shell and convergence level on cosmologies they never saw, the flow most completely and with the tightest cosmology-to-cosmology scatter, the diffusion consistently a little further short on every moment. Their convergence spectra are nearly identical, both landing at $\approx 0.90$ of the truth by $\ell = 2048$. That a 32-step stochastic sampler, evaluated on thousands of overlapping tiles sharing a single global noise field, reassembles into consistent full-sky maps also validates the overlap-tile machinery itself as a general route for applying patch-based generative models to the sphere.
 
 Several limitations bound these conclusions and set the agenda. All three pipelines were evaluated at $N_{\mathrm{side}}=512$, with the correction band capped at the matching $\ell_{\max}=1500$ \jozef{I saw 1024 in the plot titles and also lmax of 3000 is too high for nside=512} -- a common footing chosen so that the comparison measures the corrections rather than the resolutions they were handed (Sec.~\ref{sec:res-protocol}). This bounds the results from both sides. The learned models have never been asked to correct the $\ell = 1500$--$3000$ band at all, so nothing here shows they generalise to it; and the transfer function was scored with its correction band closed on 46 of the 69 shells, well below what the same method achieves on the native $N_{\mathrm{side}}=2048$ maps. Lifting both to the native resolution -- retraining the patch models on $N_{\mathrm{side}}=2048$ tiles, which the patch machinery already supports -- is the most direct extension, and is what would turn the present ordering into a statement about the methods at full resolution. The corrected fields are continuous overdensities, not integer count maps, which downstream weak-lensing statistics tolerate but a consumer requiring per-pixel count validity would not. The corrections were validated on matter shells and derived convergence maps at fixed total neutrino mass, without baryonic feedback -- which operates on precisely the scales corrected here and would need its own treatment \cite{schneider_matter_2015, fluri_full_2022}. And each cosmology entered with a single realisation, so realisation-to-realisation generalisation at fixed cosmology remains to be quantified.
 
@@ -1602,13 +1676,13 @@ The direction, however, is clear. A Disco-DJ lightcone costs minutes where the r
 \begin{figure}[h!]
     \centering
     \includegraphics[width=0.7\textwidth]{plots/results/transfer/example_patches.png}
-    \caption{Example patches for the transfer pipeline at native $N_{\mathrm{side}}=2048$ (rows: shells of increasing depth, drawn from different held-out cosmologies; columns: Disco-DJ, corrected, CosmoGridV1, and the per-patch 2D power ratio). Phases are preserved, so corrected and low show identical structures; only the small-scale amplitude changes.}
+    \caption{Example $256^2$ patches for the transfer pipeline at $N_{\mathrm{side}}=512$ (rows: shells of increasing depth, drawn from different held-out cosmologies; columns: Disco-DJ, corrected, CosmoGridV1, and the per-patch 2D power ratio). Phases are preserved, so corrected and low show identical structures; only the small-scale amplitude changes. On the two deepest rows the \texttt{low/high} curve is hidden beneath \texttt{corrected/high}: there $\ell_{\min}(s) > \ell_{\max}$, so no correction is applied and the two are identical.}
     \label{fig:transfer_patches}
 \end{figure}
 \begin{figure}[h!]
     \centering
     \includegraphics[width=0.7\textwidth]{plots/results/flow/example_patches.png}
-    \caption{Held-out test patches for the flow pipeline (rows: shells 5--50; columns: Disco-DJ, flow-corrected, CosmoGridV1, per-patch 2D power ratio). The corrected sample restores both the visual texture and the small-scale power that the low maps lack. \jozef{These are very strangely-looking patches. Why do they have these elongated patterns? The same in the next figure}}
+    \caption{Held-out test patches for the flow pipeline (rows: shells 5--50; columns: Disco-DJ, flow-corrected, CosmoGridV1, per-patch 2D power ratio). The corrected sample restores both the visual texture and the small-scale power that the low maps lack. All three pipelines draw these rows from one shared plan (\texttt{ml/analysis/example\_patches.py}), so Figures~\ref{fig:transfer_patches}, \ref{fig:flow_patches} and~\ref{fig:diff_patches} show the \emph{same} five patches of sky, at the same shells and orientations, and can be compared row by row; each is cut from that pipeline's own full-sky reconstruction rather than from an isolated training tile. \jozef{These are very strangely-looking patches. Why do they have these elongated patterns? The same in the next figure} The elongated patterns are gone in this version: they were not a property of the models but a data-preparation bug, in which full-sky shells stored in \textsc{ring} order were degraded to $N_{\mathrm{side}}=512$ under a \textsc{nested} assumption, so \texttt{ud\_grade} averaged pixels that are not sky neighbours. Every $N_{\mathrm{side}}=512$ map was regenerated and both generative models retrained on the corrected data.}
     \label{fig:flow_patches}
 \end{figure}
 \begin{figure}[h!]
@@ -1619,7 +1693,7 @@ The direction, however, is clear. A Disco-DJ lightcone costs minutes where the r
 \end{figure}
 
 \clearpage
-\section{Cl-ratios for single shells}\label{app:patches}
+\section{$C_\ell$ Ratios for Single Shells}\label{app:cl_ratio_shells}
 \begin{figure}[h!]
     \centering
     \includegraphics[width=0.56\textwidth]{plots/cl_ratio/cl_ratio_shell005_z0.065-0.079.png}\\[1mm]

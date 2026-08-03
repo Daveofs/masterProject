@@ -143,6 +143,14 @@ fi
 # itself, not just plotting).
 ELL_MIN_MPC=${ELL_MIN_MPC:-5.0}
 HP_TRANSITION=${HP_TRANSITION:-0.10}
+# Shell resolution the correction is applied at. Was hard-coded to 2048; the thesis
+# scores all three pipelines at 512 (common-footing comparison), and a mismatch here
+# silently compares two different resolutions.
+NSIDE=${NSIDE:-2048}
+if [ "$LMAX" -gt $((3 * NSIDE - 1)) ]; then
+    echo "[abort] LMAX=$LMAX exceeds band limit 3*NSIDE-1=$((3 * NSIDE - 1)) for NSIDE=$NSIDE" >&2
+    exit 1
+fi
 KAPPA_NSIDE=${KAPPA_NSIDE:-1024}
 KAPPA_LMAX=${KAPPA_LMAX:-2048}
 # apply_transfer.py's --max-cosmologies caps cl_ratio_by_zbin_grid.png's rows
@@ -195,7 +203,7 @@ if [ "$N_NODES" -gt 1 ]; then
                 OMP_NUM_THREADS=$CPUS_PER_NODE python transfer/apply_transfer.py \
                     --transfer ${BATCH_TRANSFERS[$i]} \
                     --run-dirs ${BATCH_RUN_DIRS[$i]} \
-                    --nside 2048 --lmax $LMAX --ell-min-mpc $ELL_MIN_MPC \
+                    --nside $NSIDE --lmax $LMAX --ell-min-mpc $ELL_MIN_MPC \
                     --hp-transition $HP_TRANSITION \
                     --no-clip --seed 0 \
                     --out-counts-dir '$OUT/counts' \
@@ -219,7 +227,7 @@ uenv run pytorch/v2.9.1:v2 --view=default -- bash -c "
     OMP_NUM_THREADS=$CPUS_PER_NODE python transfer/apply_transfer.py \
         --transfer $TRANSFER_FILES \
         --run-dirs $RUN_DIRS \
-        --nside 2048 --lmax $LMAX --ell-min-mpc $ELL_MIN_MPC \
+        --nside $NSIDE --lmax $LMAX --ell-min-mpc $ELL_MIN_MPC \
         --hp-transition $HP_TRANSITION \
         --no-clip --seed 0 \
         $REUSE_FLAG \

@@ -1,10 +1,10 @@
 #!/bin/bash
 
-#SBATCH --nodes=2
+#SBATCH --nodes=1
 #SBATCH --exclusive
 #SBATCH --job-name=discodj-custom
-#SBATCH --partition=normal
-#SBATCH --account=sk037
+#SBATCH --partition=debug
+#SBATCH --account=a0158
 #SBATCH --ntasks-per-node=1
 #SBATCH --time=01:00:00
 #SBATCH --gres=gpu:4
@@ -68,7 +68,6 @@ srun --ntasks=$((SLURM_NNODES * 4)) --ntasks-per-node=4 \
     --precision double \
     --grad-kernel-order 4 \
     --n-order 3 \
-    --build-shells \
     --shells-metainfo "${METAINFO_FILE}" \
     --param-file "${PARAM_YML}" \
     --class-processed "${CLASS_PROCESSED}" \

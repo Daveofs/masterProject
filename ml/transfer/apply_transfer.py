@@ -76,6 +76,7 @@ from analysis.radial_power import radial_power                                  
 from analysis.full_sky import (od_cl, zbin_shell_samples,                          # noqa: E402
                                shell_redshifts as fs_shell_redshifts)              # noqa: E402
 from analysis.moments import moments                                               # noqa: E402
+from analysis.example_patches import patch_plan, extract_patch                     # noqa: E402
 from analysis.plotting import (plot_example_patch_grid, plot_pctile_band_ratio,    # noqa: E402
                                plot_cl_shell,                                       # noqa: E402
                                plot_moments_vs_shell, plot_histogram_grid,          # noqa: E402
@@ -293,16 +294,6 @@ def apply(args, run: Path, transfer_path, out_path=None):
 # power ratio (bounded by that patch's own Nyquist ell) + pctile-band aggregate.
 # ---------------------------------------------------------------------------
 
-def extract_patch(shell_map: np.ndarray, nside: int, center_ipix: int, psi: float,
-                  patch_size: int, reso_arcmin: float) -> np.ndarray:
-    """Gnomonic-project one patch, matching make_patch_dataset.py exactly."""
-    lon, lat = hp.pix2ang(nside, int(center_ipix), nest=False, lonlat=True)
-    proj = hp.projector.GnomonicProj(rot=(lon, lat, psi), xsize=patch_size,
-                                     ysize=patch_size, reso=reso_arcmin)
-    vec2pix = lambda x, y, z, _ns=nside: hp.vec2pix(_ns, x, y, z, nest=False)
-    return proj.projmap(shell_map, vec2pix)
-
-
 def plot_patches(args, run_dirs: list[Path], corrected_by_run: dict):
     """Visual rows: ONE example patch per shell, drawn from a RANDOMLY-chosen
     held-out cosmology per row (pooled across all run_dirs, same as jbucko's
@@ -321,16 +312,18 @@ def plot_patches(args, run_dirs: list[Path], corrected_by_run: dict):
                     _load_high(run, nside, args.info_npz))
               for run in run_dirs}
 
-    rng = np.random.default_rng(args.seed)
-    shell_rows = [s for s in args.patch_shells for _ in range(args.n_per_shell)]
+    # Shared across all three pipelines so the figures show the SAME sky (see
+    # analysis/example_patches.py). The draw order is unchanged from the original
+    # inline loop, so transfer's own figure is identical to before.
+    by_name = {r.parent.name: r for r in run_dirs}
+    plan = patch_plan(args.seed, args.patch_shells, args.n_per_shell,
+                      list(by_name), nside)
 
     rows = []
-    for s in shell_rows:
-        run = run_dirs[int(rng.integers(0, len(run_dirs)))]
+    for s, cosmo_name, center_ipix, psi in plan:
+        run = by_name[cosmo_name]
         low_full, true = arrays[run]
         corrected = corrected_by_run[run]
-        center_ipix = int(rng.integers(0, npix))
-        psi = float(rng.uniform(0, 360))
         low_p = extract_patch(np.asarray(low_full[s], dtype=np.float64), nside,
                               center_ipix, psi, args.patch_size, reso_arcmin)
         corr_p = extract_patch(np.asarray(corrected[s], dtype=np.float64), nside,
@@ -670,10 +663,17 @@ def plot_kappa(args, run_dirs: list[Path], corrected_by_run: dict):
         with np.errstate(divide="ignore", invalid="ignore"):
             lo_stack = np.array([lo / hi for lo, hi in zip(a["cl_low"], a["cl_high"])])
             co_stack = np.array([co / hi for co, hi in zip(a["cl_corr"], a["cl_high"])])
+        # Persist the kappa Cl stacks behind this figure. Without them a plot-only
+        # change (y-range, fonts, labels) costs a full inference rerun -- exactly what
+        # the missing cl_ratio_by_zbin_data.npz cost once already.
+        np.savez(out_dir / f"kappa_cl_data_{tag}.npz", ells=kappa_ells,
+                 cl_low=np.asarray(a["cl_low"]), cl_corr=np.asarray(a["cl_corr"]),
+                 cl_high=np.asarray(a["cl_high"]),
+                 cosmo_labels=np.array([str(c) for c in cosmo_labels]))
         plot_pctile_band_ratio(
             kappa_ells[1:], {"low / high (baseline, no model)": lo_stack[:, 1:],
                             f"corrected ({method_label}) / high": co_stack[:, 1:]},
-            out_dir / f"kappa_cl_pctile_band_{tag}.png", xlabel=r"$\ell$", ylim=(0.4, 1.6),
+            out_dir / f"kappa_cl_pctile_band_{tag}.png", xlabel=r"$\ell$", ylim=None,
             title=f"weak-lensing kappa Cl ratio to truth ({tag}) -- median + 16-84th "
                   f"pctile band ACROSS {len(cosmo_labels)} held-out cosmologies")
 

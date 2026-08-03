@@ -219,10 +219,26 @@ def plot_pctile_band_ratio(x, ratio_stacks: dict, out_path, xlabel=r"$\ell$",
         ax.fill_between(x, p_lo, p_hi, color=color, alpha=0.2)
 
     ax.axhline(1.0, color="k", ls="--", lw=1)
-    ax.set_xlabel(xlabel)
-    ax.set_ylabel(ylabel or (r"$C_\ell/C_\ell^{true}$" if "ell" in xlabel.lower() else "ratio"))
+    ax.set_xlabel(xlabel, fontsize=FS_AXIS)
+    ax.set_ylabel(ylabel or (r"$C_\ell/C_\ell^{true}$" if "ell" in xlabel.lower() else "ratio"),
+                  fontsize=FS_AXIS)
+    ax.tick_params(labelsize=FS_TICK)
     if ylim:
         ax.set_ylim(*ylim)
+    else:
+        # Data-driven window. A fixed (0.4, 1.6) leaves the entire upper half of
+        # these panels empty -- these ratios approach unity from BELOW (the fast
+        # solver loses power, it does not gain any), so the symmetric window wastes
+        # roughly half the figure. Span the drawn curves and bands, always keeping
+        # 1.0 in view, and pad by 6%.
+        finite = np.concatenate([np.asarray(v, dtype=np.float64).ravel()
+                                 for v in ratio_stacks.values()])
+        finite = finite[np.isfinite(finite)]
+        if finite.size:
+            lo_v = min(float(np.nanpercentile(finite, 0.5)), 1.0)
+            hi_v = max(float(np.nanpercentile(finite, 99.5)), 1.0)
+            pad = max(hi_v - lo_v, 1e-3) * 0.06
+            ax.set_ylim(lo_v - pad, hi_v + pad)
     ax.legend(fontsize=FS_LEGEND)
     fig.tight_layout()
     out_path = Path(out_path); out_path.parent.mkdir(parents=True, exist_ok=True)
