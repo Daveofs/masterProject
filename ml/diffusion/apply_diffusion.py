@@ -64,7 +64,7 @@ from analysis.plotting import (plot_example_patch_grid, plot_pctile_band_ratio, 
                                plot_kappa_cl_grid, plot_kappa_moments_scatter)
 from analysis.moments import moments                      # noqa: E402
 from analysis.patch_tiling import auto_nside_centers, reconstruct_shell  # noqa: E402
-from analysis.full_sky import od_cl, zbin_shell_samples    # noqa: E402
+from analysis.full_sky import od_cl, zbin_shell_samples, shell_redshifts    # noqa: E402
 from analysis import weak_lensing                          # noqa: E402
 
 
@@ -375,8 +375,14 @@ def main():
         rows = [(f"shell {example_shells[i]}", ex_low_f[i, 0].cpu().numpy(),
                 ex_corr_f[i, 0].cpu().numpy(), ex_high_f[i, 0].cpu().numpy())
                for i in range(ns)]
+        # crop=64: these patches are cut at nside=512, where 256 px spans 29.3 deg
+        # of sky and the display grid beats against the HEALPix lattice into streaky
+        # moire fringes (present in low/corrected/high alike -- see
+        # plot_example_patch_grid's `crop`). 64 px restores the same 7.33 deg field
+        # of view the nside=2048 transfer figures use, making them comparable.
         plot_example_patch_grid(rows, out_dir / "example_patches.png",
                                 corrected_label="diffusion-corrected",
+                                crop=64,
                                 suptitle=f"held-out test patches ({space} overdensity) + "
                                          "per-patch power ratio")
 
@@ -554,8 +560,12 @@ def main():
         # in, it single-handedly blew the old "shells 45-68" panel's pctile band out to
         # ~1.9 in every pipeline's cl_ratio_by_zbin_grid.png (now "shells 45-67").
         n_shells_total -= 1
+        # label bins by redshift rather than shell index (see zbin_shell_samples):
+        # the shell grid is shared across CosmoGridV1, so any run's table serves
         zbins = zbin_shell_samples(n_shells_total, args.zbin_start, args.n_zbins,
-                                   args.n_shells_per_zbin)
+                                   args.n_shells_per_zbin,
+                                   shell_z=shell_redshifts(
+                                       Path(args.data_root) / val_cosmos[0] / args.run))
         grid_cosmos = list(val_cosmos[:args.max_cosmologies])
         if rank == 0:
             print(f"[eval] full-sky: Cl-ratio-by-redshift-bin grid for {len(grid_cosmos)} "
@@ -767,6 +777,12 @@ def main():
                         kappa_cosmo_labels, a["mom_low"], a["mom_corr"], a["mom_high"],
                         out_dir / f"kappa_moments_scatter_{tag}.png", corrected_label="diffusion-corrected",
                         suptitle=f"weak-lensing kappa map moments, {kappa_suptitle_common}")
+                    # persist the same numbers so the three pipelines can be put on
+                    # one axes later without re-running any reconstruction
+                    weak_lensing.save_kappa_moment_summary(
+                        out_dir / f"kappa_moments_{tag}.npz", kappa_cosmo_labels,
+                        a["mom_low"], a["mom_corr"], a["mom_high"],
+                        method_label="diffusion", tag=tag)
     # ============= end optional full-sky section =============
 
     if rank == 0:

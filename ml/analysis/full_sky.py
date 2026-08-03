@@ -27,8 +27,30 @@ def gnomonic_crop(m: np.ndarray, nside: int, lon: float, lat: float,
     return proj.projmap(m, lambda x, y, z, _ns=nside: hp.vec2pix(_ns, x, y, z, nest=False))
 
 
+def shell_redshifts(run_dir, info_npz: str = "compressed_shells.npz"):
+    """Mid-shell redshift for every shell of a run, from its own shell table.
+
+    Returns None (rather than raising) when the table is unavailable, so callers
+    can fall back to labelling bins by shell index -- this only feeds figure
+    labels, and a missing shell table should not abort an evaluation run.
+    """
+    from pathlib import Path
+    p = Path(run_dir) / info_npz
+    if not p.exists():
+        return None
+    try:
+        with np.load(p, allow_pickle=False) as f:
+            if "shell_info" not in f.files:
+                return None
+            si = f["shell_info"]
+        return 0.5 * (si["lower_z"].astype(float) + si["upper_z"].astype(float))
+    except Exception as exc:                      # noqa: BLE001 - label-only path
+        print(f"  [warn] could not read shell redshifts from {p}: {exc}", flush=True)
+        return None
+
+
 def zbin_shell_samples(n_shells: int, zbin_start: int = 0, n_zbins: int = 3,
-                       n_per_zbin: int = 5) -> list[tuple[str, np.ndarray]]:
+                       n_per_zbin: int = 5, shell_z=None) -> list[tuple[str, np.ndarray]]:
     """Split the usable shell range [zbin_start, n_shells-1] into n_zbins
     contiguous bins, and sample up to n_per_zbin evenly-spaced shell indices per
     bin (rounded, deduplicated) -- keeps the Cl-ratio-by-redshift-bin diagnostic
@@ -36,10 +58,20 @@ def zbin_shell_samples(n_shells: int, zbin_start: int = 0, n_zbins: int = 3,
     bounded regardless of how many shells the dataset has. zbin_start lets the
     caller skip the sparsest low shells (see transforms.py's eps-clipping note) --
     their Cl ratio is dominated by the log1p floor, not the model. Returns
-    [(bin_label, shells), ...], one entry per bin, in order."""
+    [(bin_label, shells), ...], one entry per bin, in order.
+
+    `shell_z`, when given (see shell_redshifts), labels each bin by the REDSHIFT
+    range it spans instead of by shell index -- the physically meaningful label,
+    and the only thing distinguishing the panels of cl_ratio_by_zbin_grid.png
+    from one another once axes titles are dropped in favour of captions.
+    """
     edges = np.unique(np.round(np.linspace(zbin_start, n_shells - 1, n_zbins + 1)).astype(int))
     bins = []
     for lo, hi in zip(edges[:-1], edges[1:]):
         shells = np.unique(np.round(np.linspace(lo, hi, n_per_zbin)).astype(int))
-        bins.append((f"shells {lo}-{hi}", shells))
+        if shell_z is not None and len(shell_z) > hi:
+            label = rf"$z \in [{float(shell_z[lo]):.2f},\ {float(shell_z[hi]):.2f}]$"
+        else:
+            label = f"shells {lo}-{hi}"
+        bins.append((label, shells))
     return bins

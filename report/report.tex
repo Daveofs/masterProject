@@ -14,7 +14,10 @@
 \usepackage[left=25mm,top=20mm,right=25mm,bottom=20mm]{geometry}
 \usepackage{amsmath}
 \usepackage{biblatex}
-\usepackage{ulem} % for \sout
+% normalem is essential: plain \usepackage{ulem} redefines \emph to UNDERLINE
+% instead of italicise, which silently underlined all 48 \emph{...} in this
+% document. normalem keeps \sout available while restoring normal emphasis.
+\usepackage[normalem]{ulem} % for \sout
 \addbibresource{references.bib}
 \newcommand{\jozef}[1]{\textcolor{orange}{JB: #1}}
 
@@ -84,7 +87,7 @@ the \textcolor{accentc}{Shell~Builder}, and the \textcolor{accentc}{Correction}.
 \chapter*{Abstract}
 \addcontentsline{toc}{chapter}{Abstract}
 
-Map-level, simulation-based inference from large-scale-structure surveys requires very large numbers of accurate lightcone simulations -- a demand that gravity solvers like \textsc{PkdGrav3}, which anchor the CosmoGridV1 reference suite, can only meet at a cost of many node-hours per realisation. Fast particle-mesh codes such as Disco-DJ produce the same large-scale clustering in minutes, but their mesh-limited force resolution progressively suppresses small-scale power -- precisely the scales that carry much of the non-Gaussian information such analyses exploit. This thesis builds and validates a pipeline that combines the speed of the particle-mesh solver with the small-scale accuracy of the tree code. For each CosmoGridV1 cosmology, identical backscaled initial conditions are reconstructed from the published linear perturbations and handed to both solvers, and a custom shell builder embedded in Disco-DJ's time integration reproduces \textsc{PkdGrav3}'s moving-lightcone crossing condition on CosmoGridV1's exact radial shell grid -- yielding paired full-sky lightcones that differ only through the force solver. On these pairs, three correction models are trained and compared on held-out cosmologies: a deterministic per-multipole transfer-function rescaling in harmonic space, a conditional flow-matching U-Net that transports each map patch from low to high fidelity, and an EDM-style conditional diffusion model that generates the missing small-scale residual from noise. All three restore the angular power spectrum of the corrected lightcones to the few-percent level on the scales they act on; the two generative models additionally recover the non-Gaussian one-point moments and the weak-lensing convergence statistics that the deterministic rescaling by construction cannot. The corrected fast lightcones thus approach the reference simulations at a small fraction of their cost. \jozef{I think the flow of thoughts should be: as you start map-level simulation-based inference is the future in cosmological modelling - more precise, better control of systematic effects, self-consistent modelling of different probes,... however, many simulations needed. Some gravity-only suites exist (CosmoGridV1, GowerStreet), but fixed grid of sims, and expensive to run, especially in the context of moddeling in era of stage-IV cosmological surveys. Fast surrogates are cheap to evaluate, however, inherently imprecise at small scales. AI could potentially fill the gap and be used to correct fast sims, such that their low quality at small scales is improved. This thesis... Remember, that you cannot throw a term or abbreviation onto a reader unexplained, such as EDM.}
+Map-level, simulation-based inference from large-scale-structure surveys requires very large numbers of accurate lightcone simulations -- a demand that gravity solvers like \textsc{PkdGrav3}, which anchor the CosmoGridV1 reference suite, can only meet at a cost of many node-hours per realisation. Fast particle-mesh codes such as Disco-DJ produce the same large-scale clustering in minutes, but their mesh-limited force resolution progressively suppresses small-scale power -- precisely the scales that carry much of the non-Gaussian information such analyses exploit. This thesis builds and validates a pipeline that combines the speed of the particle-mesh solver with the small-scale accuracy of the tree code. For each CosmoGridV1 cosmology, identical backscaled initial conditions are reconstructed from the published linear perturbations and handed to both solvers, and a custom shell builder embedded in Disco-DJ's time integration reproduces \textsc{PkdGrav3}'s moving-lightcone crossing condition on CosmoGridV1's exact radial shell grid -- yielding paired full-sky lightcones that differ only through the force solver. On these pairs, three correction models are trained and compared on held-out cosmologies: a deterministic per-multipole transfer-function rescaling in harmonic space, a conditional flow-matching U-Net that transports each map patch from low to high fidelity, and an EDM-style conditional diffusion model that generates the missing small-scale residual from noise. Evaluated on a common footing, all three restore the angular power spectrum of the corrected lightcones to within a few percent on the scales they act on; the two generative models additionally recover most of the non-Gaussian one-point and weak-lensing convergence signal that the deterministic rescaling by construction cannot, the flow closing the convergence-kurtosis gap from $0.54$ to $0.92$ of the reference value. The corrected fast lightcones thus approach the reference simulations at a small fraction of their cost. \jozef{I think the flow of thoughts should be: as you start map-level simulation-based inference is the future in cosmological modelling - more precise, better control of systematic effects, self-consistent modelling of different probes,... however, many simulations needed. Some gravity-only suites exist (CosmoGridV1, GowerStreet), but fixed grid of sims, and expensive to run, especially in the context of moddeling in era of stage-IV cosmological surveys. Fast surrogates are cheap to evaluate, however, inherently imprecise at small scales. AI could potentially fill the gap and be used to correct fast sims, such that their low quality at small scales is improved. This thesis... Remember, that you cannot throw a term or abbreviation onto a reader unexplained, such as EDM.}
 
 \tableofcontents
 
@@ -422,9 +425,72 @@ The correction $f$ of Eq.~\eqref{eq:correction_goal} is only well-defined if the
   \draw[flowacc] (tipsy.east) -- (pkdrun.west);
   \draw[flowacc] (tipsy.east) -- (discorun.west) node[midway, below left=-1mm, note] {unmodified};
 \end{tikzpicture}}
-\caption{\jozef{Use consistent naming CosmoGridV1}Initial-condition hand-off. From each CosmoGridV1 run's stored linear perturbations, the CDM+baryon transfer function at $a=1$ is extracted in \textsc{class} table format (\texttt{pkdgrav/get\_transfer\_function.py}); a matched \textsc{class} solve with three massive neutrino states supplies the derived $\sigma_8$ and $\Omega_r$; \texttt{IC\_preparation.py} patches these into \texttt{cosmology.par}; \textsc{PkdGrav3} generates the backscaled particle load, which both solvers then consume byte-identically.\jozef{This is not true, the cb T(k) is different to the native ICs used by CosmoGrid, as a result of CONCEPT vs. backscaling evolution, just detail: CLASS format is, I believe, wrong and it should be CAMB format, right?}}
+\caption{\jozef{Use consistent naming CosmoGridV1}Initial-condition hand-off (Sec.~\ref{subsec:ic_why_tk} explains why this reconstruction is necessary at all). From each CosmoGridV1 run's stored \textsc{concept} perturbations, the CDM+baryon transfer function at $a=1$ is extracted as a two-column $(k,\,-T/k^2)$ table (\texttt{pkdgrav/get\_transfer\_function.py}); a matched \textsc{class} solve with three massive neutrino states supplies the derived $\sigma_8$ and $\Omega_r$; \texttt{IC\_preparation.py} patches these into \texttt{cosmology.par}; \textsc{PkdGrav3} generates the backscaled particle load, which the \emph{two solvers of this thesis} then consume byte-identically. Note that this load is deliberately \emph{not} a reproduction of CosmoGridV1's own native initial conditions, which were generated through \textsc{concept}'s forward linear evolution rather than by backscaling a static table; the resulting difference is quantified in Sec.~\ref{sec:shell_validation}.\jozef{This is not true, the cb T(k) is different to the native ICs used by CosmoGrid, as a result of CONCEPT vs. backscaling evolution, just detail: CLASS format is, I believe, wrong and it should be CAMB format, right?}}
 \label{fig:ic_flow}
 \end{figure}
+
+\subsection{Why a Tabulated Transfer Function is Needed}
+\label{subsec:ic_why_tk}
+
+CosmoGridV1 does not distribute initial conditions, and the way its own runs were
+started cannot be reused here. Understanding why is what motivates the entire
+reconstruction of Sec.~\ref{subsec:ic_linear}.
+
+\paragraph{How CosmoGridV1 starts its runs.} The published configuration drives
+\textsc{PkdGrav3} in its \texttt{bClass=1} mode, in which the cosmology is not
+specified through parameters at all but read wholesale from an HDF5 file produced
+by \textsc{concept} \cite{dakin_concept_2022}, a cosmological simulation framework
+that calls \textsc{class} internally and tabulates the full linear perturbation
+history $\delta_i(k,a)$ of every species. In this mode \textsc{PkdGrav3} does more
+than draw an initial particle load: it carries selected species as \emph{linear}
+fields alongside the nonlinear particles for the whole run. The CosmoGridV1
+parameter file requests
+\begin{center}
+\texttt{achLinSpecies = "g+ncdm[0]+fld+metric"}, \qquad \texttt{nGridLin = 208},
+\end{center}
+that is, photons, the massive-neutrino species, the dark-energy fluid and the
+metric perturbations are evolved on their own $208^3$ linear grid and their
+gravitational effect is added to the $832^3$ nonlinear particles at every step.
+The linear cosmology is thus an active ingredient throughout the simulation, not
+merely a boundary condition at the start.
+
+\paragraph{Why that mode cannot be used here.} The obstacle is structural rather
+than technical. Disco-DJ is a pure particle-mesh code (Sec.~\ref{sec:discodj}): it
+evolves particles under the Poisson equation and has no counterpart to
+\textsc{PkdGrav3}'s linear-species machinery. Were \textsc{PkdGrav3} run with
+\texttt{achLinSpecies} active while Disco-DJ was not, the two lightcones would
+differ through the treatment of photons, neutrinos and dark energy \emph{in
+addition} to the force solver -- and the correction $f$ of
+Eq.~\eqref{eq:correction_goal} would be learning that difference too, defeating
+the controlled comparison the whole thesis rests on. The requirement that the two
+runs differ \emph{only} through gravity therefore forces both to be started from
+one plain particle load, with no linear species carried afterwards.
+
+\paragraph{What this forces.} \texttt{IC\_preparation.py} accordingly switches
+\textsc{PkdGrav3} to \texttt{bClass=0}, removes the linear-species keys, and
+replaces the HDF5 reference by \texttt{achTfFile}, a \emph{static} tabulated
+transfer function. In this mode \textsc{PkdGrav3} draws a backscaled particle load
+from that single table (Sec.~\ref{subsec:ic_handoff}) and writes it to a
+\texttt{tipsy} file, which both solvers then consume identically. But CosmoGridV1
+ships no such table -- it ships \textsc{concept}'s perturbation HDF5. The table
+must therefore be reconstructed from it, which is precisely what
+Sec.~\ref{subsec:ic_linear} does. The file itself is minimal: \textsc{PkdGrav3}
+parses two whitespace-separated columns per line, $k$ and $-T(k)/k^2$, and takes
+the logarithm of both (\texttt{master.c}), so the tabulated values must be
+strictly positive. This is neither \textsc{class}'s nor \textsc{camb}'s
+multi-column transfer output -- the $-T/k^2$ normalisation follows \textsc{camb}'s
+convention, while the two-column layout is \textsc{PkdGrav3}'s own.
+
+\paragraph{The consequence.} Because the linear input is compressed into one
+static table at a single epoch and then backscaled with a scale-independent growth
+factor, the initial conditions reconstructed here are \emph{not} identical to
+CosmoGridV1's native ones: \textsc{concept}'s forward evolution treats radiation
+and massive neutrinos as separate, scale-dependent species, which a single growth
+factor cannot reproduce at every redshift simultaneously. The two agree by
+construction where the table is anchored, at $z=0$, and drift slowly away from it
+towards higher redshift. This is not a hidden approximation -- it is measurable,
+and Sec.~\ref{sec:shell_validation} quantifies it as a sub-percent, monotonically
+redshift-dependent offset in the large-scale amplitude of the resulting lightcone.
 
 \subsection{Matching the CosmoGridV1 Linear Input}
 \label{subsec:ic_linear}
@@ -452,6 +518,7 @@ From this patched configuration \jozef{Please, avoid unclear formulations - patc
 
 \subsection{Validation against CosmoGridV1}
 \label{sec:shell_validation}
+\jozef{I would put this as first part of the results. Because 1. this is part of your main contribution and 2. for these results/plots, you already need the shell builder, which you have not discussed up to this point}
 Before this machinery is trusted for training data, it is validated end-to-end at the high-fidelity side: \textsc{PkdGrav3} is run with its native lightcone module on the exact box, resolution, and cosmology used by CosmoGridV1, and the resulting matter angular power spectrum $C_\ell$ is compared shell-by-shell against the corresponding published CosmoGridV1 lightcone. Agreement here confirms that the reconstructed transfer function, the derived parameters of Sec.~\ref{subsec:ic_linear}, and the run configuration together reproduce the reference suite; only then is the same IC handed to Disco-DJ, whose shell output additionally validates the shell builder itself (\texttt{pkdgrav/validate\_shell\_builder.py}). Both runs describe the same cosmology
 on the same 69-shell radial grid, so their angular power spectra can be compared
 shell by shell (Figure~\ref{fig:cl_comparison}) and quantified through the ratio
@@ -465,9 +532,9 @@ lightcone. On the logarithmic scale of Figure~\ref{fig:cl_comparison} the two
 simulations are visually indistinguishable over most of the range -- itself the
 first result -- separating only at high $\ell$, and only on the nearer shells. The
 ratio resolves what that comparison cannot, and three distinct effects emerge from
-it.
+it. \jozef{what is $s$?}
 
-\paragraph{Lightcone geometry.} The first validates the shell builder itself. An
+\paragraph{Lightcone geometry.} The first  \jozef{of the two figures mentioned above} validates the shell builder itself. An
 error in the geometry -- a mis-solved crossing condition (Eq.~\ref{eq:vx_formula}),
 a missing periodic replica (Eq.~\ref{eq:replica_set}), a wrong shell assignment
 (Eq.~\ref{eq:shell_filter}), or a HEALPix ordering mismatch -- would misplace or
@@ -476,7 +543,7 @@ multipole, most conspicuously at the largest scales. No such corruption is
 present: on all four shells the ratio sits on unity to better than half a percent
 for $\ell \lesssim 100$. The streaming accumulation of
 Sec.~\ref{sec:shell_builder_core} therefore reproduces \textsc{PkdGrav3}'s
-lightcone geometry to the precision this test can resolve.
+lightcone geometry to the precision this test can resolve.  \jozef{the end of the last sentence is kind of redundant. Either change or skip, now it does not tell us much.}
 
 \begin{figure}[h!]
     \centering
@@ -498,7 +565,7 @@ lightcone geometry to the precision this test can resolve.
     \caption{The same four shells as Figure~\ref{fig:cl_comparison}, shown as the
     ratio of Eq.~\eqref{eq:shell_validation_ratio}, which resolves differences
     invisible on a six-decade logarithmic axis. All four shells agree with the
-    reference to better than half a percent at $\ell \lesssim 100$ -- the result
+    reference to better than half a percent  \jozef{are we sure? for some ells maybe but there are for sure some with larger difference. Just to phrase correctly - either 0.5\% at most ls or similar} at $\ell \lesssim 100$ -- the result
     that validates the shell builder -- while the small-scale deficit sets in at a
     fixed comoving scale and therefore at a higher multipole for each more distant
     shell. The upturn at the highest multipoles on shells~5 and~60 is the common
@@ -506,7 +573,7 @@ lightcone geometry to the precision this test can resolve.
     \label{fig:cl_ratio_summary}
 \end{figure}
 
-\paragraph{The backscaling trade-off.} The second is a small residual in the
+\paragraph{The backscaling trade-off.} The second \jozef{of the two figures shows} a small residual in the
 large-scale amplitude, and it follows directly from how the initial
 conditions are built. The linear spectrum is extracted at $a = 1$ and scaled back
 to the starting redshift with the linear growth factor
@@ -529,6 +596,7 @@ shell & $z$ & $R$ at $\ell \lesssim 100$ \\
 \bottomrule
 \end{tabular}
 \end{center}
+\jozef{Mention how was R calculated in this inline table. Is it average over ells below 100 or something else?}
 The drift stays sub-percent across the whole lightcone, small compared with the
 deficit the corrections must repair, but systematic rather than noise. It is the
 price of backscaled initial conditions: the closer a shell lies to $z = 0$, the
@@ -540,11 +608,11 @@ Figure~\ref{fig:cl_ratio_summary} exposes its defining property: it is a functio
 of comoving scale, not of multipole. Disco-DJ's force resolution is capped
 by its particle-mesh cell, $L_{\mathrm{box}}/N_{\mathrm{pm}} = 900/1664 =
 0.54\,\mathrm{cMpc}/h$, a fixed physical length; through the flat-sky
-correspondence $\ell \simeq \chi/r$ that one length maps to a different multipole
+correspondence $\ell \simeq \chi/r$ \jozef{have chi and r been introduced?} that one length maps to a different multipole
 on every shell, since $\chi$ grows with redshift. The dashed markers show where
 one fixed comoving scale of $5\,\mathrm{cMpc}/h$ -- the scale at which the
 transfer-function correction is switched on (Eq.~\ref{eq:ell_min}) -- lands on
-each shell, and they track the onset of the roll-off shell by shell: the nearest
+each shell, and they track the onset of the roll-off \jozef{roll-off - not clear what that means - use more scientific phrasing such as departure of PM power spectrum from the high-fidelity one} shell by shell: the nearest
 shell departs from unity around $\ell \sim 70$ and falls to $R \approx 0.24$ near
 $\ell \approx 2000$; shell~20 holds to $\ell \sim 300$ and reaches $R \approx
 0.56$ at $\ell = 3000$; shell~40 holds to $\ell \sim 600$ and reaches only
@@ -634,7 +702,7 @@ The pre-step state is then discarded and the post-step state becomes the next st
   \node[note] at (6.2,-3.0) {$S$ running HEALPix count maps};
   \draw[flowacc] (7.9,-0.35) -- (s3.north) node[midway, right=1mm, note] {$\mathbf{S}_s \mathrel{+}= \mathbf{M}_s^{(j)}$ (Eq.~\ref{eq:shell_update})};
 \end{tikzpicture}
-\caption{Streaming shell accumulation. The integration grid is the sorted union of all shell edges, so each sub-step sweeps exactly one radial shell (highlighted). Per step, only the pre- and post-step particle states are alive; their lightcone crossings (Sec.~\ref{sec:crossing}) are pixelised and added to that shell's running count map, after which the pre-step state is discarded. Memory usage is thus two snapshots $+\;S$ maps, independent of the number of steps.}
+\caption{Streaming shell accumulation. The integration grid is the sorted union of all shell edges, so each sub-step sweeps exactly one radial shell (highlighted). Per step, only the pre- and post-step particle states are alive; their lightcone crossings (Sec.~\ref{sec:crossing}) are pixelised and added to that shell's running count map, after which the pre-step state is discarded. Memory usage is thus two snapshots $+\;S$ maps, independent of the number of steps. \jozef{Doesn't S depend on number of steps?}}
 \label{fig:shell_stream}
 \end{figure}
 
@@ -1297,13 +1365,15 @@ held-out cosmology & $\Omega_m$ & $\sigma_8$ & $w_0$ & $H_0$ & $n_s$ & $\Omega_b
 \texttt{cosmo\_203124} & 0.2807 & 0.7217 & $-1.0855$ & 66.96 & 0.9617 & 0.04725 \\
 \bottomrule
 \end{tabular}
-\caption{The 30 held-out validation cosmologies and their varied parameters (from each run's \texttt{params.yml}; all other parameters are fixed across the CosmoGridV1 grid, Sec.~\ref{sec:cosmogrid}). Cosmologies marked $^\ast$ form the shared ten-cosmology evaluation set used for all full-sky and weak-lensing figures in this chapter.}
+\caption{The 30 held-out validation cosmologies and their varied parameters (from each run's \texttt{params.yml}; all other parameters are fixed across the CosmoGridV1 grid, Sec.~\ref{sec:cosmogrid}). All 30 form the shared evaluation set used for the full-sky and weak-lensing figures in this chapter.}
 \label{tab:heldout}
 \end{table}
 
-\paragraph{Statistics and resolutions.} Every pipeline is scored with the same shared diagnostics (\texttt{ml/analysis/}): per-shell full-sky angular power spectra pooled into three redshift bins, example patches with per-patch 2D power ratios, one-point moments (variance, skewness, excess kurtosis) as a function of shell depth, and weak-lensing convergence maps. The $\kappa$ maps are built with the \textsc{UFalcon} lightcone integration \cite{sgier_fast_2018} (\texttt{ml/analysis/weak\_lensing.py}): all corrected shells within a source bin's redshift range are combined into one convergence map per cosmology at $N_{\mathrm{side}}=1024$ ($\ell \le 2048$), using the DES-Y3 \textsc{metacal} source redshift distributions of tomographic bins 1 ($z \lesssim 1.05$) and 4 ($z \lesssim 1.85$) -- the lowest- and highest-redshift bins, which weight the nearby (hardest) and distant (easiest) shells respectively. One resolution asymmetry must be kept in mind throughout: the transfer pipeline operates on the native $N_{\mathrm{side}}=2048$ shells up to $\ell_{\max}=3000$, whereas the two learned pipelines were trained and applied at $N_{\mathrm{side}}=512$ (Sec.~\ref{subsec:pipe-patches}), so their shell-level statistics extend only to $\ell \sim 1500$ and their $\kappa$ maps lack input power beyond the corresponding band limit.
+\paragraph{Statistics and resolutions.} Every pipeline is scored with the same shared diagnostics (\texttt{ml/analysis/}): per-shell full-sky angular power spectra pooled into three redshift bins, example patches with per-patch 2D power ratios, one-point moments (variance, skewness, excess kurtosis) as a function of shell depth, and weak-lensing convergence maps. The $\kappa$ maps are built with the \textsc{UFalcon} lightcone integration \cite{sgier_fast_2018} (\texttt{ml/analysis/weak\_lensing.py}): all corrected shells within a source bin's redshift range are combined into one convergence map per cosmology at $N_{\mathrm{side}}=1024$ ($\ell \le 2048$), using the DES-Y3 \textsc{metacal} source redshift distributions of tomographic bins 1 ($z \lesssim 1.05$) and 4 ($z \lesssim 1.85$) -- the lowest- and highest-redshift bins, which weight the nearby (hardest) and distant (easiest) shells respectively. \paragraph{A common evaluation footing.} All three pipelines are scored at one and the same resolution: shells at $N_{\mathrm{side}}=512$, with the correction band capped at $\ell_{\max}=1500$. This is a deliberate choice rather than a technical limit. The transfer function is a harmonic rescaling and can be applied to the native $N_{\mathrm{side}}=2048$ shells out to $\ell=3000$ at negligible extra cost, whereas the two learned pipelines are bound to the resolution of the patch dataset they were trained on (Sec.~\ref{subsec:pipe-patches}). Scoring each method at the best resolution it happens to support would confound two different things -- how good the correction is, and how much input power its representation was given -- and would flatter the transfer function on exactly the small scales where the comparison is interesting.
 
-\paragraph{Percentile bands.} The shaded bands in the $C_\ell$-ratio figures are \emph{percentile bands across the held-out evaluation set}, not error bars on a mean. For the shell-level grids (e.g.\ Figure~\ref{fig:transfer_cl}), five shells are sampled from each redshift bin for each of the ten cosmologies, and the ratio $C_\ell/C_\ell^{\mathrm{true}}$ is computed per (cosmology, shell) pair -- fifty samples per bin. The solid line is their median; the band spans the 16th to 84th percentile, i.e.\ the central 68\% of the actual cosmology-to-cosmology and shell-to-shell scatter. A narrow band therefore means the correction is \emph{uniformly} good across cosmologies and depths, not merely good on average; for the $\kappa$ figures the band is taken across the ten cosmologies at fixed $\ell$.
+The choice is not free, and it costs the transfer function rather than the learned models. The per-shell correction onset $\ell_{\min}(s) = 2\pi\chi(s)/L$ of Eq.~\eqref{eq:ell_min} with $L = 5\,\mathrm{Mpc}/h$ grows with comoving distance: $\ell_{\min} \approx 319$ on shell~5 ($z \approx 0.09$), but $\approx 1331$ already on shell~20 ($z \approx 0.37$) and $\approx 3132$ on shell~40 ($z \approx 0.95$). At $\ell_{\max} = 1500$ only 23 of the 69 shells retain any band in which the transfer function acts at all; at $\ell_{\max} = 3000$ that number is 39. On the more distant half of the lightcone the transfer pipeline is therefore switched off by construction here, and its numbers below should be read as the performance of the method \emph{within a deliberately restricted band}, not as its ceiling. The corresponding native-resolution behaviour is reported separately in Sec.~\ref{sec:res-transfer}.
+
+\paragraph{Percentile bands.} The shaded bands in the $C_\ell$-ratio figures are \emph{percentile bands across the held-out evaluation set}, not error bars on a mean. For the shell-level grids (e.g.\ Figure~\ref{fig:transfer_cl}), five shells are sampled from each redshift bin for each of the 30 cosmologies, and the ratio $C_\ell/C_\ell^{\mathrm{true}}$ is computed per (cosmology, shell) pair -- 150 samples per bin. The solid line is their median; the band spans the 16th to 84th percentile, i.e.\ the central 68\% of the actual cosmology-to-cosmology and shell-to-shell scatter. A narrow band therefore means the correction is \emph{uniformly} good across cosmologies and depths, not merely good on average; for the $\kappa$ figures the band is taken across the 30 cosmologies at fixed $\ell$.
 
 \section{Transfer-Function Pipeline}
 \label{sec:res-transfer}
@@ -1419,7 +1489,7 @@ Inference & closed form & 8 Euler steps & 32 Heun steps; shared noise; taper $p=
     \label{fig:flow_moments}
 \end{figure}
 
-\paragraph{Weak lensing.} The convergence spectra (Figure~\ref{fig:flow_kappa}) follow the truth to within the band width out to $\ell \approx 700$ (bin 1) and $\ell \approx 1000$ (bin 4), then decline smoothly to $\approx 0.90$ and $\approx 0.95$ respectively at $\ell \approx 2000$. This high-$\ell$ deficit is consistent with the evaluation resolution: the $\kappa$ integration extends to $\ell = 2048$, beyond the band limit of the $N_{\mathrm{side}}=512$ shell reconstructions that feed it. The $\kappa$ moments (Figure~\ref{fig:flow_kappa_moments}) are the pipeline's strongest single result: for every one of the ten held-out cosmologies, the corrected variance, skewness, and excess kurtosis land on the reference values, where the uncorrected maps miss by large factors.
+\paragraph{Weak lensing.} The convergence spectra (Figure~\ref{fig:flow_kappa}) follow the truth to within the band width out to $\ell \approx 700$ (bin 1) and $\ell \approx 1000$ (bin 4), then decline smoothly to $\approx 0.90$ and $\approx 0.95$ respectively at $\ell \approx 2000$. This high-$\ell$ deficit is consistent with the evaluation resolution: the $\kappa$ integration extends to $\ell = 2048$, beyond the band limit of the $N_{\mathrm{side}}=512$ shell reconstructions that feed it. The $\kappa$ moments (Figure~\ref{fig:flow_kappa_moments}) are the pipeline's strongest single result. Averaged over the 30 held-out cosmologies, the corrected-to-reference ratios in bin~1 are $0.954 \pm 0.009$ (variance), $0.959 \pm 0.014$ (skewness) and $0.921 \pm 0.045$ (excess kurtosis), against $0.803 \pm 0.018$, $0.733 \pm 0.020$ and $0.537 \pm 0.042$ uncorrected; in bin~4 they reach $0.986/0.983/0.963$. The flow thus closes roughly three quarters of the non-Gaussian gap and does so consistently -- its scatter is the tightest of the three pipelines -- but a systematic few-percent undershoot remains, growing with the order of the moment.
 
 \begin{figure}[h!]
     \centering
@@ -1474,7 +1544,7 @@ Inference & closed form & 8 Euler steps & 32 Heun steps; shared noise; taper $p=
     \label{fig:diff_moments}
 \end{figure}
 
-\paragraph{Weak lensing.} At the $\kappa$ level (Figure~\ref{fig:diff_kappa}), the diffusion correction is the best of the three at high multipoles in bin 1: it remains within $\approx 5\%$ of the truth out to $\ell = 2048$, where the flow has declined to $\approx 0.90$, and bin 4 sits at $\approx 0.97$ at the same scales. Its percentile bands are somewhat wider than the flow's -- the price of a genuinely stochastic sampler. The $\kappa$ moments (Figure~\ref{fig:diff_kappa_moments}) land close to the truth for all ten cosmologies, with a small systematic undershoot of skewness and kurtosis relative to the flow's essentially exact recovery.
+\paragraph{Weak lensing.} At the $\kappa$ level (Figure~\ref{fig:diff_kappa}), the diffusion correction is the best of the three at high multipoles in bin 1: it remains within $\approx 5\%$ of the truth out to $\ell = 2048$, where the flow has declined to $\approx 0.90$, and bin 4 sits at $\approx 0.97$ at the same scales. Its percentile bands are somewhat wider than the flow's -- the price of a genuinely stochastic sampler. The $\kappa$ moments (Figure~\ref{fig:diff_kappa_moments}) improve strongly on the uncorrected maps across all 30 cosmologies -- bin~1 ratios of $0.935 \pm 0.010$, $0.885 \pm 0.019$ and $0.773 \pm 0.056$, bin~4 ratios of $0.983/0.959/0.902$ -- but sit consistently below the flow on every moment, the gap widening from variance to kurtosis.
 
 \begin{figure}[h!]
     \centering
@@ -1495,7 +1565,21 @@ Inference & closed form & 8 Euler steps & 32 Heun steps; shared noise; taper $p=
 \section{Synthesis}
 \label{sec:res-synthesis}
 
-Three consistent messages emerge. First, every pipeline repairs the two-point statistics on the scales it acts on: the transfer function holds shell and convergence spectra within a few percent out to the native $\ell = 3000$ resolution at almost no inference cost, and the two learned pipelines do the same within their $N_{\mathrm{side}}=512$ evaluation band. Second, the statistics beyond two-point cleanly separate the deterministic from the generative route: skewness and kurtosis -- at shell level and $\kappa$ level alike -- are untouched by the amplitude rescale but restored by both generative models, with the flow essentially exact and the diffusion slightly conservative. Third, the two generative models trade differently at the convergence level: the flow gives the most precise moments and the tightest bands, the diffusion the flattest high-$\ell$ spectra. The comparison between transfer and the learned pipelines at the highest multipoles is not yet apples-to-apples -- the learned corrections were evaluated at $N_{\mathrm{side}}=512$, and extending them to the native resolution is the most direct next step (Chapter~\ref{ch:conclusion}). \jozef{I think the following comparison/summary plot would be great (to compare the three methods). For kappa maps bin1: compute the ratio of low/high for variance/skewness/kurtosis for each of 10 held-out cosmologies and take the mean+standard deviation of these 10 ratios. This will give you a single point with errorbars for variance, single point for skewness and the same for kurtosis. Should be some number between 0 and 1 with errorbar. Now, you can compute the same but for kappa maps produced by all three methods you trained. You can put all of this into single plot, such that we can clearly compare how the methods work.  In addition, I think Alexandre could ask about the weak-lensing peaks, which can be measured from the kappa maps and can be another estimate of how well the methods work. But I can give you more info in case you have time and mood to do this:)}
+Figure~\ref{fig:method_comparison} reduces all three pipelines to a single view: for each held-out cosmology the ratio of a $\kappa$-map moment to its reference value, averaged over the 30 cosmologies, with the cosmology-to-cosmology scatter as an errorbar. Because every method is scored at the same $N_{\mathrm{side}}=512$, $\ell_{\max}=1500$ footing, the vertical ordering is a statement about the corrections themselves rather than about the resolutions they were given.
+
+Three consistent messages emerge. First, every pipeline repairs the two-point statistics on the scales it acts on: the uncorrected variance ratio of $0.803 \pm 0.018$ (bin~1) is lifted to $0.941 \pm 0.010$ by the transfer function, $0.935 \pm 0.010$ by the diffusion model and $0.954 \pm 0.009$ by the flow, all three at a small fraction of the $N$-body cost. Second, the higher moments cleanly separate the deterministic from the generative route. A pure amplitude rescale cannot manufacture the phase correlations that skew a distribution, and the transfer function accordingly moves skewness only from $0.733 \pm 0.020$ to $0.789 \pm 0.027$ and excess kurtosis from $0.537 \pm 0.042$ to $0.636 \pm 0.058$ -- a real but modest gain, inherited from the reweighting of scales rather than from any new structure. Both generative models go substantially further, the flow reaching $0.959 \pm 0.014$ in skewness and $0.921 \pm 0.045$ in kurtosis and the diffusion $0.885 \pm 0.019$ and $0.773 \pm 0.056$. Third, the recovery is not complete: even the flow leaves a $\approx 8\%$ kurtosis deficit in bin~1, and the residual is systematically one-sided -- every method undershoots. The generative models close most of the non-Gaussian gap the transfer function cannot touch, but they do not close it entirely.
+
+The same ordering holds in bin~4 with uniformly smaller gaps (flow $0.986/0.983/0.963$, diffusion $0.983/0.959/0.902$, transfer $0.960/0.884/0.773$), which is expected: the distant shells are the ones Disco-DJ already gets nearly right, so less has to be repaired. The errorbars are informative in their own right -- the flow's are the tightest of the three on every moment, so its correction is not only the most accurate on average but also the most uniform across cosmologies.
+
+\begin{figure}[h!]
+    \centering
+    \includegraphics[width=0.92\textwidth]{plots/results/comparison/method_comparison_kappa_moments_bin1.png}
+    \includegraphics[width=0.92\textwidth]{plots/results/comparison/method_comparison_kappa_moments_bin4.png}
+    \caption{All three corrections on one axis (\texttt{vis/plot\_method\_comparison.py}), for DES-Y3 \textsc{metacal} source bin~1 (top) and bin~4 (bottom). For each of the 30 held-out cosmologies the $\kappa$-map variance, skewness and excess kurtosis are divided by their CosmoGridV1 reference value; the marker is the mean of that ratio over cosmologies and the errorbar its standard deviation, so a perfect correction sits on the dashed line at unity with a short bar. The errorbar measures cosmology-to-cosmology \emph{consistency}, not uncertainty on the mean: a method may sit on unity with a wide bar (right on average, unreliable per cosmology) or slightly below it with a tight bar (biased but predictable). The uncorrected Disco-DJ lightcone is shown on the same axis -- the distance from it to unity is the gap each method is trying to close. All three are evaluated at the common $N_{\mathrm{side}}=512$, $\ell_{\max}=1500$ footing, which handicaps the transfer function relative to its native-resolution capability (see the common-footing discussion in Sec.~\ref{sec:res-protocol}).}
+    \label{fig:method_comparison}
+\end{figure}
+
+\jozef{I think the following comparison/summary plot would be great (to compare the three methods). For kappa maps bin1: compute the ratio of low/high for variance/skewness/kurtosis for each of 10 held-out cosmologies and take the mean+standard deviation of these 10 ratios. This will give you a single point with errorbars for variance, single point for skewness and the same for kurtosis. Should be some number between 0 and 1 with errorbar. Now, you can compute the same but for kappa maps produced by all three methods you trained. You can put all of this into single plot, such that we can clearly compare how the methods work.  In addition, I think Alexandre could ask about the weak-lensing peaks, which can be measured from the kappa maps and can be another estimate of how well the methods work. But I can give you more info in case you have time and mood to do this:)}
 
 \chapter{Conclusion}
 \label{ch:conclusion}
@@ -1506,7 +1590,7 @@ The foundation was infrastructural. By reconstructing each CosmoGridV1 cosmology
 
 On these pairs, three corrections were built (Sec.~\ref{sec:correction-pipelines}), sharing one measured insight -- Disco-DJ's small-scale deficit is primarily one of \emph{amplitude}, its phases remaining correlated with the truth deep into the nonlinear regime -- and one shared guarantee, the high-pass residual formulation that pins the already-correct large scales to the fast simulation exactly. The deterministic transfer-function pipeline holds shell and weak-lensing convergence spectra within a few percent of the reference out to the native $\ell = 3000$, at essentially zero inference cost; it is the method of choice wherever two-point statistics suffice. What it cannot do -- by construction, not by failure -- is generate the one-point non-Gaussianity of the missing structure. The two generative pipelines close exactly that gap: both the flow-matching U-Net and the EDM diffusion model restore skewness and excess kurtosis at shell and convergence level on cosmologies they never saw, the flow essentially exactly and with the tightest cosmology-to-cosmology scatter, the diffusion slightly conservatively but with the flattest high-multipole convergence spectra. That a 32-step stochastic sampler, evaluated on thousands of overlapping tiles sharing a single global noise field, reassembles into consistent full-sky maps also validates the overlap-tile machinery itself as a general route for applying patch-based generative models to the sphere.
 
-Several limitations bound these conclusions and set the agenda. The learned pipelines were trained and evaluated at $N_{\mathrm{side}}=512$ \jozef{I saw 1024 in the plot titles and also lmax of 3000 is too high for nside=512}, so their corrections currently stop short of the native $\ell = 3000$ band where the transfer function was scored -- retraining on native-resolution patches is the most direct extension, and the patch machinery already supports it. The corrected fields are continuous overdensities, not integer count maps, which downstream weak-lensing statistics tolerate but a consumer requiring per-pixel count validity would not. The corrections were validated on matter shells and derived convergence maps at fixed total neutrino mass, without baryonic feedback -- which operates on precisely the scales corrected here and would need its own treatment \cite{schneider_matter_2015, fluri_full_2022}. And each cosmology entered with a single realisation, so realisation-to-realisation generalisation at fixed cosmology remains to be quantified.
+Several limitations bound these conclusions and set the agenda. All three pipelines were evaluated at $N_{\mathrm{side}}=512$, with the correction band capped at the matching $\ell_{\max}=1500$ \jozef{I saw 1024 in the plot titles and also lmax of 3000 is too high for nside=512} -- a common footing chosen so that the comparison measures the corrections rather than the resolutions they were handed (Sec.~\ref{sec:res-protocol}). This bounds the results from both sides. The learned models have never been asked to correct the $\ell = 1500$--$3000$ band at all, so nothing here shows they generalise to it; and the transfer function was scored with its correction band closed on 46 of the 69 shells, well below what the same method achieves on the native $N_{\mathrm{side}}=2048$ maps. Lifting both to the native resolution -- retraining the patch models on $N_{\mathrm{side}}=2048$ tiles, which the patch machinery already supports -- is the most direct extension, and is what would turn the present ordering into a statement about the methods at full resolution. The corrected fields are continuous overdensities, not integer count maps, which downstream weak-lensing statistics tolerate but a consumer requiring per-pixel count validity would not. The corrections were validated on matter shells and derived convergence maps at fixed total neutrino mass, without baryonic feedback -- which operates on precisely the scales corrected here and would need its own treatment \cite{schneider_matter_2015, fluri_full_2022}. And each cosmology entered with a single realisation, so realisation-to-realisation generalisation at fixed cosmology remains to be quantified.
 
 The direction, however, is clear. A Disco-DJ lightcone costs minutes where the reference costs node-hours, and the corrections add almost nothing to that -- so corrected fast lightcones can populate the simulation demand of deep-learning analyses of current surveys \cite{thomsen_dark_2026, fluri_full_2022} at a small fraction of the reference suite's cost, reserving full $N$-body runs for validation rather than production. The longer-term prospect is tighter still: Disco-DJ is differentiable end-to-end \cite{list_disco-dj_2026}, and a differentiable corrected forward model -- from cosmological parameters through the corrected lightcone to the map-level statistic -- would put gradient-based inference within reach of the same pipeline.
 

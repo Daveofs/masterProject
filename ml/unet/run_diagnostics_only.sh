@@ -2,7 +2,7 @@
 #SBATCH --nodes=4
 #SBATCH --job-name=unet-diag
 #SBATCH --partition=normal
-#SBATCH --account=sk037
+#SBATCH --account=a0158
 #SBATCH --ntasks-per-node=1
 #SBATCH --gres=gpu:4
 #SBATCH --cpus-per-task=128

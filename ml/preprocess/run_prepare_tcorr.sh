@@ -2,7 +2,7 @@
 #SBATCH --nodes=1
 #SBATCH --job-name=prep-tcorr
 #SBATCH --partition=normal
-#SBATCH --account=sk037
+#SBATCH --account=a0158
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=72
 #SBATCH --time=06:00:00

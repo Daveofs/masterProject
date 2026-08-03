@@ -71,7 +71,10 @@ from transfer_function import (_alm, ell_of_flat_index, alm_fname, smooth_cl,   
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 from analysis.transforms import log1p_delta_pair                                   # noqa: E402
 from analysis.radial_power import radial_power                                     # noqa: E402
-from analysis.full_sky import od_cl, zbin_shell_samples                            # noqa: E402
+# aliased: transfer_function.shell_redshifts (imported above, 3 args) is a
+# DIFFERENT function with a different signature, and is still used by apply()
+from analysis.full_sky import (od_cl, zbin_shell_samples,                          # noqa: E402
+                               shell_redshifts as fs_shell_redshifts)              # noqa: E402
 from analysis.moments import moments                                               # noqa: E402
 from analysis.plotting import (plot_example_patch_grid, plot_pctile_band_ratio,    # noqa: E402
                                plot_cl_shell,                                       # noqa: E402
@@ -88,6 +91,24 @@ from analysis import weak_lensing                                               
 # --poisson path (lognormal+Poisson re-discretization) was removed entirely --
 # see the import-section comment above for why.
 # ---------------------------------------------------------------------------
+
+def _load_high(run, nside, info_npz):
+    """High (CosmoGridV1) shells AT THE SAME nside as the low/corrected maps.
+
+    The native compressed_shells.npz is always nside=2048. Reading it while the
+    correction is applied at a lower nside compares two different resolutions:
+    the degraded map is missing the small-scale power the pixel window removes,
+    so every Cl ratio acquires a spurious high-ell roll-off that has nothing to
+    do with the model (measured at NSIDE=512: the zbin grid fell to ~0.67 by
+    ell=1500, where the true low/high ratio of the same shells is 0.98-0.99).
+    Prefer the prepared stack at the requested nside and fall back to the npz
+    only when it genuinely IS the native resolution.
+    """
+    prepared = run / f"high_shells_nside={nside}.npy"
+    if prepared.exists():
+        return np.load(prepared, mmap_mode="r")
+    return np.load(run / info_npz, mmap_mode="r")["shells"]
+
 
 def apply(args, run: Path, transfer_path, out_path=None):
     tf = np.load(transfer_path)
@@ -297,7 +318,7 @@ def plot_patches(args, run_dirs: list[Path], corrected_by_run: dict):
     # low_full/true differ per cosmology -- load once per run, reused by both the
     # visual grid and the pooled pctile-band sampling below.
     arrays = {run: (np.load(run / f"low_shells_nside={nside}.npy", mmap_mode="r"),
-                    np.load(run / args.info_npz, mmap_mode="r")["shells"])
+                    _load_high(run, nside, args.info_npz))
               for run in run_dirs}
 
     rng = np.random.default_rng(args.seed)
@@ -400,7 +421,7 @@ def plot_full_sky(args, run_dirs: list[Path], corrected_by_run: dict):
     method_label = "transfer (no-clip)" if args.no_clip else "transfer (clipped)"
 
     arrays = {run: (np.load(run / f"low_shells_nside={nside}.npy", mmap_mode="r"),
-                    np.load(run / args.info_npz, mmap_mode="r")["shells"])
+                    _load_high(run, nside, args.info_npz))
               for run in run_dirs}
     run0 = run_dirs[0]
     low_all0, high_all0 = arrays[run0]
@@ -483,8 +504,12 @@ def plot_cl_zbin_grid(args, run_dirs: list[Path], corrected_by_run: dict):
     # in, it single-handedly blew the old "shells 45-68" panel's pctile band out to
     # ~1.9 in every pipeline's cl_ratio_by_zbin_grid.png (now "shells 45-67").
     n_shells_total -= 1
+    # label the bins by redshift rather than shell index (see zbin_shell_samples):
+    # the shell table is per-cosmology, but the shell GRID is shared across the
+    # CosmoGridV1 suite, so any held-out run's table gives the same z labels.
     zbins = zbin_shell_samples(n_shells_total, args.zbin_start, args.n_zbins,
-                               args.n_shells_per_zbin)
+                               args.n_shells_per_zbin,
+                               shell_z=fs_shell_redshifts(run_dirs[0], args.info_npz))
     grid_runs = run_dirs[:args.max_cosmologies]
     print(f"[plot_cl_zbin_grid] {len(grid_runs)} held-out cosmologies x "
           f"{len(zbins)} redshift bins {[b[0] for b in zbins]}", flush=True)
@@ -492,7 +517,7 @@ def plot_cl_zbin_grid(args, run_dirs: list[Path], corrected_by_run: dict):
     grid = []
     for run in grid_runs:
         low_all = np.load(run / f"low_shells_nside={nside}.npy", mmap_mode="r")
-        high_all = np.load(run / args.info_npz, mmap_mode="r")["shells"]
+        high_all = _load_high(run, nside, args.info_npz)
         corrected = corrected_by_run[run]
         panels = []
         for bin_label, shells in zbins:
@@ -510,6 +535,27 @@ def plot_cl_zbin_grid(args, run_dirs: list[Path], corrected_by_run: dict):
         grid.append((f"{run.parent.name}/{run.name}", panels))
 
     method_label = "transfer (no-clip)" if args.no_clip else "transfer (clipped)"
+
+    # Dump the ratio stacks behind the figure, matching what unet/apply_flow.py and
+    # diffusion/apply_diffusion.py already write. Without it, ANY later change to
+    # this plot (a legend that overflows, a relabelled axis) costs a full ~1.5h
+    # rerun of the whole correction just to redraw it, whereas the other two
+    # pipelines replot from disk in seconds.
+    _dump = {"cosmos": np.array([f"{r.parent.name}/{r.name}" for r in grid_runs]),
+             "lmax": np.array(lmax),
+             "bin_labels": np.array([p[0] for p in grid[0][1]]) if grid else np.array([]),
+             "bin_shells": np.array([np.asarray(p[1]) for p in grid[0][1]], dtype=object)
+                           if grid else np.array([])}
+    for row_label, panels in grid:
+        cname = row_label.split("/")[0]
+        for _lab, shells_ref, _ells, lo_stack, co_stack in panels:
+            for si, sh in enumerate(np.atleast_1d(shells_ref)):
+                _dump[f"low_{cname}_s{int(sh)}"] = np.asarray(lo_stack)[si]
+                _dump[f"corrected_{cname}_s{int(sh)}"] = np.asarray(co_stack)[si]
+    np.savez(out_dir / "cl_ratio_by_zbin_data.npz", **_dump)
+    print(f"[plot_cl_zbin_grid] wrote cl_ratio_by_zbin_data.npz "
+          f"({len(grid)} cosmologies) -- replot without re-running apply()", flush=True)
+
     plot_cl_ratio_pctile_grid(
         grid, out_dir / "cl_ratio_by_zbin_grid.png",
         corrected_label=f"corrected ({method_label}) / true (after)",
@@ -573,7 +619,7 @@ def plot_kappa(args, run_dirs: list[Path], corrected_by_run: dict):
         lower_z, upper_z = lower_z_all[usable], upper_z_all[usable]
 
         low_all = np.load(run / f"low_shells_nside={nside}.npy", mmap_mode="r")
-        high_all = np.load(run / args.info_npz, mmap_mode="r")["shells"]
+        high_all = _load_high(run, nside, args.info_npz)
         corrected = corrected_by_run[run]
         # float32, not float64 (2026-07-24): these are materialized COPIES (up to
         # ~69 usable shells x nside=2048's 50M pixels each), not mmap views, and
@@ -636,6 +682,12 @@ def plot_kappa(args, run_dirs: list[Path], corrected_by_run: dict):
             out_dir / f"kappa_moments_scatter_{tag}.png",
             corrected_label=f"corrected ({method_label})",
             suptitle=f"weak-lensing kappa map moments, {suptitle_common}")
+        # persist the same numbers so the three pipelines can be put on one axes
+        # later without re-running any reconstruction
+        weak_lensing.save_kappa_moment_summary(
+            out_dir / f"kappa_moments_{tag}.npz", cosmo_labels,
+            a["mom_low"], a["mom_corr"], a["mom_high"],
+            method_label="transfer", tag=tag)
 
 
 # ---------------------------------------------------------------------------

@@ -13,10 +13,50 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
+from matplotlib.ticker import FuncFormatter, MaxNLocator
+
 from .radial_power import radial_power
 
 
-def plot_example_patch_grid(rows, out_path, corrected_label="corrected", suptitle=None):
+def _sci_tick(v, _pos=None):
+    """Tick label as a x 10^b in mathtext (see plot_kappa_moments_scatter)."""
+    if v == 0:
+        return "0"
+    e = int(np.floor(np.log10(abs(v))))
+    m = v / 10.0 ** e
+    return rf"${m:.1f}\times10^{{{e}}}$"
+
+# ---------------------------------------------------------------------------
+# Typography. These figures go into the thesis at roughly \textwidth, so every
+# label has to survive that downscaling -- hence sizes well above matplotlib's
+# defaults. Axes TITLES are deliberately not drawn: the shell index, redshift
+# range, cosmology and pooling are stated in the LaTeX caption instead, which
+# keeps that information in one place and out of the rasterised image. The
+# `suptitle` arguments below are kept in the signatures (many callers pass them)
+# but are ignored for the same reason.
+# ---------------------------------------------------------------------------
+FS_AXIS = 15      # axis labels
+FS_TICK = 13      # tick labels
+FS_LEGEND = 12    # legend entries
+FS_PANEL = 13     # in-panel annotations (e.g. the z-range of a shell bin)
+FS_ROWLAB = 13    # per-row identifying labels on faceted grids
+
+
+def centre_crop(img, n):
+    """Central (n, n) crop of a 2D array (returned unchanged if n is None or too
+    large). Used to bring the nside=512 patch figures onto the SAME sky area as
+    the nside=2048 ones -- see plot_example_patch_grid's `crop`."""
+    if n is None:
+        return img
+    h, w = img.shape[-2:]
+    if n >= min(h, w):
+        return img
+    i0, j0 = (h - n) // 2, (w - n) // 2
+    return img[..., i0:i0 + n, j0:j0 + n]
+
+
+def plot_example_patch_grid(rows, out_path, corrected_label="corrected", suptitle=None,
+                            crop=None):
     """rows: list of (row_label, low_img, corr_img, high_img) -- 2D patches in
     whatever overdensity space the CALLER chose to display (NOT necessarily log1p):
     unet/apply_flow.py and diffusion/apply_diffusion.py pass their model's own
@@ -28,22 +68,46 @@ def plot_example_patch_grid(rows, out_path, corrected_label="corrected", suptitl
     name the space (as the two model pipelines' now do). One row per shell/example.
     4 columns: low/corrected/high images + per-patch radial-power-ratio (the
     flat-patch analogue of the C_ell ratio, bounded by that one patch's own Nyquist
-    wavenumber)."""
+    wavenumber).
+
+    `crop` centre-crops the three image columns to (crop, crop) pixels BEFORE
+    display, leaving the power-ratio column (computed on the full patch) alone.
+    Its purpose is field of view, not zoom: a 256-pixel patch spans
+    256*nside2resol(nside), i.e. 29.3 deg at nside=512 but only 7.33 deg at
+    nside=2048. Over 29 deg the square display grid beats against HEALPix's
+    diamond lattice and the patch acquires long streaky moire fringes -- visible
+    identically in the low, corrected AND high columns, so an artefact of
+    displaying that much sky, not of any model. Cropping an nside=512 patch to 64
+    pixels restores exactly the 7.33 deg of the nside=2048 figures, removing the
+    fringes and making the two directly comparable; the coarser pixels that remain
+    are the genuine resolution difference between the runs.
+    """
     ns = len(rows)
     fig, axes = plt.subplots(ns, 4, figsize=(13, 3 * ns),
                              gridspec_kw={"width_ratios": [1, 1, 1, 1.3]})
     axes = np.atleast_2d(axes)
-    for i, (label, low_img, corr_img, high_img) in enumerate(rows):
+    for i, (label, low_img_full, corr_img_full, high_img_full) in enumerate(rows):
+        low_img = centre_crop(low_img_full, crop)
+        corr_img = centre_crop(corr_img_full, crop)
+        high_img = centre_crop(high_img_full, crop)
         vmin, vmax = float(high_img.min()), float(high_img.max())
+        # Smooth the RENDERING of small (cropped, nside=512) patches: at 64 px
+        # blown up to a full panel, nearest-neighbour shows every pixel as a hard
+        # block, which reads as a defect rather than as the coarser resolution it
+        # actually is. Bilinear is a display choice only -- no data is altered,
+        # and no detail is implied beyond the pixel scale, which the caption
+        # states. Large patches (the nside=2048 figures) keep nearest, so their
+        # appearance is unchanged. Lanczos was tried and rejected: it rings.
+        interp = "bilinear" if min(low_img.shape[-2:]) < 128 else "nearest"
         for j, (img, ttl) in enumerate([(low_img, "low (DISCO)"), (corr_img, corrected_label),
                                         (high_img, "high (CosmoGrid)")]):
             a = axes[i, j]
-            a.imshow(img, vmin=vmin, vmax=vmax, cmap="viridis")
+            a.imshow(img, vmin=vmin, vmax=vmax, cmap="viridis", interpolation=interp)
             a.set_xticks([]); a.set_yticks([])
             if i == 0:
-                a.set_title(ttl, fontsize=10)
+                a.set_title(ttl, fontsize=FS_AXIS)
             if j == 0:
-                a.set_ylabel(label, fontsize=9)
+                a.set_ylabel(label, fontsize=FS_ROWLAB)
 
         pr_low = radial_power(low_img); pr_corr = radial_power(corr_img); pr_high = radial_power(high_img)
         k = np.arange(len(pr_high))
@@ -52,15 +116,13 @@ def plot_example_patch_grid(rows, out_path, corrected_label="corrected", suptitl
             ai.semilogx(k[1:], (pr_low / pr_high)[1:], ":", color="seagreen", label="low/high")
             ai.semilogx(k[1:], (pr_corr / pr_high)[1:], "-", color="steelblue", label="corrected/high")
         ai.axhline(1, color="k", lw=0.8); ai.set_ylim(0.4, 1.6)
-        ai.tick_params(labelsize=8)
+        ai.tick_params(labelsize=FS_TICK)
         if i == 0:
-            ai.set_title("power ratio to truth", fontsize=10)
-            ai.legend(fontsize=7, loc="lower left")
+            ai.set_title("power ratio to truth", fontsize=FS_AXIS)
+            ai.legend(fontsize=FS_LEGEND, loc="lower left")
         if i == ns - 1:
-            ai.set_xlabel("radial wavenumber bin", fontsize=8)
+            ai.set_xlabel("radial wavenumber bin", fontsize=FS_AXIS)
 
-    if suptitle:
-        fig.suptitle(suptitle, fontsize=11, wrap=True)
     fig.tight_layout()
     out_path = Path(out_path); out_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out_path, dpi=300); plt.close(fig)
@@ -86,24 +148,22 @@ def plot_example_full_sky_grid(rows, out_path, corrected_label="corrected", supt
             a.imshow(img, vmin=vmin, vmax=vmax, cmap="viridis")
             a.set_xticks([]); a.set_yticks([])
             if i == 0:
-                a.set_title(ttl, fontsize=10)
+                a.set_title(ttl, fontsize=FS_AXIS)
             if j == 0:
-                a.set_ylabel(label, fontsize=9)
+                a.set_ylabel(label, fontsize=FS_ROWLAB)
 
         ai = axes[i, 3]
         with np.errstate(divide="ignore", invalid="ignore"):
             ai.semilogx(ells[1:], (cl_lo / cl_hi)[1:], ":", color="seagreen", label="low/high")
             ai.semilogx(ells[1:], (cl_c / cl_hi)[1:], "-", color="steelblue", label="corrected/high")
         ai.axhline(1, color="k", lw=0.8); ai.set_ylim(0.0, 1.6)
-        ai.tick_params(labelsize=8)
+        ai.tick_params(labelsize=FS_TICK)
         if i == 0:
-            ai.set_title(r"real $C_\ell$ ratio to truth", fontsize=10)
-            ai.legend(fontsize=7, loc="lower left")
+            ai.set_title(r"real $C_\ell$ ratio to truth", fontsize=FS_AXIS)
+            ai.legend(fontsize=FS_LEGEND, loc="lower left")
         if i == ns - 1:
-            ai.set_xlabel(r"$\ell$", fontsize=8)
+            ai.set_xlabel(r"$\ell$", fontsize=FS_AXIS)
 
-    if suptitle:
-        fig.suptitle(suptitle, fontsize=11, wrap=True)
     fig.tight_layout()
     out_path = Path(out_path); out_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out_path, dpi=300); plt.close(fig)
@@ -163,11 +223,7 @@ def plot_pctile_band_ratio(x, ratio_stacks: dict, out_path, xlabel=r"$\ell$",
     ax.set_ylabel(ylabel or (r"$C_\ell/C_\ell^{true}$" if "ell" in xlabel.lower() else "ratio"))
     if ylim:
         ax.set_ylim(*ylim)
-    ax.set_title(title or f"ratio to truth ({n_samples} samples, "
-                          f"{lo_pct}-{hi_pct}th pctile band)", fontsize=10, wrap=True)
-    ax.legend(fontsize=9)
-    if suptitle:
-        fig.suptitle(suptitle, fontsize=11, wrap=True)
+    ax.legend(fontsize=FS_LEGEND)
     fig.tight_layout()
     out_path = Path(out_path); out_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out_path, dpi=300); plt.close(fig)
@@ -215,9 +271,15 @@ def plot_cl_ratio_pctile_grid(grid, out_path, pctile=(16, 84), suptitle=None,
         edges = np.geomspace(max(ell_min, 2), ells.max(), n_ell_bins + 1)
         centers = np.sqrt(edges[:-1] * edges[1:])
 
+        # Legend labels are deliberately SHORT. The y-axis already reads
+        # C_l / C_l^true, so the "/ true (before|after)" half of the caller's
+        # label is redundant -- and with it, "corrected (transfer (no-clip)) /
+        # true (after)" is wide enough that the legend box overflowed the panel
+        # into its neighbour. Strip that suffix and keep only the method name.
+        short_corr = corrected_label.split(" / ")[0].strip() or "corrected"
         for stack, color, label in [
-                (lo_pool, "gray", "low / true (before)"),
-                (co_pool, "steelblue", corrected_label)]:
+                (lo_pool, "gray", "low (DISCO)"),
+                (co_pool, "steelblue", short_corr)]:
             xs, med, p_lo_arr, p_hi_arr = [], [], [], []
             for k in range(n_ell_bins):
                 sel = (ells >= edges[k]) & (ells < edges[k + 1])
@@ -239,17 +301,36 @@ def plot_cl_ratio_pctile_grid(grid, out_path, pctile=(16, 84), suptitle=None,
             ax.fill_between(xs, p_lo_arr, p_hi_arr, color=color, alpha=0.2)
 
         ax.axhline(1.0, color="k", ls="--", lw=0.8)
-        shell_list = [int(s) for s in shells_ref]
-        ax.set_title(f"{bin_label} ({shell_list})\n(pooled: {n_cosmo} cosmologies x "
-                     f"{len(shell_list)} shells)", fontsize=9, wrap=True)
-        ax.set_xlabel(r"$\ell$", fontsize=9)
-        ax.tick_params(labelsize=8)
+        # The redshift range goes INSIDE the panel rather than into a title: with
+        # one panel per z-bin, that range is the only thing distinguishing them,
+        # so it has to travel with the panel even when the figure is read on its
+        # own. bin_label already carries it in "z in (lo, hi)" form.
+        ax.text(0.03, 0.04, bin_label, transform=ax.transAxes,
+                fontsize=FS_PANEL, va="bottom", ha="left",
+                bbox=dict(boxstyle="round,pad=0.3", fc="white", ec="0.8", alpha=0.9))
+        ax.set_xlabel(r"$\ell$", fontsize=FS_AXIS)
+        ax.tick_params(labelsize=FS_TICK)
         if j == 0:
-            ax.set_ylabel(r"$C_\ell/C_\ell^{\rm true}$", fontsize=10)
-            ax.legend(fontsize=8, loc="lower left")
+            ax.set_ylabel(r"$C_\ell/C_\ell^{\rm true}$", fontsize=FS_AXIS)
+            # Stacked directly ABOVE the z-range box in the same bottom-left
+            # corner. Both curves approach 1 from below and the interesting part
+            # of the panel is the upper half, so anchoring the legend up there
+            # (matplotlib's "best"/upper-left) put it straight on top of them.
+            leg = ax.legend(fontsize=FS_LEGEND, loc="lower left",
+                            bbox_to_anchor=(0.03, 0.14), borderaxespad=0.0)
+            # hard guard: if the (possibly caller-supplied) labels still make the
+            # box wider than the panel, shrink the text until it fits rather than
+            # letting it spill over the neighbouring panel
+            fig.canvas.draw()
+            for _ in range(6):
+                lw = leg.get_window_extent().width
+                aw = ax.get_window_extent().width
+                if lw <= 0.94 * aw:
+                    break
+                for t in leg.get_texts():
+                    t.set_fontsize(t.get_fontsize() * 0.9)
+                fig.canvas.draw()
 
-    if suptitle:
-        fig.suptitle(suptitle, fontsize=12, wrap=True)
     fig.tight_layout()
     out_path = Path(out_path); out_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out_path, dpi=300); plt.close(fig)
@@ -277,21 +358,32 @@ def plot_kappa_cl_grid(cosmo_labels, ells, cl_low_list, cl_corr_list, cl_high_li
         a0.loglog(x, cl_lo[1:], ":", color="seagreen", lw=1.2, label="low (DISCO)")
         a0.loglog(x, cl_c[1:], "-", color="steelblue", lw=1.3, label=corrected_label)
         a0.loglog(x, cl_hi[1:], "--", color="tomato", lw=1.2, label="high (CosmoGrid)")
-        a0.set_ylabel(f"{label}\n" + r"$C_\ell^{\kappa\kappa}$", fontsize=8)
-        a0.tick_params(labelsize=7)
+        a0.set_ylabel(f"{label}\n" + r"$C_\ell^{\kappa\kappa}$", fontsize=FS_ROWLAB)
+        a0.tick_params(labelsize=FS_TICK)
         with np.errstate(divide="ignore", invalid="ignore"):
-            a1.semilogx(x, (cl_lo / cl_hi)[1:], ":", color="seagreen", lw=1.2, label="low/high")
-            a1.semilogx(x, (cl_c / cl_hi)[1:], "-", color="steelblue", lw=1.3,
-                       label="corrected/high")
+            r_lo = (cl_lo / cl_hi)[1:]
+            r_c = (cl_c / cl_hi)[1:]
+            a1.semilogx(x, r_lo, ":", color="seagreen", lw=1.2, label="low/high")
+            a1.semilogx(x, r_c, "-", color="steelblue", lw=1.3, label="corrected/high")
         a1.axhline(1.0, color="k", ls="--", lw=0.8)
-        a1.set_ylim(0.4, 1.6); a1.set_ylabel(r"$C_\ell/C_\ell^{true}$", fontsize=8)
-        a1.tick_params(labelsize=7)
+        # Data-driven y-range instead of a fixed (0.4, 1.6): the corrected curve
+        # typically lives within a few percent of unity, so the fixed window spent
+        # most of the panel on empty space. Bracket what is actually drawn (both
+        # curves), keep 1.0 in view, and pad by 8%.
+        finite = np.concatenate([r_lo[np.isfinite(r_lo)], r_c[np.isfinite(r_c)]])
+        if finite.size:
+            lo_v = min(float(np.percentile(finite, 0.5)), 1.0)
+            hi_v = max(float(np.percentile(finite, 99.5)), 1.0)
+            pad = max(hi_v - lo_v, 1e-3) * 0.08
+            a1.set_ylim(lo_v - pad, hi_v + pad)
+        a1.set_ylabel(r"$C_\ell/C_\ell^{\rm true}$", fontsize=FS_AXIS)
+        a1.tick_params(labelsize=FS_TICK)
         if i == 0:
-            a0.legend(fontsize=7, loc="lower left"); a1.legend(fontsize=7, loc="lower left")
+            a0.legend(fontsize=FS_LEGEND, loc="lower left")
+            a1.legend(fontsize=FS_LEGEND, loc="lower left")
         if i == n - 1:
-            a0.set_xlabel(r"$\ell$", fontsize=8); a1.set_xlabel(r"$\ell$", fontsize=8)
-    if suptitle:
-        fig.suptitle(suptitle, fontsize=11, wrap=True)
+            a0.set_xlabel(r"$\ell$", fontsize=FS_AXIS)
+            a1.set_xlabel(r"$\ell$", fontsize=FS_AXIS)
     fig.tight_layout()
     out_path = Path(out_path); out_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out_path, dpi=300); plt.close(fig)
@@ -306,25 +398,70 @@ def plot_kappa_moments_scatter(cosmo_labels, moms_low, moms_corr, moms_high, out
     categorical (cosmology), not a continuous depth a line plot would imply.
     moms_*: list of moments.moments() dicts, one per cosmo_labels entry, low/
     corrected/high aligned."""
-    fig, axes = plt.subplots(1, 3, figsize=(15, 4.5))
-    panels = [("variance", "variance"), ("skewness", "skewness"),
-             ("excess_kurtosis", "excess kurtosis")]
-    x = np.arange(len(cosmo_labels))
-    series = [("low", moms_low, "darkorange", "o"), (corrected_label, moms_corr, "steelblue", "^"),
-             ("high (true)", moms_high, "tomato", "s")]
-    for ax, (key, title) in zip(axes, panels):
+    fig, axes = plt.subplots(1, 3, figsize=(15, 5.0))
+    panels = [("variance", r"variance  $\langle\kappa^2\rangle$"),
+              ("skewness", r"skewness  $S_3$"),
+              ("excess_kurtosis", r"excess kurtosis  $K_4$")]
+    series = [("low (DISCO)", moms_low, "darkorange", "o"),
+              (corrected_label, moms_corr, "steelblue", "^")]
+    for ax, (key, axis_label) in zip(axes, panels):
+        true_vals = np.asarray([m[key] for m in moms_high], dtype=np.float64)
+        # Small quantities (kappa variance is ~1e-4..1e-8 depending on the source
+        # bin) get SCIENTIFIC TICK LABELS, written out per tick as a x 10^b. The
+        # alternative matplotlib reaches for by default -- a bare "1e-8" floated
+        # in the corner as an axis offset -- is easy to miss entirely and easier
+        # to misread as a data point. Quantities already of order unity (skewness,
+        # excess kurtosis) keep plain ticks; nothing is rescaled either way, so
+        # the numbers on the axes are always the real values.
+        finite_all = np.concatenate([
+            true_vals,
+            *[np.asarray([m[key] for m in mm], dtype=np.float64) for _, mm, _, _ in series]])
+        finite_all = finite_all[np.isfinite(finite_all) & (finite_all != 0)]
+        exp10 = 0
+        if finite_all.size:
+            exp10 = int(np.floor(np.log10(np.max(np.abs(finite_all)))))
+        use_sci = abs(exp10) >= 3
+        scale, unit = 1.0, ""
+        # Plotted AGAINST THE TRUE VALUE rather than against a categorical
+        # cosmology axis: with one point per held-out cosmology, the old version
+        # spent its x-axis on ten rotated "cosmo_000176"-style labels that carried
+        # no quantitative meaning. Here x is the reference moment itself, so the
+        # dashed 1:1 line IS perfect agreement and each point's vertical distance
+        # from it is that cosmology's error -- the same data, made readable.
         for name, moms, color, marker in series:
-            ax.scatter(x, [m[key] for m in moms], color=color, marker=marker, label=name, s=40)
-        ax.set_title(title)
-        ax.set_xticks(x); ax.set_xticklabels(cosmo_labels, rotation=45, ha="right", fontsize=7)
-        ax.tick_params(labelsize=8)
+            vals = np.asarray([m[key] for m in moms], dtype=np.float64) * scale
+            ax.scatter(true_vals * scale, vals, color=color, marker=marker, label=name,
+                       s=55, alpha=0.85, edgecolor="white", linewidth=0.6, zorder=3)
+        both = np.concatenate([true_vals * scale,
+                               *[np.asarray([m[key] for m in mm], dtype=np.float64) * scale
+                                 for _, mm, _, _ in series]])
+        both = both[np.isfinite(both)]
+        if both.size:
+            lo_v, hi_v = float(both.min()), float(both.max())
+            pad = max(hi_v - lo_v, 1e-12) * 0.08
+            lims = (lo_v - pad, hi_v + pad)
+            ax.plot(lims, lims, "--", color="0.35", lw=1.0, zorder=2,
+                    label="perfect agreement" if ax is axes[0] else None)
+            ax.set_xlim(*lims); ax.set_ylim(*lims)
+        ax.set_xlabel(f"{axis_label}{unit}   CosmoGridV1", fontsize=FS_AXIS)
+        ax.set_ylabel(f"{axis_label}{unit}   model", fontsize=FS_AXIS)
+        if use_sci:
+            fmt = FuncFormatter(_sci_tick)
+            ax.xaxis.set_major_formatter(fmt); ax.yaxis.set_major_formatter(fmt)
+            ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
+            ax.yaxis.set_major_locator(MaxNLocator(nbins=4))
+            for lbl in ax.get_xticklabels():
+                lbl.set_rotation(20); lbl.set_horizontalalignment("right")
+        else:
+            ax.ticklabel_format(style="plain", axis="both", useOffset=False)
+        ax.tick_params(labelsize=FS_TICK)
+        ax.grid(True, color="0.9", lw=0.6)
+        ax.set_axisbelow(True)
         if ax is axes[0]:
-            ax.legend(fontsize=8)
-    if suptitle:
-        fig.suptitle(suptitle, fontsize=12, wrap=True)
+            ax.legend(fontsize=FS_LEGEND, loc="upper left")
     fig.tight_layout()
     out_path = Path(out_path); out_path.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(out_path, dpi=300); plt.close(fig)
+    fig.savefig(out_path, dpi=300, bbox_inches="tight"); plt.close(fig)
     print(f"[plotting] kappa moments scatter, {len(cosmo_labels)} cosmologies -> {out_path}", flush=True)
     return out_path
 
@@ -368,8 +505,6 @@ def plot_histogram_grid(rows, out_path, corrected_label="corrected", n_bins=60,
     for k in range(ns, len(flat)):
         flat[k].axis("off")
 
-    if suptitle:
-        fig.suptitle(suptitle, fontsize=11, wrap=True)
     fig.tight_layout()
     out_path = Path(out_path); out_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out_path, dpi=300); plt.close(fig)
@@ -395,15 +530,31 @@ def plot_moments_vs_shell(shell_idx, series: dict, out_path, suptitle=None, note
     the per-cosmology parameters via `note` (rendered under the panels) so an
     outlier cosmology -- e.g. cosmo_000003's sigma8=1.15 -- is visible on the
     figure itself instead of needing a params.yml lookup."""
-    fig, axes = plt.subplots(1, 3, figsize=(15, 4.5))
-    panels = [("variance", "variance"), ("skewness", "skewness"),
-             ("excess_kurtosis", "excess kurtosis")]
+    # Two rows: the moment itself (log y) over a ratio-to-truth row. Log y because
+    # the moments span orders of magnitude across shell depth, which on a linear
+    # axis compresses every shell except the sparsest into an unreadable band; the
+    # ratio row then shows the AGREEMENT, which absolute curves at that dynamic
+    # range cannot resolve. The reference series (the one whose label mentions
+    # "high"/"true") is the ratio denominator.
+    fig, axes = plt.subplots(2, 3, figsize=(15, 7.6), sharex=True,
+                             gridspec_kw={"height_ratios": [2.1, 1.0]})
+    panels = [("variance", r"variance  $\sigma^2$"), ("skewness", r"skewness  $S_3$"),
+             ("excess_kurtosis", r"excess kurtosis  $K_4$")]
     colors = ["darkorange", "seagreen", "steelblue", "tomato"]
     markers = ["o", "s", "^", "d"]
     lo_pct, hi_pct = pctile
     x = np.asarray(shell_idx, dtype=np.float64)
     n_samples = 0
-    for ax, (key, title) in zip(axes, panels):
+
+    def _is_ref(lbl):
+        low = lbl.lower()
+        return ("high" in low) or ("true" in low)
+
+    ref_key = next((lbl for lbl in series if _is_ref(lbl)), None)
+
+    for col, (key, axis_label) in enumerate(panels):
+        ax, axr = axes[0, col], axes[1, col]
+        med_by_label = {}
         for (label, moms_per_shell), color, marker in zip(
                 series.items(), colors, markers):
             med, p_lo, p_hi = [], [], []
@@ -417,14 +568,38 @@ def plot_moments_vs_shell(shell_idx, series: dict, out_path, suptitle=None, note
                 med.append(float(np.median(vals)))
                 p_lo.append(float(np.percentile(vals, lo_pct)))
                 p_hi.append(float(np.percentile(vals, hi_pct)))
+            med = np.asarray(med); p_lo = np.asarray(p_lo); p_hi = np.asarray(p_hi)
+            med_by_label[label] = (med, color, marker)
             ax.plot(x, med, "-", marker=marker, ms=4.5, lw=1.4, color=color, label=label)
             ax.fill_between(x, p_lo, p_hi, color=color, alpha=0.2)
-        ax.set_xlabel("shell index (depth)"); ax.set_title(title)
-        ax.tick_params(labelsize=8)
-        if ax is axes[0]:
-            ax.legend(fontsize=8)
-    if suptitle:
-        fig.suptitle(suptitle, fontsize=12, wrap=True)
+
+        # log y only where the quantity is positive throughout: skewness and
+        # excess kurtosis legitimately cross zero, and a symlog/linear axis is the
+        # honest choice there rather than silently dropping the negative points.
+        all_med = np.concatenate([m for m, _, _ in med_by_label.values()])
+        all_med = all_med[np.isfinite(all_med)]
+        if all_med.size and all_med.min() > 0:
+            ax.set_yscale("log")
+        ax.set_ylabel(axis_label, fontsize=FS_AXIS)
+        ax.tick_params(labelsize=FS_TICK)
+        if col == 0:
+            ax.legend(fontsize=FS_LEGEND)
+
+        # ---- ratio row ----
+        if ref_key is not None:
+            ref_med = med_by_label[ref_key][0]
+            for label, (med, color, marker) in med_by_label.items():
+                if label == ref_key:
+                    continue
+                with np.errstate(divide="ignore", invalid="ignore"):
+                    ratio = med / ref_med
+                axr.plot(x, ratio, "-", marker=marker, ms=4.0, lw=1.3, color=color,
+                         label=f"{label} / {ref_key}")
+            axr.axhline(1.0, color="k", ls="--", lw=0.8)
+            axr.set_ylabel("ratio to truth", fontsize=FS_AXIS)
+        axr.set_xlabel("shell index (depth)", fontsize=FS_AXIS)
+        axr.tick_params(labelsize=FS_TICK)
+
     if note:
         n_lines = note.count("\n") + 1
         pad = min(0.32, 0.028 * n_lines + 0.03)
@@ -478,8 +653,6 @@ def plot_cosmo_param_matrix(pool: dict, held: dict, out_path,
             (ax.set_xlabel(_PARAM_LABELS.get(xq, xq), fontsize=11)
              if i == k - 1 else ax.set_xticklabels([]))
             ax.tick_params(labelsize=7)
-    if suptitle:
-        fig.suptitle(suptitle, fontsize=12, wrap=True)
     fig.tight_layout()
     out_path = Path(out_path); out_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out_path, dpi=400); plt.close(fig)
@@ -577,8 +750,6 @@ def plot_train_val_loss(x, train_vals, val_vals, out_path, xlabel="epoch",
                label=f"best val {val_vals[best_i]:.4g} @ {xlabel} {x[best_i]}")
     ax.set_xlabel(xlabel); ax.set_ylabel(ylabel)
     ax.set_yscale("log"); ax.legend(fontsize=9); ax.grid(True, alpha=0.3)
-    if formula:
-        ax.set_title(formula, fontsize=10, wrap=True)
     fig.tight_layout()
     out_path = Path(out_path); out_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out_path, dpi=150); plt.close(fig)
@@ -594,7 +765,7 @@ def plot_cl_shell(s, ells, cl_lo, cl_c, cl_hi, out_path):
     ax[0].loglog(ells, cl_lo, "-", color="seagreen", label="DISCO (low)")
     ax[0].loglog(ells, cl_c, "-", color="steelblue", label="corrected")
     ax[0].loglog(ells, cl_hi, "--", color="tomato", label="CosmoGrid (high)")
-    ax[0].set_ylabel(r"$C_\ell$"); ax[0].legend(); ax[0].set_title(f"shell {s}")
+    ax[0].set_ylabel(r"$C_\ell$"); ax[0].legend()
     with np.errstate(divide="ignore", invalid="ignore"):
         ax[1].semilogx(ells, cl_lo / cl_hi, ":", color="seagreen", label="low/high")
         ax[1].semilogx(ells, cl_c / cl_hi, "-", color="steelblue", label="corrected/high")

@@ -31,10 +31,16 @@ def _resolve_low(ld, low_name, low_glob):
 
 def process_single_run(task_args):
     """Worker function executed by CPU subprocesses."""
-    ld, low_name, high_name, lmax, low_glob, log_density = task_args
+    (ld, low_name, high_name, lmax, low_glob, log_density,
+     prepared_nside) = task_args
 
     # 1. Changed target extensions to raw .npy
     prefix = "_log" if log_density else ""
+    # NOT nside-tagged: transfer_function.alm_fname() (the sole consumer) keys
+    # only on lmax, and lmax already separates the two regimes in practice -- an
+    # nside=512 run needs lmax <= 3*512-1 = 1535, well below the native
+    # nside=2048 runs' lmax=3000. Tagging would mean changing alm_fname and every
+    # fit/train/emulate/apply call site for no gain.
     out_low_path = ld / f"low{prefix}_alms_lmax{lmax}.npy"
     out_high_path = ld / f"high{prefix}_alms_lmax{lmax}.npy"
 
@@ -42,12 +48,24 @@ def process_single_run(task_args):
        return f"[Skipped] {ld.name} (Already transformed)"
 
     try:
-        low_path = _resolve_low(ld, low_name, low_glob)
-        high_path = ld / high_name
-        if low_path is None or not high_path.exists():
-            return f"[Skipped] {ld.name} (missing low/high shells)"
-        low_data = np.load(low_path, allow_pickle=False)["shells"]
-        high_data = np.load(high_path, allow_pickle=False)["shells"]
+        if prepared_nside:
+            # Take the alms of the SAME field the correction is applied to
+            # (apply_transfer.py adds its residual onto low_shells_nside=N.npy),
+            # rather than of the native nside=2048 map. Fitting T on 2048-derived
+            # Cl and applying it to a degraded map would mix two resolutions.
+            low_path = ld / f"low_shells_nside={prepared_nside}.npy"
+            high_path = ld / f"high_shells_nside={prepared_nside}.npy"
+            if not (low_path.exists() and high_path.exists()):
+                return f"[Skipped] {ld.name} (missing prepared nside={prepared_nside} shells)"
+            low_data = np.load(low_path, mmap_mode="r")
+            high_data = np.load(high_path, mmap_mode="r")
+        else:
+            low_path = _resolve_low(ld, low_name, low_glob)
+            high_path = ld / high_name
+            if low_path is None or not high_path.exists():
+                return f"[Skipped] {ld.name} (missing low/high shells)"
+            low_data = np.load(low_path, allow_pickle=False)["shells"]
+            high_data = np.load(high_path, allow_pickle=False)["shells"]
         n_available = min(low_data.shape[0], high_data.shape[0])
 
         low_alms, high_alms = [], []
@@ -56,8 +74,10 @@ def process_single_run(task_args):
             # log1p(rho) is well-defined at rho=0 (-> 0, not -inf) and, unlike raw
             # rho, reconstructs via expm1 without ever needing a hard floor at 0 --
             # see transfer_function.py apply()'s --log-density branch.
-            low_map = np.log1p(low_data[i]) if log_density else low_data[i]
-            high_map = np.log1p(high_data[i]) if log_density else high_data[i]
+            lo_i = np.asarray(low_data[i], dtype=np.float64)
+            hi_i = np.asarray(high_data[i], dtype=np.float64)
+            low_map = np.log1p(lo_i) if log_density else lo_i
+            high_map = np.log1p(hi_i) if log_density else hi_i
             alm_low = hp.map2alm(low_map, lmax=lmax, iter=1)
             alm_high = hp.map2alm(high_map, lmax=lmax, iter=1)
             
@@ -102,6 +122,12 @@ def main():
                              "concurrently on N nodes with no coordination "
                              "needed beyond a disjoint index split.")
     parser.add_argument("--num-shards", type=int, default=1)
+    parser.add_argument("--prepared-nside", type=int, default=0,
+                        help="Read preprocess/prepare_maps.py's "
+                             "{low,high}_shells_nside=N.npy instead of the native "
+                             "npz, and tag the output _nsideN. Use when the "
+                             "correction will be applied at that nside (lmax must "
+                             "be <= 3*N-1).")
     args = parser.parse_args()
 
     data_dir = Path(args.data_dir)
@@ -126,10 +152,16 @@ def main():
 
     tasks = []
     for ld in leaf_dirs:
-        low_ok = _resolve_low(ld, args.low_npz, args.low_glob) is not None
-        if low_ok and (ld / args.high_npz).exists():
+        if args.prepared_nside:
+            # gate on the prepared stacks, not the native npz
+            low_ok = (ld / f"low_shells_nside={args.prepared_nside}.npy").exists()
+            high_ok = (ld / f"high_shells_nside={args.prepared_nside}.npy").exists()
+        else:
+            low_ok = _resolve_low(ld, args.low_npz, args.low_glob) is not None
+            high_ok = (ld / args.high_npz).exists()
+        if low_ok and high_ok:
             tasks.append((ld, args.low_npz, args.high_npz, args.lmax, args.low_glob,
-                          args.log_density))
+                          args.log_density, args.prepared_nside))
 
     print(f"Found {len(tasks)} valid execution targets inside: {data_dir}")
     print(f"Spawning {args.num_workers} multi-core processes...")

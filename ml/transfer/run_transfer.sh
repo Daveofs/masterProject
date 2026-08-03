@@ -168,6 +168,24 @@ DATA=/capstor/scratch/cscs/damrein/grid
 # yet confirmed to fix the "washed out" patch look (2026-07-21) -- this is the
 # knob to test that hypothesis with, not a validated fix.
 LMAX=${LMAX:-3000}
+# NSIDE: the resolution the correction is APPLIED at (apply_transfer.py adds its
+# residual onto low_shells_nside=${NSIDE}.npy). 2048 is the native DISCO/CosmoGrid
+# resolution and the default. Set NSIDE=512 to put this pipeline on the SAME
+# footing as the unet/diffusion runs for a like-for-like comparison -- in that
+# case LMAX must be <= 3*512-1 = 1535, and the alms are taken from the PREPARED
+# nside=512 stacks (--prepared-nside) rather than the native nside=2048 npz, so
+# that T is fitted on and applied to the same field.
+NSIDE=${NSIDE:-2048}
+PREPARED_FLAG=""
+if [ "$NSIDE" != "2048" ]; then
+    PREPARED_FLAG="--prepared-nside $NSIDE"
+    MAX_LMAX=$((3 * NSIDE - 1))
+    if [ "$LMAX" -gt "$MAX_LMAX" ]; then
+        echo "ERROR: LMAX=$LMAX exceeds 3*NSIDE-1=$MAX_LMAX for NSIDE=$NSIDE." >&2
+        echo "       Resubmit with e.g. --export=NSIDE=$NSIDE,LMAX=1500" >&2
+        exit 2
+    fi
+fi
 # Stage 1's per-node SHT worker count. 20 was sized for lmax=3000; each worker's
 # map2alm/alm2map memory footprint grows with lmax (roughly linearly, at fixed
 # nside=2048), so running 20 of them CONCURRENTLY at a much higher lmax can
@@ -271,7 +289,7 @@ if [ "$N_NODES" -gt 1 ]; then
                 --data-dir '$DATA' \
                 --low-glob 'disco_sim/*/disco_shells_nside=2048.npz' \
                 --high-npz compressed_shells.npz \
-                --lmax $LMAX --num-workers $NUM_WORKERS \
+                --lmax $LMAX --num-workers $NUM_WORKERS $PREPARED_FLAG \
                 --shard-index $i --num-shards $N_NODES
         " &
     done
@@ -282,7 +300,7 @@ else
         --data-dir "$DATA" \
         --low-glob "disco_sim/*/disco_shells_nside=2048.npz" \
         --high-npz compressed_shells.npz \
-        --lmax $LMAX --num-workers $NUM_WORKERS
+        --lmax $LMAX --num-workers $NUM_WORKERS $PREPARED_FLAG
 fi
 N_ALM_FILES=$(find "$DATA" -maxdepth 3 -name "low_alms_lmax${LMAX}.npy" 2>/dev/null | wc -l)
 if [ "$N_ALM_FILES" -eq 0 ]; then
@@ -422,7 +440,7 @@ if [ "$N_NODES" -gt 1 ]; then
                 OMP_NUM_THREADS=$CPUS_PER_NODE python transfer/apply_transfer.py \
                     --transfer ${BATCH_TRANSFERS[$i]} \
                     --run-dirs ${BATCH_RUN_DIRS[$i]} \
-                    --nside 2048 --lmax $LMAX --ell-min-mpc $ELL_MIN_MPC \
+                    --nside $NSIDE --lmax $LMAX --ell-min-mpc $ELL_MIN_MPC \
                     --hp-transition $HP_TRANSITION \
                     --no-clip --seed 0 \
                     --out-counts-dir '$OUT/counts' \
@@ -463,7 +481,7 @@ uenv run pytorch/v2.9.1:v2 --view=default -- bash -c "
     OMP_NUM_THREADS=$CPUS_PER_NODE python transfer/apply_transfer.py \
         --transfer $TRANSFER_FILES \
         --run-dirs $RUN_DIRS \
-        --nside 2048 --lmax $LMAX --ell-min-mpc $ELL_MIN_MPC \
+        --nside $NSIDE --lmax $LMAX --ell-min-mpc $ELL_MIN_MPC \
         --hp-transition $HP_TRANSITION \
         --no-clip --seed 0 \
         $REUSE_FLAG \

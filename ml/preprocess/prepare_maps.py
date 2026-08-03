@@ -27,10 +27,26 @@ import healpy as hp
 
 
 def _to_nside(stack, nside):
+    """Degrade a stack of full-sky shells to `nside`.
+
+    order_in/order_out are RING (2026-07-29 fix; was "NESTED"). The source shells
+    ARE RING-ordered -- verified empirically and relied upon everywhere else in
+    this codebase (make_patch_dataset.py's vec2pix/pix2ang all pass nest=False).
+    Declaring them NESTED made ud_grade average together groups of pixels that
+    are NOT sky neighbours, which scrambled the map rather than smoothing it.
+
+    The bug was invisible in the mean (a permutation of which pixels get averaged
+    preserves the total) but destroyed the angular power spectrum at ALL scales,
+    including the largest -- which is the tell, because a local average CANNOT
+    change power at ell << ell_pix. Measured on shell 50 of cosmo_000176,
+    stored/nside2048 Cl ratio was 0.009 at ell=5, 0.145 at ell=50, versus 1.000
+    for a correct RING degrade. It also put visible streaks into every nside=512
+    patch figure (the "elongated patterns" in the thesis review).
+    """
     if hp.npix2nside(stack.shape[1]) == nside:
         return stack.astype(np.float32)
     return np.stack([hp.ud_grade(m.astype(np.float32), nside,
-                                 order_in="NESTED", order_out="NESTED")
+                                 order_in="RING", order_out="RING")
                      for m in stack]).astype(np.float32)
 
 

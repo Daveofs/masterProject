@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --job-name=preprocess_alms
-#SBATCH --account=sk037
+#SBATCH --account=a0158
 #SBATCH --partition=normal
 #SBATCH --time=00:30:00
 #SBATCH --ntasks=1

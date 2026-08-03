@@ -102,3 +102,35 @@ def kappa_cl(kappa: np.ndarray, lmax: int) -> np.ndarray:
     an overdensity from a raw-COUNTS map first), a kappa map already IS the field of
     interest -- hp.anafast applies directly, no transform."""
     return hp.anafast(kappa.astype(np.float64), lmax=lmax)
+
+
+# ---------------------------------------------------------------------------
+# Cross-pipeline comparison support
+# ---------------------------------------------------------------------------
+
+_MOMENT_KEYS = ("variance", "skewness", "excess_kurtosis")
+
+
+def save_kappa_moment_summary(out_path, cosmo_labels, mom_low, mom_corr, mom_high,
+                              method_label: str, tag: str):
+    """Persist the per-cosmology kappa-map moments behind kappa_moments_scatter.
+
+    Every pipeline recomputes these from scratch inside its own --kappa block and
+    then throws them away into a PNG, which makes a cross-pipeline comparison
+    impossible without re-running all three full-sky reconstructions. Writing the
+    three arrays out here is what lets vis/plot_method_comparison.py put transfer,
+    unet-flow and diffusion on one axes afterwards, from cheap files.
+    """
+    import numpy as np
+    from pathlib import Path
+    out_path = Path(out_path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    pack = lambda moms: np.array([[float(m[k]) for k in _MOMENT_KEYS] for m in moms])
+    np.savez(out_path,
+             cosmo_labels=np.array([str(c) for c in cosmo_labels]),
+             moment_keys=np.array(_MOMENT_KEYS),
+             mom_low=pack(mom_low), mom_corr=pack(mom_corr), mom_high=pack(mom_high),
+             method_label=str(method_label), tag=str(tag))
+    print(f"[weak_lensing] kappa moment summary ({len(cosmo_labels)} cosmologies, "
+          f"{tag}) -> {out_path}", flush=True)
+    return out_path
