@@ -96,8 +96,10 @@ LR=${LR:-4.8e-3}
 VAL_FRAC=${VAL_FRAC:-0.15}
 SEED=${SEED:-0}
 # High-pass residual formulation (see sphere_flow.py's module docstring): graph
-# analogue of diffusion's --hp-cutoff/--hp-transition (smoothing steps/rate instead
-# of a literal Nyquist fraction). REASONED BUT UNVALIDATED defaults -- see
+# analogue of diffusion's high-pass cutoff (smoothing steps/rate instead of a
+# literal Nyquist fraction). NOTE: not migrated to the per-shell comoving cutoff
+# the other three pipelines now use (--hp-scale-mpc-h), so its onset is still
+# fixed across shells. REASONED BUT UNVALIDATED defaults -- see
 # sphere_flow.graph_lowpass's docstring.
 HP_N_ITER=${HP_N_ITER:-20}
 HP_ALPHA=${HP_ALPHA:-0.25}

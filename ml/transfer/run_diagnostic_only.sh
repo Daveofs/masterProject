@@ -29,29 +29,6 @@
 # they agree with whatever originally produced the counts:
 #   sbatch --export=TRANSFER_JOB=4201972,DATA=/capstor/scratch/cscs/damrein/cosmogridv1,ELL_MIN_MPC=3.0 \
 #       transfer/run_diagnostic_only.sh
-# NOTE job 4215699 (and anything before 2026-07-21) predates --hp-transition --
-# its counts were computed under the OLD hard ell_min step, equivalent to
-# HP_TRANSITION=0. The auto-REUSE_COUNTS fast path below is only an exact match
-# against that job if you ALSO pass HP_TRANSITION=0 (the default here is 0.10,
-# matching the other 3 pipelines -- see the HP_TRANSITION block below):
-#   sbatch --export=TRANSFER_JOB=4215699,HP_TRANSITION=0 transfer/run_diagnostic_only.sh
-# Override the held-out cosmology set explicitly (space-separated) if you want a
-# different/smaller set than what that job evaluated:
-#   sbatch --export=TRANSFER_JOB=4199680,TEST_COSMOS='cosmo_000001 cosmo_000003' \
-#       transfer/run_diagnostic_only.sh
-#
-# MULTI-NODE: request more than 1 node at submission time to parallelize the
-# correction across held-out cosmologies:
-#   sbatch --nodes=4 --export=TRANSFER_JOB=4199680 transfer/run_diagnostic_only.sh
-# With N>1 nodes, each node computes ITS slice of held-out cosmologies (compute-
-# only, no plots) into a job-local counts dir ($OUT/counts); the auto-detected/
-# passed REUSE_COUNTS is NOT consulted during that parallel phase (deliberately --
-# it may belong to a DIFFERENT job/knobs, and partial cache hits there would leave
-# $OUT/counts inconsistently populated), so N>1 always does a full parallel
-# recompute. This is the right choice when you're here BECAUSE a knob (e.g.
-# ELL_MIN_MPC) changed and REUSE_COUNTS would have been a cache miss anyway. For
-# the actual fast "just redraw the plots" case, submit with the default --nodes=1,
-# which keeps the original REUSE_COUNTS fast-path fully intact.
 
 source /users/damrein/miniforge3/etc/profile.d/conda.sh
 conda activate deepSphere
@@ -73,7 +50,7 @@ DATA=${DATA:-/capstor/scratch/cscs/damrein/grid}
 # whatever lmax that prior job used; a mismatched LMAX here will simply fail to
 # find those files (they're named low_alms_lmax<N>.npy) or silently reload the
 # wrong alm set if a coincidentally-matching one exists elsewhere.
-LMAX=${LMAX:-3000}
+LMAX=${LMAX:-1500}
 N_NODES=${SLURM_JOB_NUM_NODES:-1}
 
 # Defaults currently point at the grid run_transfer.sh job 2884508 (10 held-out
@@ -133,26 +110,40 @@ fi
 
 # Same apply-stage knobs as run_transfer.sh -- override via --export= to re-run
 # diagnostics with different settings against the SAME trained transfer(s).
-# Default here matches job 4215699's actual grid-run config (ELL_MIN_MPC=5.0) --
-# REUSE_COUNTS below is only an EXACT match if this agrees with what originally
-# produced the counts.
-# --hp-transition: raised-cosine hand-over band above ell_min (fraction of lmax),
-# same convention/default as run_transfer.sh / diffusion/run_diffusion.sh's
-# HP_TRANSITION -- see highpass_ell_ramp's docstring. Must match whatever the
-# REUSE_COUNTS source used to be an EXACT reuse (it affects the correction
-# itself, not just plotting).
-ELL_MIN_MPC=${ELL_MIN_MPC:-5.0}
-HP_TRANSITION=${HP_TRANSITION:-0.10}
+# REUSE_COUNTS below is only an EXACT match if this agrees with whatever originally
+# produced the counts -- job 4215699 and the other pre-2026-08-11 runs used
+# ELL_MIN_MPC=5.0 AND a raised-cosine hand-over, so their counts are NOT reusable
+# under the current default; let them recompute.
+# ELL_MIN_MPC: leave comoving scales LARGER than this untouched. Converted to a
+# PER-SHELL ell_min = 2*pi*chi/L, so the correction starts where the particle-mesh
+# deficit actually starts on that shell. 17.0 Mpc/h is the measured onset
+# (17.0 +- 1.1 Mpc/h, constant to 4% over 25 shells spanning a factor 22 in chi);
+# the previous 5.0 started 3.4x too late and left the near shells uncorrected.
+# The HP_TRANSITION raised-cosine hand-over was REMOVED 2026-08-11 (as were the
+# generative pipelines' fixed-angular hpc/hpt): it held the correction below full
+# strength for ~0.10*lmax past each ell_min, exactly the band the kappa spectra
+# were worst in. The hand-over is now a hard step at ell_min.
+ELL_MIN_MPC=${ELL_MIN_MPC:-17.0}
 # Shell resolution the correction is applied at. Was hard-coded to 2048; the thesis
 # scores all three pipelines at 512 (common-footing comparison), and a mismatch here
 # silently compares two different resolutions.
-NSIDE=${NSIDE:-2048}
+NSIDE=${NSIDE:-512}
 if [ "$LMAX" -gt $((3 * NSIDE - 1)) ]; then
     echo "[abort] LMAX=$LMAX exceeds band limit 3*NSIDE-1=$((3 * NSIDE - 1)) for NSIDE=$NSIDE" >&2
     exit 1
 fi
-KAPPA_NSIDE=${KAPPA_NSIDE:-1024}
-KAPPA_LMAX=${KAPPA_LMAX:-2048}
+# ---- common comparison footing (thesis Sec. "protocol") --------------------------
+# ALL pipelines are scored at N_side=512 -> lmax=1500, and the kappa maps are built at
+# the SAME resolution as the shells they integrate. Building kappa at a higher nside
+# than the shells is pure upsampling: it invents no information and produces spectra
+# past the shells' own band limit (3*512-1 = 1535) that are interpolation and
+# pixel-window artefacts. Derived, not hard-coded, so the two cannot drift apart.
+KAPPA_NSIDE=${KAPPA_NSIDE:-$NSIDE}
+KAPPA_LMAX=${KAPPA_LMAX:-$LMAX}
+if [ "$KAPPA_LMAX" -gt $((3 * KAPPA_NSIDE - 1)) ]; then
+    echo "[abort] KAPPA_LMAX=$KAPPA_LMAX exceeds band limit 3*KAPPA_NSIDE-1=$((3 * KAPPA_NSIDE - 1))" >&2
+    exit 1
+fi
 # apply_transfer.py's --max-cosmologies caps cl_ratio_by_zbin_grid.png's rows
 # (default 3, sized for a single-cosmology-at-a-time budget). This script exists
 # specifically to re-run diagnostics against ALREADY-COMPUTED (or freshly
@@ -181,7 +172,7 @@ fi
 REUSE_FLAG=""
 [ "$N_NODES" -eq 1 ] && [ -n "$REUSE_COUNTS" ] && REUSE_FLAG="--reuse-counts '$REUSE_COUNTS'"
 
-echo "==== transfer diagnostics-only | reusing transfer(s) from job $TRANSFER_JOB | ell_min_mpc=$ELL_MIN_MPC | hp_transition=$HP_TRANSITION | nodes=$N_NODES ===="
+echo "==== transfer diagnostics-only | reusing transfer(s) from job $TRANSFER_JOB | ell_min_mpc=$ELL_MIN_MPC | nodes=$N_NODES ===="
 echo "held-out cosmologies (${#COSMOS_ARR[@]}): ${COSMOS_ARR[@]}"
 echo "kappa: nside=$KAPPA_NSIDE lmax=$KAPPA_LMAX"
 
@@ -204,7 +195,6 @@ if [ "$N_NODES" -gt 1 ]; then
                     --transfer ${BATCH_TRANSFERS[$i]} \
                     --run-dirs ${BATCH_RUN_DIRS[$i]} \
                     --nside $NSIDE --lmax $LMAX --ell-min-mpc $ELL_MIN_MPC \
-                    --hp-transition $HP_TRANSITION \
                     --no-clip --seed 0 \
                     --out-counts-dir '$OUT/counts' \
                     --patch-shells --fullsky-shells --n-zbins 0 \
@@ -228,7 +218,6 @@ uenv run pytorch/v2.9.1:v2 --view=default -- bash -c "
         --transfer $TRANSFER_FILES \
         --run-dirs $RUN_DIRS \
         --nside $NSIDE --lmax $LMAX --ell-min-mpc $ELL_MIN_MPC \
-        --hp-transition $HP_TRANSITION \
         --no-clip --seed 0 \
         $REUSE_FLAG \
         --out-counts-dir '$OUT/counts' \

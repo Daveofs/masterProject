@@ -219,10 +219,13 @@ def plot_pctile_band_ratio(x, ratio_stacks: dict, out_path, xlabel=r"$\ell$",
         ax.fill_between(x, p_lo, p_hi, color=color, alpha=0.2)
 
     ax.axhline(1.0, color="k", ls="--", lw=1)
-    ax.set_xlabel(xlabel, fontsize=FS_AXIS)
+    # The kappa Cl panels are reproduced at full text width in the thesis, so they
+    # carry a larger type scale than the faceted grids: at FS_AXIS the axis labels
+    # were noticeably smaller than the surrounding body text.
+    ax.set_xlabel(xlabel, fontsize=FS_AXIS + 5)
     ax.set_ylabel(ylabel or (r"$C_\ell/C_\ell^{true}$" if "ell" in xlabel.lower() else "ratio"),
-                  fontsize=FS_AXIS)
-    ax.tick_params(labelsize=FS_TICK)
+                  fontsize=FS_AXIS + 5)
+    ax.tick_params(labelsize=FS_TICK + 4)
     if ylim:
         ax.set_ylim(*ylim)
     else:
@@ -239,7 +242,7 @@ def plot_pctile_band_ratio(x, ratio_stacks: dict, out_path, xlabel=r"$\ell$",
             hi_v = max(float(np.nanpercentile(finite, 99.5)), 1.0)
             pad = max(hi_v - lo_v, 1e-3) * 0.06
             ax.set_ylim(lo_v - pad, hi_v + pad)
-    ax.legend(fontsize=FS_LEGEND)
+    ax.legend(fontsize=FS_LEGEND + 4)
     fig.tight_layout()
     out_path = Path(out_path); out_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out_path, dpi=300); plt.close(fig)

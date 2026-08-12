@@ -106,12 +106,13 @@
 #                    example_histograms.png         check Cl structurally can't do
 #                    kappa_cl_{per_cosmology,pctile_band}.png +
 #                    kappa_moments_scatter.png      weak lensing (--kappa)
-#                  NOTE --kappa-nside/--kappa-lmax default to 1024/2048, NOT the
-#                  old 128/350: nside=128 caps kappa at ell~383, but the transfer
-#                  function is ~1 below ell 350 and does ALL its work above it
-#                  (measured max|T-1| on shells 10-30: 0.002-0.025 for ell<=350 vs
-#                  0.15-1.10 for ell 351-3000), so the old kappa plots were blind
-#                  to the entire correction by construction.
+#                  NOTE kappa is built at KAPPA_NSIDE/KAPPA_LMAX = the SHELL
+#                  resolution (512/1500), not the old 1024/2048 (which upsampled)
+#                  and emphatically not the older 128/350: nside=128 caps kappa at
+#                  ell~383, but the transfer function is ~1 below ell 350 and does
+#                  ALL its work above it (measured max|T-1| on shells 10-30:
+#                  0.002-0.025 for ell<=350 vs 0.15-1.10 for ell 351-3000), so those
+#                  kappa plots were blind to the entire correction by construction.
 #
 # MULTI-NODE (2026-07-21): this script scales stages 2 and 3 across however many
 # nodes SLURM actually allocates ($SLURM_JOB_NUM_NODES) -- NOT a variable you set
@@ -167,7 +168,7 @@ DATA=/capstor/scratch/cscs/damrein/grid
 # shell. Override at submission time, e.g. `sbatch --export=LMAX=4096 ...`; NOT
 # yet confirmed to fix the "washed out" patch look (2026-07-21) -- this is the
 # knob to test that hypothesis with, not a validated fix.
-LMAX=${LMAX:-3000}
+LMAX=${LMAX:-1500}
 # NSIDE: the resolution the correction is APPLIED at (apply_transfer.py adds its
 # residual onto low_shells_nside=${NSIDE}.npy). 2048 is the native DISCO/CosmoGrid
 # resolution and the default. Set NSIDE=512 to put this pipeline on the SAME
@@ -175,7 +176,7 @@ LMAX=${LMAX:-3000}
 # case LMAX must be <= 3*512-1 = 1535, and the alms are taken from the PREPARED
 # nside=512 stacks (--prepared-nside) rather than the native nside=2048 npz, so
 # that T is fitted on and applied to the same field.
-NSIDE=${NSIDE:-2048}
+NSIDE=${NSIDE:-512}
 PREPARED_FLAG=""
 if [ "$NSIDE" != "2048" ]; then
     PREPARED_FLAG="--prepared-nside $NSIDE"
@@ -228,13 +229,29 @@ SMOOTH_WINDOW=${SMOOTH_WINDOW:-21}
 INCLUDE_TEST=${INCLUDE_TEST:-}
 FIT_FLAGS=""
 [ -n "$INCLUDE_TEST" ] && FIT_FLAGS="--include-test"
-# Stage 3 (transfer correction) knobs -- see transfer_function.py apply()'s
-# --ell-min-mpc docstring.
-# --hp-transition: raised-cosine hand-over band above ell_min (fraction of lmax),
-# same convention/default as diffusion/run_diffusion.sh's HP_TRANSITION -- see
-# highpass_ell_ramp's docstring. 0 recovers the old hard ell_min step exactly.
-ELL_MIN_MPC=${ELL_MIN_MPC:-5.0}
-HP_TRANSITION=${HP_TRANSITION:-0.10}
+# Stage 3 (transfer correction) knobs.
+# ELL_MIN_MPC: leave comoving scales LARGER than this untouched. Converted to a
+# PER-SHELL ell_min = 2*pi*chi/L, so the correction starts where the particle-mesh
+# deficit actually starts on that shell. 17.0 Mpc/h is the measured onset
+# (17.0 +- 1.1 Mpc/h, constant to 4% over 25 shells spanning a factor 22 in chi);
+# the previous 5.0 started 3.4x too late and left the near shells uncorrected.
+# The HP_TRANSITION raised-cosine hand-over was REMOVED 2026-08-11 (as were the
+# generative pipelines' fixed-angular hpc/hpt): it held the correction below full
+# strength for ~0.10*lmax past each ell_min, exactly the band the kappa spectra
+# were worst in. The hand-over is now a hard step at ell_min.
+ELL_MIN_MPC=${ELL_MIN_MPC:-17.0}
+# ---- common comparison footing (thesis Sec. "protocol") --------------------------
+# ALL pipelines are scored at N_side=512 -> lmax=1500, and the kappa maps are built at
+# the SAME resolution as the shells they integrate. Building kappa at a higher nside
+# than the shells is pure upsampling: it invents no information and produces spectra
+# past the shells' own band limit (3*512-1 = 1535) that are interpolation and
+# pixel-window artefacts. Derived, not hard-coded, so the two cannot drift apart.
+KAPPA_NSIDE=${KAPPA_NSIDE:-$NSIDE}
+KAPPA_LMAX=${KAPPA_LMAX:-$LMAX}
+if [ "$KAPPA_LMAX" -gt $((3 * KAPPA_NSIDE - 1)) ]; then
+    echo "[abort] KAPPA_LMAX=$KAPPA_LMAX exceeds band limit 3*KAPPA_NSIDE-1=$((3 * KAPPA_NSIDE - 1))" >&2
+    exit 1
+fi
 OUT=/capstor/scratch/cscs/damrein/outputs/transfer/${SLURM_JOB_ID}
 mkdir -p "$OUT" /capstor/scratch/cscs/damrein/outputs/logs/transfer
 
@@ -441,7 +458,6 @@ if [ "$N_NODES" -gt 1 ]; then
                     --transfer ${BATCH_TRANSFERS[$i]} \
                     --run-dirs ${BATCH_RUN_DIRS[$i]} \
                     --nside $NSIDE --lmax $LMAX --ell-min-mpc $ELL_MIN_MPC \
-                    --hp-transition $HP_TRANSITION \
                     --no-clip --seed 0 \
                     --out-counts-dir '$OUT/counts' \
                     --patch-shells --fullsky-shells --n-zbins 0 \
@@ -475,21 +491,20 @@ for ((j = 0; j < ${#EVAL_COSMOS_ARR[@]} && j < DIAG_MAX_COSMOLOGIES; j++)); do
     RUN_DIRS="$RUN_DIRS $DATA/${EVAL_COSMOS_ARR[$j]}/run_0"
     TRANSFER_FILES="$TRANSFER_FILES ${TRANSFER_ARR[$j]}"
 done
-echo "[stage 3] apply_transfer.py: correction (--no-clip, ell_min_mpc=$ELL_MIN_MPC, hp_transition=$HP_TRANSITION) + diagnostics (incl. kappa), $((${#EVAL_COSMOS_ARR[@]} < DIAG_MAX_COSMOLOGIES ? ${#EVAL_COSMOS_ARR[@]} : DIAG_MAX_COSMOLOGIES)) held-out cosmologies"
+echo "[stage 3] apply_transfer.py: correction (--no-clip, ell_min_mpc=$ELL_MIN_MPC) + diagnostics (incl. kappa), $((${#EVAL_COSMOS_ARR[@]} < DIAG_MAX_COSMOLOGIES ? ${#EVAL_COSMOS_ARR[@]} : DIAG_MAX_COSMOLOGIES)) held-out cosmologies"
 uenv run pytorch/v2.9.1:v2 --view=default -- bash -c "
     source ${SPHEREFLOW_VENV}/bin/activate
     OMP_NUM_THREADS=$CPUS_PER_NODE python transfer/apply_transfer.py \
         --transfer $TRANSFER_FILES \
         --run-dirs $RUN_DIRS \
         --nside $NSIDE --lmax $LMAX --ell-min-mpc $ELL_MIN_MPC \
-        --hp-transition $HP_TRANSITION \
         --no-clip --seed 0 \
         $REUSE_FLAG \
         --out-counts-dir '$OUT/counts' \
         --patch-shells 5 10 15 30 50 --n-per-shell 1 --patch-size 256 \
         --fullsky-shells 5 10 15 30 50 \
         --max-cosmologies $DIAG_MAX_COSMOLOGIES \
-        --kappa \
+        --kappa --kappa-nside $KAPPA_NSIDE --kappa-lmax $KAPPA_LMAX \
         --out-dir '$OUT/eval'
 "
 

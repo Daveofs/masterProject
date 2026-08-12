@@ -109,14 +109,18 @@ def compute_cl(count_map: np.ndarray, lmax: int) -> np.ndarray:
     return cl
 
 
-# Physical scale -> multipole (Limber flat-sky: ell ~ chi / r)
-# Only the 5 cMpc/h scale is marked: it is the comoving scale at which the
-# transfer-function correction is switched on (run_transfer.sh --ell-min-mpc 5),
-# so this one line ties the validation figures to the correction. The 1 cMpc/h,
-# box-size, PM-cell and 2*nside markers were dropped -- five vertical lines per
-# panel obscured the curve they were meant to annotate.
+# Physical scale -> multipole (Limber flat-sky: ell = 2*pi*chi/L, see ell_from_scale)
+# Only the 17 cMpc/h scale is marked: it is the MEASURED onset of the particle-mesh
+# deficit (17.0 +- 1.1 cMpc/h over 25 shells) and the scale at which all three
+# correction pipelines are switched on (run_transfer.sh --ell-min-mpc 17,
+# --hp-scale-mpc-h 17), so this one line ties the validation figures to the
+# correction. It was 5 cMpc/h until 2026-08-11, which mis-stated both: 5 cMpc/h is
+# not where the deficit starts, and the marker was additionally drawn with a formula
+# missing the factor 2*pi (see ell_from_scale), so it landed at roughly half the
+# multipole it claimed. The 1 cMpc/h, box-size, PM-cell and 2*nside markers were
+# dropped -- five vertical lines per panel obscured the curve they annotate.
 _SCALE_LINES = [
-    (5.0, "5 cMpc/h", "#4f8a76"),   # muted sage-teal: legible, but calmer than a
+    (17.0, "17 cMpc/h", "#4f8a76"),  # muted sage-teal: legible, but calmer than a
 ]                                    # saturated green next to the data colours
 # An annotation, not a data series: a long clean dash at moderate weight, drawn
 # UNDER the curves, reads as a reference marker rather than competing with them.
@@ -138,11 +142,19 @@ _LEGEND_FONTSIZE = 13
 def ell_from_scale(r_cmpch: float, chi_cmpch: float) -> float:
     """Multipole corresponding to comoving scale r [cMpc/h] at distance chi [cMpc/h].
 
-    Uses the Limber flat-sky approximation: ell ~ chi / r.
+    Limber flat-sky: a structure of comoving size r at comoving distance chi subtends
+    an angle r/chi, and an angular scale theta corresponds to ell = 2*pi/theta, so
+
+        ell = 2*pi*chi / r
+
+    The 2*pi was MISSING here until 2026-08-11 (the function returned chi/r), which
+    placed every marker at 1/(2*pi) of its true multipole. This is the same relation
+    as apply_transfer.ell_min_from_mpc_h and as unet/diffusion's cutoff_from_chi --
+    all three must agree, since they now all switch on at the same comoving scale.
     """
     if chi_cmpch <= 0 or r_cmpch <= 0:
         return np.nan
-    return chi_cmpch / r_cmpch
+    return 2.0 * np.pi * chi_cmpch / r_cmpch
 
 
 def tight_ylim(ax, curves, ells, lmax, ell_min=2, log=False,

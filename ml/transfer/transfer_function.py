@@ -162,34 +162,20 @@ def ell_min_from_mpc_h(z: np.ndarray, cosmo: np.ndarray, scale_mpc_h: float) -> 
     return np.clip(ell_min, 0, None)
 
 
-def highpass_ell_ramp(ell: np.ndarray, ell_min: int, transition: float) -> np.ndarray:
-    """Raised-cosine ramp w(ell) in [0,1]: 0 below ell_min, smoothly rising to 1
-    over a transition band of width `transition` (in ell), 1 above ell_min+transition.
+def highpass_ell_step(ell: np.ndarray, ell_min: int) -> np.ndarray:
+    """w(ell) in {0,1}: 0 below ell_min, 1 at and above it.
 
-    Same shape (0.5*(1-cos(pi*t))) as the highpass masks the OTHER three
-    correction pipelines converged on independently after all three showed a
-    systematic kappa Cl bias traced to a HARD large-scale cutoff (see
-    unet/flow_model.py's _highpass_mask, diffusion/model.py's _highpass_mask,
-    sphereflow/sphere_flow.py's graph_highpass -- and the [[deepsphere-shell-
-    correction]] memory) -- ported here, not imported (this project's ml/
-    pipeline dirs never cross-import, see [[feedback-decoupled-pipeline-
-    modules]]; transfer_function.py -> apply_transfer.py is a WITHIN-pipeline
-    import, same as those three already do internally, so this one is fine).
-    Applied here to apply()'s (Ti-1)/(Ri-1) correction deltas directly in ell
-    space -- the EXACT equivalent of those pipelines' 2D-FFT/graph radial
-    highpass on a flat-patch or graph signal, but exact rather than
-    approximate, since T/R are already per-ell scalars with no spatial extent
-    to Fourier-transform.
-
-    transition<=0 reduces to a hard step (0 below ell_min, else 1) -- the
-    ORIGINAL apply() behavior (a step function in harmonic space rings in real
-    space at the cutoff scale, same Gibbs-phenomenon motivation the other three
-    pipelines' docstrings give for smoothing theirs)."""
-    if transition <= 0:
-        return (ell >= ell_min).astype(np.float64)
-    t = np.clip((ell.astype(np.float64) - ell_min) / transition, 0.0, 1.0)
-    return 0.5 * (1.0 - np.cos(np.pi * t))
-
+    A HARD step. The raised-cosine ramp this replaces (--hp-transition, removed
+    2026-08-11 along with the other pipelines' angular hpc/hpt) was introduced against
+    Gibbs ringing, but it cost far more than it bought: at 0.10*lmax it held the
+    correction below full strength out to ell ~ 150 past each shell's ell_min, which
+    is precisely the band the kappa spectra were most deficient in. Since ell_min is
+    itself per-shell (ell_min_from_mpc_h -- the correction now starts where the
+    particle-mesh deficit actually starts, L = 17 Mpc/h), there is nothing left for a
+    ramp to protect: below ell_min the shell is already correct, above it the
+    correction is wanted in full.
+    """
+    return (ell >= ell_min).astype(np.float64)
 
 def build_features(ell: np.ndarray, z: float, cosmo: np.ndarray,
                    cl_low: np.ndarray) -> np.ndarray:

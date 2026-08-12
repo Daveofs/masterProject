@@ -147,6 +147,7 @@ class PatchDataset(Dataset):
             "z": float(0.5 * (m["lower_z"] + m["upper_z"])),  # shell midpoint redshift
             "shell_idx": int(m["shell_idx"]),
             "shell_com": float(m["shell_com"]),  # comoving distance (Mpc/h) - drives the HPF cutoff
+            "reso_arcmin": float(m["reso_arcmin"]),  # pixel scale this patch was cut at
             "idx": idx,
         }
 

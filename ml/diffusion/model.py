@@ -70,62 +70,87 @@ import torch.nn as nn
 # (H, W, cutoff, transition, device, dtype) -> radial high-pass mask over the rFFT
 # grid. Depends only on geometry + cutoff, not on the data, so it is built once per
 # distinct patch size and reused for every patch/batch.
-_HP_MASK_CACHE: dict[tuple, torch.Tensor] = {}
+_HP_RADIUS_CACHE: dict[tuple, torch.Tensor] = {}
 
 
-def _highpass_mask(H: int, W: int, cutoff_frac: float, transition_frac: float,
-                   device, dtype) -> torch.Tensor:
-    """Real radial high-pass mask on the rfft2 grid of an (H, W) patch. 0 below
-    cutoff_frac, smoothly (raised-cosine) rising to 1 by cutoff_frac+transition_frac,
-    where both fractions are of the patch NYQUIST radial frequency. A smooth (not
-    hard) transition avoids the ringing a brick-wall cutoff would inject into the
-    small-scale residual."""
-    key = (H, W, round(cutoff_frac, 5), round(transition_frac, 5), device, dtype)
-    m = _HP_MASK_CACHE.get(key)
-    if m is not None:
-        return m
-    fy = torch.fft.fftfreq(H, device=device)      # cycles/pixel in [-0.5, 0.5)
-    fx = torch.fft.rfftfreq(W, device=device)      # cycles/pixel in [0, 0.5]
-    r = torch.sqrt(fy[:, None] ** 2 + fx[None, :] ** 2) / 0.5   # 1.0 == Nyquist
-    lo, hi = cutoff_frac, cutoff_frac + transition_frac
-    t = torch.clamp((r - lo) / max(hi - lo, 1e-8), 0.0, 1.0)
-    mask = (0.5 * (1 - torch.cos(math.pi * t))).to(dtype)       # 0 below lo, 1 above hi
-    _HP_MASK_CACHE[key] = mask
-    return mask
+def cutoff_from_chi(chi_mpc_h, reso_arcmin, scale_mpc_h: float):
+    """The high-pass cutoff for a patch, as a fraction of the patch Nyquist
+    frequency, from a FIXED COMOVING scale.
+
+    This is the only cutoff the pipeline has. It replaces the fixed angular cutoff
+    the models used previously, which was wrong in principle and measurably so: the
+    particle-mesh deficit sets in at a fixed COMOVING scale (measured at
+    17.0 +- 1.1 Mpc/h, constant to 4% over a factor 22 in comoving distance), so its
+    onset multipole ell_min = 2*pi*chi/L moves with the shell. One angular cutoff can
+    therefore only be right for a single shell -- at the old hpc=0.05 it landed at
+    l=79, too late for the nearest shells (shell 2 is already deficient by l=42) and
+    5-11x too early for the distant ones, licensing the model to alter scales already
+    correct to 0.5%. The transfer pipeline has always used this construction for its
+    ell_min(s); the generative pipelines now use it too.
+
+    In units of the patch Nyquist the 2*pi and the pi cancel:
+        r = ell/ell_Nyq = (2*pi*chi/L) / (pi/dtheta) = 2*chi*dtheta/L
+    dtheta comes from the patch metadata's reso_arcmin -- the scale the patch was
+    actually cut at -- so a dataset built at another resolution cannot mismatch.
+    """
+    dtheta = reso_arcmin * (math.pi / (180.0 * 60.0))
+    if torch.is_tensor(chi_mpc_h):
+        return (2.0 * chi_mpc_h * dtheta / scale_mpc_h).clamp(0.0, 1.0)
+    return min(max(2.0 * float(chi_mpc_h) * float(dtheta) / scale_mpc_h, 0.0), 1.0)
 
 
-def highpass_2d(x: torch.Tensor, cutoff_frac: float, transition_frac: float) -> torch.Tensor:
-    """Radial high-pass filter on (B, C, H, W) patches via 2D rFFT: removes the
-    largest-scale (low radial-wavenumber) content, keeping only small scales.
-    cutoff_frac / transition_frac are fractions of the patch Nyquist frequency
-    (e.g. cutoff 0.1 pins everything below ~0.1*Nyquist to whatever the caller adds
-    it back onto). Operates per patch, so it says nothing about cross-patch coherence
-    on its own -- that comes from adding the result onto the (globally coherent) low
-    map in compose_corrected."""
+def _hp_radius(H: int, W: int, device, dtype) -> torch.Tensor:
+    """Radial frequency of the rfft2 grid, normalised so r = 1 at Nyquist."""
+    key = (H, W, device, dtype)
+    r = _HP_RADIUS_CACHE.get(key)
+    if r is None:
+        fy = torch.fft.fftfreq(H, device=device)
+        fx = torch.fft.rfftfreq(W, device=device)
+        r = (torch.sqrt(fy[:, None] ** 2 + fx[None, :] ** 2) / 0.5).to(dtype)
+        _HP_RADIUS_CACHE[key] = r
+    return r
+
+
+def highpass_2d(x: torch.Tensor, cutoff) -> torch.Tensor:
+    """Radial high-pass on (B, C, H, W) patches via 2D rFFT: everything below
+    `cutoff` (a fraction of the patch Nyquist) is removed, everything above passes
+    unchanged.
+
+    The cutoff is a hard step, not a ramp. The previous raised-cosine transition
+    spanned 0.20 of Nyquist -- l = 79 to 393 -- which admitted only 11% of the
+    corrective POWER at l=200 and none at l=100, precisely the band where the nearest
+    shells are deficient. Since the cutoff now tracks the shell, there is nothing left
+    for a ramp to protect: below it the map is already correct, above it the
+    correction is wanted in full.
+
+    `cutoff` may be a scalar or a (B,) tensor -- one per patch, from cutoff_from_chi.
+    """
     B, C, H, W = x.shape
-    mask = _highpass_mask(H, W, cutoff_frac, transition_frac, x.device, x.dtype)
-    f = torch.fft.rfft2(x) * mask[None, None]
-    return torch.fft.irfft2(f, s=(H, W))
+    r = _hp_radius(H, W, x.device, x.dtype)
+    if torch.is_tensor(cutoff):
+        m = (r[None] >= cutoff.to(device=x.device, dtype=x.dtype).reshape(-1, 1, 1))
+        mask = m.to(x.dtype)[:, None]
+    else:
+        mask = (r >= float(cutoff)).to(x.dtype)[None, None]
+    return torch.fft.irfft2(torch.fft.rfft2(x) * mask, s=(H, W))
 
 
-def residual_target(low_f: torch.Tensor, high_f: torch.Tensor,
-                    cutoff_frac: float, transition_frac: float) -> torch.Tensor:
-    """The diffusion TARGET x1: the high-pass part of the (high - low) residual. This
-    is what the denoiser learns to produce -- small scales only, large scales dropped
-    (they're supplied by the low map at compose time)."""
-    return highpass_2d(high_f - low_f, cutoff_frac, transition_frac)
+def residual_target(low_f: torch.Tensor, high_f: torch.Tensor, cutoff) -> torch.Tensor:
+    """The TARGET's high-pass component: highpass(high_f - low_f). With x0=low_f,
+    x1 = x0 + residual_target(...) makes the target velocity x1-x0 exactly this
+    residual -- a pure high-pass field, so the model can only ever add small-scale
+    content (large scales start AND end at low_f)."""
+    return highpass_2d(high_f - low_f, cutoff)
 
 
-def compose_corrected(low_f: torch.Tensor, sample: torch.Tensor,
-                      cutoff_frac: float, transition_frac: float) -> torch.Tensor:
-    """Re-assemble the corrected field from a diffusion SAMPLE: low map (all its
-    scales) + the high-pass sample. highpass() is applied to the sample again here
-    (idempotent for an already-high-pass field) as a hard guarantee that the sample
-    contributes NOTHING at large scales, so corrected's large scales == low's large
-    scales exactly, independent of any low-frequency leakage the finite-step sampler
-    might have left in. THE inverse of residual_target -- train and apply must both go
-    through this pair."""
-    return low_f + highpass_2d(sample, cutoff_frac, transition_frac)
+def compose_corrected(low_f: torch.Tensor, sample: torch.Tensor, cutoff) -> torch.Tensor:
+    """Re-assemble the corrected field: low_f + highpass(sample), where `sample` is
+    the effective residual the sampler accumulated. High-passing again before adding
+    back is a hard guarantee that the large scales end up EXACTLY low_f's, whatever
+    drift a finite-step integration left in (a no-op for an already-high-pass field).
+    THE inverse of residual_target -- train and apply must both go through this pair,
+    and with the SAME cutoff, or the guarantee stops holding."""
+    return low_f + highpass_2d(sample, cutoff)
 
 
 class SinusoidalEmbedding(nn.Module):

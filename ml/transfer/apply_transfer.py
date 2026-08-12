@@ -54,7 +54,7 @@ import healpy as hp
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from transfer_function import (_alm, ell_of_flat_index, alm_fname, smooth_cl,      # noqa: E402
                                ell_min_from_mpc_h, load_cosmo, shell_redshifts,     # noqa: E402
-                               _debias_mean, highpass_ell_ramp)                     # noqa: E402
+                               _debias_mean, highpass_ell_step)                     # noqa: E402
 # poisson_resample.py (lognormal+Poisson re-discretization into valid counts) is no
 # longer wired in here (2026-07-16): validated that for kappa specifically, the
 # --no-clip continuous field is BOTH cheaper AND more accurate than the Poisson path
@@ -191,23 +191,17 @@ def apply(args, run: Path, transfer_path, out_path=None):
     else:
         ell_min_per_shell = np.full(n_shells, args.ell_min, dtype=np.int64)
 
-    # HIGH-PASS transition band (2026-07-21, ported from unet/diffusion/sphereflow's
-    # highpass_residual formulation for consistency -- see highpass_ell_ramp's
-    # docstring). --hp-transition in ell = args.hp_transition * lmax, the same
-    # "fraction of Nyquist" convention those pipelines use for their
-    # --hp-transition (lmax plays the role of Nyquist here: it IS the max
-    # resolvable ell, exactly like patch/graph Nyquist there). --hp-transition 0
-    # recovers the ORIGINAL hard ell_min_i step exactly.
-    # NOTE (2026-07-21): an ell_min-relative version of this (transition width =
-    # hp_transition * ell_min_i instead of hp_transition * lmax) was tried and
-    # REVERTED -- it measurably improved the flat-patch power-ratio "washed out"
-    # look but made kappa_cl/cl_ratio_by_zbin_grid WORSE (user-observed, real job
-    # comparison), so it is not a strict improvement. Root cause of "washed out"
-    # is still open -- possibly SHT/pixelization resolution (nside/lmax), not
-    # this transition band at all; do not re-attempt the ell_min-relative
-    # version without re-validating BOTH the patch view and kappa/cl_ratio.
+    # Where the correction starts, per shell: ell_min_per_shell above. It is a HARD
+    # step in ell -- the --hp-transition raised-cosine hand-over was removed
+    # 2026-08-11 (see highpass_ell_step). Historical note kept because it cost a
+    # round of debugging: an ell_min-RELATIVE transition width (hp_transition *
+    # ell_min_i rather than * lmax) was also tried and reverted -- it improved the
+    # flat-patch power-ratio "washed out" look but made kappa_cl and
+    # cl_ratio_by_zbin_grid worse. That "washed out" appearance is still unexplained
+    # and is most likely SHT/pixelization resolution (nside/lmax), not the hand-over
+    # band; do not reintroduce any transition without re-validating BOTH the patch
+    # view and kappa.
     ell_arr = np.arange(lmax + 1, dtype=np.float64)
-    hp_transition_ell = args.hp_transition * lmax
 
     for i in range(n_shells):
         Ti = T[min(i, T.shape[0] - 1)].copy()      # per-shell transfer
@@ -216,10 +210,9 @@ def apply(args, run: Path, transfer_path, out_path=None):
             Ti = Ti * Ri                             # Wiener/MMSE gain r*T
         ell_min_i = int(ell_min_per_shell[i])
         if ell_min_i > 0:                            # leave large scales untouched
-            # Smooth raised-cosine hand-over (not a hard truncation, see above):
-            # w=0 (no correction, Ti/Ri->1) below ell_min_i, w=1 (full Ti/Ri)
-            # above ell_min_i+hp_transition_ell.
-            w = highpass_ell_ramp(ell_arr, ell_min_i, hp_transition_ell)
+            # w=0 (no correction, Ti/Ri -> 1) below ell_min_i, w=1 (full Ti/Ri) at
+            # and above it.
+            w = highpass_ell_step(ell_arr, ell_min_i)
             Ti = 1.0 + w * (Ti - 1.0)
             Ri = 1.0 + w * (Ri - 1.0)
         v = low[i].astype(np.float64)
@@ -356,6 +349,12 @@ def plot_patches(args, run_dirs: list[Path], corrected_by_run: dict):
     # unet/apply_flow.py's patch_power_ratio_pctile_band.png, which pools
     # its own multi-cosmology held-out patch set the same way. ---
     if args.n_pctile_patches > 0:
+        # Own RNG for the pooled sampling below. The per-row example patches are now
+        # drawn from the SHARED plan (analysis/example_patches.patch_plan) so all three
+        # pipelines show the same sky; this pooled band is a separate, transfer-only
+        # statistic and keeps its own stream, seeded off args.seed so it stays
+        # reproducible and does not perturb the shared plan's draws.
+        rng = np.random.default_rng(args.seed + 1)
         print(f"[plot_patches] sampling {args.n_pctile_patches} random patches "
               f"across shells {args.patch_shells} and {len(run_dirs)} held-out "
               f"cosmologies for the pctile-band power-ratio plot", flush=True)
@@ -721,25 +720,16 @@ def main():
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--smooth-window", type=int, default=21)
     p.add_argument("--ell-min", type=int, default=0,
-                   help="Leave ell<ell_min untouched (T=1), smoothly ramped up over "
-                        "--hp-transition above ell_min (see there). Overridden by "
-                        "--ell-min-mpc when that is > 0.")
-    p.add_argument("--ell-min-mpc", type=float, default=3.0,
+                   help="Leave ell<ell_min untouched (T=1); full correction at and "
+                        "above it. Overridden by --ell-min-mpc when that is > 0.")
+    p.add_argument("--ell-min-mpc", type=float, default=17.0,
                    help="Leave comoving scales LARGER than this (Mpc/h) untouched, "
-                        "converted to a PER-SHELL ell_min via each shell's own "
-                        "redshift (see ell_min_from_mpc_h). 0 disables.")
-    p.add_argument("--hp-transition", type=float, default=0.10,
-                   help="Width (as a fraction of lmax, same 'fraction of Nyquist' "
-                        "convention as unet/diffusion/sphereflow's --hp-transition) "
-                        "of the raised-cosine hand-over band above ell_min -- "
-                        "smoothly ramps Ti/Ri from 1 (no correction) up to their "
-                        "full values instead of a hard step, avoiding the "
-                        "ringing/Gibbs artifact a step produces in real space (see "
-                        "highpass_ell_ramp's docstring; ported for consistency with "
-                        "the other 3 correction pipelines, which independently "
-                        "converged on the same fix for a kappa Cl bias traced to "
-                        "exactly this kind of hard cutoff). 0 recovers the original "
-                        "hard ell_min step exactly.")
+                        "converted to a PER-SHELL ell_min = 2*pi*chi/L via each "
+                        "shell's own redshift (see ell_min_from_mpc_h). 17.0 is the "
+                        "measured onset of the particle-mesh deficit (17.0 +- 1.1 "
+                        "Mpc/h over 25 shells); the old 5.0 started the correction "
+                        "3.4x too late and left the near shells uncorrected. "
+                        "0 disables.")
     p.add_argument("--no-clip", action="store_true",
                    help="Emit the raw Cl-optimal overdensity field instead of a "
                         "positivity-clipped one -- KEEPS negative pixels (up to ~49%% "
@@ -775,7 +765,10 @@ def main():
                         "plots. Empty to skip. Densified 2026-07-16 (was 5 10 15 30 "
                         "50): with only 5 shells a spike at one shell is "
                         "indistinguishable from a trend.")
-    p.add_argument("--lmax", type=int, default=3000)
+    p.add_argument("--lmax", type=int, default=1500,
+                   help="band limit for the full-sky Cl. 1500 is the common "
+                        "N_side=512 footing all three pipelines are scored on; "
+                        "clamped to 3*nside-1 regardless.")
 
     # --- plot_cl_zbin_grid args (multi-cosmology Cl-ratio-by-redshift-bin pctile
     # grid, mirrors unet/apply_flow.py's cl_ratio_by_zbin_grid.png) ---
@@ -811,27 +804,29 @@ def main():
                         "low-z regime where the correction is hardest) AND bin4 "
                         "(z~0.98 peak, less correction needed but the most weight "
                         "in cosmological analyses).")
-    p.add_argument("--kappa-nside", type=int, default=1024,
-                   help="output kappa map nside (independent of --nside). 1024 (not "
-                        "128) because the kappa map's own resolution CUTS OFF the "
-                        "diagnostic: nside=128 can only represent ell<~383 (3*nside-1; "
-                        "27.5 arcmin pixels), but the transfer function is ~1 there and "
-                        "does essentially ALL of its work above it -- measured on real "
-                        "transfer_cosmo_000003.npz, max|T-1| over ell<=350 is only "
-                        "0.002-0.025 on shells 10-30 versus 0.15-1.10 over ell 351-3000. "
-                        "At nside=128 the kappa comparison would show corrected ~ low ~ "
-                        "high and say nothing about whether the correction works. "
-                        "nside=1024 reaches ell~3071, covering the corrected band.")
+    p.add_argument("--kappa-nside", type=int, default=512,
+                   help="output kappa map nside. MUST match the nside the shells were "
+                        "corrected at (--nside): the thesis compares all pipelines on a "
+                        "common N_side=512 footing, and building kappa at 1024 from 512 "
+                        "shells is pure upsampling -- it invents no information and "
+                        "produces spectra out to ell~3071 that above the shells' own band "
+                        "limit (3*512-1 = 1535) are interpolation and pixel-window "
+                        "artefacts, not signal. It must also not go LOW: the transfer "
+                        "function is ~1 below ell~350 and does essentially all its work "
+                        "above it (measured on transfer_cosmo_000003.npz: max|T-1| is "
+                        "0.002-0.025 over ell<=350 on shells 10-30, versus 0.15-1.10 over "
+                        "ell 351-3000), so at e.g. nside=128 (ell<~383) the kappa "
+                        "comparison would show corrected ~ low ~ high and say nothing.")
     p.add_argument("--kappa-zi", type=float, default=0.0)
     p.add_argument("--kappa-zf", type=float, nargs="+", default=[1.05, 1.85],
                    help="integration upper redshift PER --kappa-nz entry (single "
                         "value broadcasts). Defaults hold >=95%% of each bin's "
                         "n(z): 1.05 for bin1, 1.85 (~99%%) for bin4.")
-    p.add_argument("--kappa-lmax", type=int, default=2048,
-                   help="angular power spectrum lmax for the kappa maps (--kappa-nside "
-                        "supports up to ~3*nside-1, so keep this below that). Must reach "
-                        "well past ell~350 or the correction is invisible -- see "
-                        "--kappa-nside.")
+    p.add_argument("--kappa-lmax", type=int, default=1500,
+                   help="angular power spectrum lmax for the kappa maps. Must match the "
+                        "shells' own band limit for a fair comparison (1500 on the "
+                        "N_side=512 footing) -- and must reach well past ell~350 or the "
+                        "correction is invisible; see --kappa-nside.")
 
     p.add_argument("--reuse-counts", default="",
                    help="Directory of <cosmo>_counts.npz from a PREVIOUS run (i.e. a "

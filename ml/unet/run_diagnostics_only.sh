@@ -29,7 +29,8 @@
 # (--data-root given: full-sky reconstruction + real angular Cl) and --kappa.
 # Emits the SAME figure set as transfer/run_diagnostic_only.sh and
 # sphereflow/run_diagnostics_only.sh -- same shells (5 10 15 30 50), same kappa
-# resolution (nside=1024, lmax=2048, apply_flow.py's defaults) -- so the three
+# resolution (nside=512, lmax=1500 = apply_flow.py's defaults, matching the shell
+# resolution so kappa is not upsampled) -- so the three
 # pipelines' eval dirs can be diffed plot-by-plot.
 
 export UENV_REPO_PATH=/capstor/scratch/cscs/damrein/.uenv-images
@@ -49,7 +50,12 @@ UNET=/users/damrein/masterProject/ml/unet
 # every run_diagnostics_only.sh submission failed loading best.pt from it.
 DATA_ROOT=${DATA_ROOT:-/capstor/scratch/cscs/damrein/grid}
 PATCH_DIR=${PATCH_DIR:-/capstor/scratch/cscs/damrein/outputs/flowpatches/grid_nside512_256_100000}
-OUT_DIR=${OUT_DIR:-/capstor/scratch/cscs/damrein/outputs/flowruns/flow_delta_grid_nside512_patch256_n100000_ch32_b32_e200_lr3e-5_hp0.10_0.20_lossw}
+# The default below is the CURRENT (per-shell comoving cutoff, L=17 Mpc/h) run.
+# Checkpoints from before 2026-08-11 -- their directory names end in _hp<cutoff>_<transition>
+# -- were trained with the retired fixed ANGULAR filter and are REFUSED by apply
+# (hard error naming the setting), because filtering their residual per-shell would
+# cut at a scale they never saw. Point OUT_DIR at one of those only to confirm that.
+OUT_DIR=${OUT_DIR:-/capstor/scratch/cscs/damrein/outputs/flowruns/flow_delta_grid_nside512_patch256_n100000_ch32_b32_e200_lr3e-5_L17.0}
 # Where the figures go (default: the run's own eval/). Override for an A/B rerun
 # against a checkpoint whose eval/ already holds the baseline you want to KEEP --
 # e.g. EVAL_DIR=${OUT_DIR}/eval_taper32 for the taper_power A/B, so the existing

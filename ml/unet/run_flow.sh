@@ -56,7 +56,8 @@ DATA_ROOT="${DATA_ROOT:-/capstor/scratch/cscs/damrein/grid}"
 METAINFO_DIR="/capstor/scratch/cscs/damrein/cosmogridv1"
 UNET=/users/damrein/masterProject/ml/unet
 
-NSIDE=${NSIDE:-1024}
+NSIDE=${NSIDE:-512}
+LMAX=${LMAX:-1500}
 PATCH_SIZE=${PATCH_SIZE:-256}
 NPATCH=${NPATCH:-100000}
 EPOCHS=${EPOCHS:-200}
@@ -77,8 +78,21 @@ STEPS=${STEPS:-8}
 # see flow_model.py's module docstring): the flow target now only adds small-scale
 # content, large scales pinned to the low map. Passed to BOTH train (builds the
 # target) and, via the checkpoint, apply (composes the corrected map).
-HP_CUTOFF=${HP_CUTOFF:-0.05}
-HP_TRANSITION=${HP_TRANSITION:-0.12}
+# --- high-pass residual: WHERE the model is allowed to act -------------------------
+# The target is highpass(high - low) and the corrected patch is low + highpass(sample),
+# so scales the filter rejects are pinned to the low map by construction. The cutoff is
+# PER SHELL, from a fixed comoving scale L: ell_min = 2*pi*chi/L, i.e. r = 2*chi*dtheta/L
+# in units of the patch Nyquist. L=17 Mpc/h is the measured onset of the particle-mesh
+# deficit (17.0 +- 1.1 Mpc/h, constant to 4% over 25 shells spanning a factor 22 in chi).
+#
+# This replaced the fixed ANGULAR pair HP_CUTOFF/HP_TRANSITION, now REMOVED. That pair
+# could be right for at most one shell (hpc=0.05 put the cutoff at ell=79: too late for
+# the near shells, which are already deficient by ell=42, and 5-11x too early for the far
+# ones), and its raised-cosine ramp reached full transmission only at ell=393, admitting
+# just 11% of the corrective power at ell=200 -- the band the kappa spectra were worst in.
+# There is no ramp any more: below the cutoff the map is already correct, above it the
+# correction is wanted in full.
+HP_SCALE_MPC_H=${HP_SCALE_MPC_H:-17.0}
 # cosmology+redshift conditioning at the bottleneck (flow_model.FlowUNet) -- on by
 # default; set USE_COSMO_COND=0 for an A/B run against the unconditioned model.
 USE_COSMO_COND=${USE_COSMO_COND:-1}
@@ -106,7 +120,7 @@ SPACE=${SPACE:-delta}
 # highpass-residual delta-space retrain never collides with an old pre-2026-07-21
 # full-field checkpoint at the same name -- apply_flow.py's hp_cutoff guard would
 # reject the old one anyway, but this keeps the two from silently overwriting.
-RUN_NAME=${RUN_NAME:-flow_${SPACE}_${DATA_TAG}_nside${NSIDE}_patch${PATCH_SIZE}_n${NPATCH}_ch${BASE_CH}_b${BATCH}_e${EPOCHS}_lr${LEARNING_RATE}_hpc${HP_CUTOFF}_hpt${HP_TRANSITION}${COSMO_SUFFIX}}
+RUN_NAME=${RUN_NAME:-flow_${SPACE}_${DATA_TAG}_nside${NSIDE}_patch${PATCH_SIZE}_n${NPATCH}_ch${BASE_CH}_b${BATCH}_e${EPOCHS}_lr${LEARNING_RATE}_L${HP_SCALE_MPC_H}${COSMO_SUFFIX}}
 # weak-lensing kappa map diagnostic (analysis.weak_lensing, apply_flow.py --kappa):
 # ON by default. It reconstructs every usable shell (z<~1.05, ~47/69) via full-sky
 # tiling for --kappa-max-cosmologies held-out cosmologies, which used to be far too
@@ -114,6 +128,19 @@ RUN_NAME=${RUN_NAME:-flow_${SPACE}_${DATA_TAG}_nside${NSIDE}_patch${PATCH_SIZE}_
 # across every shell/cosmology (analysis.patch_tiling.gnomonic_index_maps, ~108x
 # faster per shell), so it fits comfortably. KAPPA=0 skips it.
 KAPPA=${KAPPA:-1}
+# ---- common comparison footing (thesis Sec. "protocol") --------------------------
+# ALL pipelines are scored at N_side=512 -> lmax=1500, and the kappa maps are built at
+# the SAME resolution as the shells they integrate. Building kappa at a higher nside
+# than the shells is pure upsampling: it invents no information and produces spectra
+# past the shells' own band limit (3*512-1 = 1535) that are interpolation and
+# pixel-window artefacts. Derived, not hard-coded, so the two cannot drift apart.
+KAPPA_NSIDE=${KAPPA_NSIDE:-$NSIDE}
+KAPPA_LMAX=${KAPPA_LMAX:-$LMAX}
+if [ "$KAPPA_LMAX" -gt $((3 * KAPPA_NSIDE - 1)) ]; then
+    echo "[abort] KAPPA_LMAX=$KAPPA_LMAX exceeds band limit 3*KAPPA_NSIDE-1=$((3 * KAPPA_NSIDE - 1))" >&2
+    exit 1
+fi
+
 KAPPA_FLAG=""; [ "${KAPPA}" = "1" ] && KAPPA_FLAG="--kappa"
 # held-out cosmologies used by BOTH the zbin-grid diagnostic (--max-cosmologies)
 # and the kappa diagnostic (--kappa-max-cosmologies) -- apply_flow.py defaults
@@ -179,7 +206,7 @@ srun --nodes=${SLURM_NNODES} --ntasks-per-node=1 --gres=gpu:4 uenv run pytorch/v
     --patch-dir '${PATCH_DIR}' \
     --out-dir   '${OUT_DIR}' \
     --epochs ${EPOCHS} --batch-size ${BATCH} --base-channels ${BASE_CH} --lr ${LEARNING_RATE} \
-    --hp-cutoff ${HP_CUTOFF} --hp-transition ${HP_TRANSITION} --space ${SPACE} \
+    --hp-scale-mpc-h ${HP_SCALE_MPC_H} --space ${SPACE} \
     --num-workers $((SLURM_CPUS_PER_TASK / 4)) ${COSMO_FLAG} ${NO_LR_SCALING_FLAG}
 "
 
@@ -223,6 +250,7 @@ srun --ntasks=${NNODES} --ntasks-per-node=1 --gres=gpu:${GPUS_PER_NODE} uenv run
     --data-root '${DATA_ROOT}' \
     --shell-indices --example-shells 5 10 15 30 50 \
     --fullsky-patch-size ${PATCH_SIZE} ${KAPPA_FLAG} \
-    --max-cosmologies ${MAX_COSMO} --kappa-max-cosmologies ${MAX_COSMO}
+    --max-cosmologies ${MAX_COSMO} --kappa-max-cosmologies ${MAX_COSMO} \
+    --lmax ${LMAX} --kappa-nside ${KAPPA_NSIDE} --kappa-lmax ${KAPPA_LMAX}
 "
 echo "unet-flow job ${SLURM_JOB_ID} finished at $(date) -> ${OUT_DIR}/eval"

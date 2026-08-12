@@ -49,7 +49,7 @@ import matplotlib.pyplot as plt
 
 # embed his files: this script lives alongside flow_model.py / dataset.py
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from flow_model import FlowUNet, sample_ode, compose_corrected  # noqa: E402
+from flow_model import FlowUNet, sample_ode, compose_corrected, cutoff_from_chi  # noqa: E402
 from dataset import (PatchDataset, split_by_cosmo, transform_pair,  # noqa: E402
                      low_to_field, field_to_counts, cosmo_z_vector, COSMO_FIELDS)
 
@@ -190,7 +190,10 @@ def main():
                         "its HEALPix-superpixel tiling has no overlap to average over "
                         "in the first place). Override only to A/B-test this claim on "
                         "your own checkpoint.")
-    p.add_argument("--lmax", type=int, default=3000)
+    p.add_argument("--lmax", type=int, default=1500,
+                   help="band limit for the full-sky Cl. 1500 is the common "
+                        "N_side=512 footing all three pipelines are scored on; "
+                        "clamped to 3*nside-1 regardless.")
     # --- example_full_sky.png: Cl-ratio-by-redshift-bin pctile grid (rows = held-out
     # cosmologies, columns = redshift/shell bins) -- no images (see example_patches.png
     # for those), just the aggregate two-point check. Each cell needs
@@ -231,25 +234,29 @@ def main():
                    help="one or more n(z) distributions; a FULL kappa diagnostic set "
                         "per bin, files tagged _bin1/_bin4/... (bin1: low-z, hardest "
                         "correction; bin4: high-z, most cosmological weight).")
-    p.add_argument("--kappa-nside", type=int, default=1024,
-                   help="output kappa map nside (independent of --fullsky-patch-size). "
-                        "1024 (not the old 128) because the kappa map's own resolution "
-                        "CUTS OFF the diagnostic: nside=128 only represents ell<~383 "
-                        "(3*nside-1), but the correction does essentially ALL of its "
-                        "work above that, so the comparison would show corrected ~ low "
-                        "~ high and say nothing. Same value as transfer/apply_transfer.py "
-                        "and sphereflow/apply_sphere_flow.py, so the kappa plots of the "
-                        "three pipelines are directly comparable.")
+    p.add_argument("--kappa-nside", type=int, default=512,
+                   help="output kappa map nside. MUST match the nside the shells were "
+                        "corrected at (--nside): the thesis compares all pipelines on a "
+                        "common N_side=512 footing, and building kappa at 1024 from 512 "
+                        "shells is pure upsampling -- it invents no information and "
+                        "produces spectra out to ell~3071 that above the shells' own band "
+                        "limit (3*512-1 = 1535) are interpolation and pixel-window "
+                        "artefacts, not signal. It must also not go LOW: the transfer "
+                        "function is ~1 below ell~350 and does essentially all its work "
+                        "above it (measured on transfer_cosmo_000003.npz: max|T-1| is "
+                        "0.002-0.025 over ell<=350 on shells 10-30, versus 0.15-1.10 over "
+                        "ell 351-3000), so at e.g. nside=128 (ell<~383) the kappa "
+                        "comparison would show corrected ~ low ~ high and say nothing.")
     p.add_argument("--kappa-zi", type=float, default=0.0)
     p.add_argument("--kappa-zf", type=float, nargs="+", default=[1.05, 1.85],
                    help="integration upper redshift PER --kappa-nz entry (single "
                         "value broadcasts): 1.05 holds >=95%% of bin1's n(z), "
                         "1.85 ~99%% of bin4's.")
-    p.add_argument("--kappa-lmax", type=int, default=2048,
-                   help="angular power spectrum lmax for the kappa maps (--kappa-nside "
-                        "supports up to ~3*nside-1, so keep this below that). Must reach "
-                        "well past ell~350 or the correction is invisible -- see "
-                        "--kappa-nside.")
+    p.add_argument("--kappa-lmax", type=int, default=1500,
+                   help="angular power spectrum lmax for the kappa maps. Must match the "
+                        "shells' own band limit for a fair comparison (1500 on the "
+                        "N_side=512 footing) -- and must reach well past ell~350 or the "
+                        "correction is invisible; see --kappa-nside.")
     p.add_argument("--kappa-max-cosmologies", type=int, default=3,
                    help="held-out cosmologies to build kappa maps for. This is THE "
                         "cost knob of the whole script: each one needs every usable "
@@ -298,26 +305,45 @@ def main():
     # so the fallback must be False, not the FlowUNet default of True.
     use_cosmo_cond = bool(cfg.get("use_cosmo_cond", False))
     # High-pass residual formulation (see flow_model.py): MUST use the exact cutoff
-    # the target was built with at train time, so the checkpoint is authoritative.
+    # the target was built with at train time, so THE CHECKPOINT IS AUTHORITATIVE --
+    # deliberately not a CLI flag, which could silently disagree with training and
+    # break the composition guarantee without any error.
     #
-    # HARD ERROR, not a default: a checkpoint without hp_cutoff predates this
-    # formulation (trained to flow the WHOLE field, large scales included) --
-    # composing its output via compose_corrected would be semantically wrong (it
-    # would highpass-filter an output that was never trained to be pinned at large
-    # scales, silently corrupting it) rather than a crash. See
-    # diffusion/apply_diffusion.py's identical guard (job 4247908's finding: kappa Cl
-    # collapsed to ~0.55 at low ell for exactly this reason -- no large-scale pin).
-    if "hp_cutoff" not in cfg:
+    # HARD ERROR, not a default, on either of the two older formulations:
+    #   no hp_scale_mpc_h -> trained with a fixed ANGULAR cutoff, correct for at most
+    #                        one shell; applying a per-shell filter to it would filter
+    #                        at a scale it never saw.
+    #   no hp_cutoff      -> older still: trained to flow the WHOLE field, so
+    #                        compose_corrected would highpass an output that was never
+    #                        pinned at large scales, silently corrupting it (job
+    #                        4247908: kappa Cl collapsed to ~0.55 at low ell).
+    # Three checkpoint generations, distinguished by which keys their saved args have:
+    #   hp_scale_mpc_h present  -> current, per-shell comoving cutoff. Accepted.
+    #   hp_cutoff only          -> retired FIXED ANGULAR filter. Its residual has one
+    #                              onset multipole for every shell, so filtering it
+    #                              per-shell here would cut at a scale it never saw.
+    #   neither                 -> v1 FULL-FIELD model, trained to output the whole
+    #                              high map. compose_corrected would add a whole field
+    #                              on top of the low map (~4x power, ~40x variance) --
+    #                              plausible-looking garbage, not a crash, which is
+    #                              exactly why this refuses instead of falling back.
+    # Note hp_cutoff is ABSENT from current checkpoints (the flag was removed), so
+    # presence of hp_cutoff cannot be the test for "new enough" -- hp_scale_mpc_h is.
+    if not float(cfg.get("hp_scale_mpc_h", 0.0)):
+        if "hp_cutoff" in cfg:
+            raise SystemExit(
+                f"{args.model} was trained with the retired FIXED ANGULAR cutoff "
+                f"(hp_cutoff={cfg.get('hp_cutoff')}, hp_transition={cfg.get('hp_transition')}). "
+                f"That filter is gone: the cutoff is now per-shell, from a fixed comoving "
+                f"scale. Retrain with the current train_flow.py (--hp-scale-mpc-h 17.0).")
         raise SystemExit(
-            f"{args.model} predates the high-pass residual formulation (no "
-            f"'hp_cutoff' in its saved args) -- it was trained to flow the WHOLE "
-            f"field, so composing its output with compose_corrected would silently "
-            f"corrupt it. Retrain with the current train_flow.py, or evaluate with "
-            f"an older apply_flow.py if you specifically need the old behavior.")
-    hp_cutoff = float(cfg["hp_cutoff"])
-    hp_transition = float(cfg["hp_transition"])
-    # Absent => a pre-2026-07-21 checkpoint would have already failed the hp_cutoff
-    # guard above, so any checkpoint reaching here is new enough that 'delta' (the
+            f"{args.model} predates the high-pass residual formulation entirely (no "
+            f"'hp_scale_mpc_h' and no 'hp_cutoff' in its saved args) -- it was trained on "
+            f"the WHOLE field, so composing its output as low + highpass(sample) would "
+            f"silently corrupt it. Retrain with the current train_flow.py.")
+    hp_scale_mpc_h = float(cfg["hp_scale_mpc_h"])
+    # Absent => a pre-2026-07-21 checkpoint would have already failed the guards
+    # above, so any checkpoint reaching here is new enough that 'delta' (the
     # current default) is the correct fallback, not a guess.
     space = str(cfg.get("space", "delta"))
     net = FlowUNet(in_channels=1, out_channels=1,
@@ -326,17 +352,26 @@ def main():
                    use_cosmo_cond=use_cosmo_cond).to(dev)
     net.load_state_dict(ckpt["model"])
     net.eval()
-    print(f"[eval] checkpoint use_cosmo_cond={use_cosmo_cond} hp_cutoff={hp_cutoff} "
-          f"hp_transition={hp_transition} space={space}", flush=True)
+    print(f"[eval] checkpoint use_cosmo_cond={use_cosmo_cond} "
+          f"hp_scale_mpc_h={hp_scale_mpc_h} space={space}", flush=True)
 
-    def sample(x0, cosmo_z):
+    def _cut(shell_chi):
+        """Cutoff from comoving distance -- the same quantity training took from the
+        patch metadata (flow_model.cutoff_from_chi). Scalar, or a (B,) tensor when a
+        batch mixes shells."""
+        chi = shell_chi if torch.is_tensor(shell_chi) else float(shell_chi)
+        return cutoff_from_chi(chi, hp.nside2resol(nside_src, arcmin=True), hp_scale_mpc_h)
+
+    def sample(x0, cosmo_z, shell_chi):
         """Integrate the flow ODE from x0 (=low field) and compose the corrected
         field via compose_corrected -- the hard guarantee that large scales end up
         EXACTLY x0's, independent of any drift the finite-step ODE accumulated. Every
         call site below goes through this, so none of them can forget the compose
         step (see flow_model.compose_corrected's docstring)."""
         raw = sample_ode(net, x0, n_steps=args.steps, cosmo_z=cosmo_z, amp=args.amp)
-        return compose_corrected(x0, raw - x0, hp_cutoff, hp_transition)
+        # Same filter as training. If these two ever disagree the composition
+        # guarantee (large scales end up EXACTLY x0's) silently stops holding.
+        return compose_corrected(x0, raw - x0, _cut(shell_chi))
 
     # held-out cosmologies = our test data
     _, val_idx, val_cosmos = split_by_cosmo(args.patch_dir, args.val_frac, args.seed)
@@ -346,6 +381,13 @@ def main():
     # (shell_idx field) -- for the example_patches.png rows specifically. Also
     # reused below by the full-sky section (cosmo params + shell redshift lookup).
     meta = np.load(Path(args.patch_dir) / "metadata.npy")
+
+    nside_src = int(np.unique(meta["nside_source"])[0])
+    if len(np.unique(meta["nside_source"])) > 1:
+        raise RuntimeError(f"--patch-dir mixes multiple source nsides: "
+                           f"{np.unique(meta['nside_source'])} -- the high-pass cutoff "
+                           f"is derived from the pixel scale, so one value cannot serve both.")
+
     val_shell_idx = meta["shell_idx"][val_idx]
     example_pick, example_shells = [], []
     for s in args.example_shells:
@@ -366,6 +408,7 @@ def main():
         print(f"[eval] {len(val_idx)} held-out patches from {len(val_cosmos)} cosmologies "
               f"{val_cosmos}; evaluating {len(pick)} | ODE steps={args.steps}", flush=True)
 
+        chi_all = torch.tensor([ds[i]["shell_com"] for i in range(len(ds))], device=dev)                            # (N,) Mpc/h, per patch
         low_all = torch.stack([ds[i]["low"] for i in range(len(ds))])       # (N,1,H,W) raw, CPU
         high_all = torch.stack([ds[i]["high"] for i in range(len(ds))])
         cosmo_z_all = stack_cosmo_z(ds, dev, low_all.dtype)                 # (N,8)
@@ -378,7 +421,7 @@ def main():
             lo = low_all[b:b + mb].to(dev); hi = high_all[b:b + mb].to(dev)
             lo_f, hi_f = transform_pair(lo, hi, space)
             with torch.no_grad():
-                co_f = sample(lo_f, cosmo_z_all[b:b + mb])
+                co_f = sample(lo_f, cosmo_z_all[b:b + mb], chi_all[b:b + mb].to(lo_f.dtype))
             low_f_parts.append(lo_f); high_f_parts.append(hi_f); corr_f_parts.append(co_f)
         low_f = torch.cat(low_f_parts); high_f = torch.cat(high_f_parts)
         corr_f = torch.cat(corr_f_parts)
@@ -437,7 +480,9 @@ def main():
         ex_cosmo_z = stack_cosmo_z(ex_ds, dev, ex_low.dtype)
         ex_low_f, ex_high_f = transform_pair(ex_low, ex_high, space)
         with torch.no_grad():
-            ex_corr_f = sample(ex_low_f, ex_cosmo_z)
+            ex_chi = torch.tensor([ex_ds[i]["shell_com"] for i in range(ns)],
+                                  device=dev, dtype=ex_low_f.dtype)
+            ex_corr_f = sample(ex_low_f, ex_cosmo_z, ex_chi)
 
         rows = [(f"shell {example_shells[i]}", ex_low_f[i, 0].cpu().numpy(),
                 ex_corr_f[i, 0].cpu().numpy(), ex_high_f[i, 0].cpu().numpy())
@@ -463,7 +508,9 @@ def main():
             s_low_mean = s_low.mean(dim=(2, 3), keepdim=True)
             s_low_f, _ = transform_pair(s_low, s_high, space)
             with torch.no_grad():
-                s_corr_f = sample(s_low_f, s_cosmo_z)
+                s_chi = torch.tensor([sd[i]["shell_com"] for i in range(len(sd))],
+                                     device=dev, dtype=s_low_f.dtype)
+                s_corr_f = sample(s_low_f, s_cosmo_z, s_chi)
             s_corr_raw = field_to_counts(s_corr_f, s_low_mean, space)
 
             low_np, high_np, corr_np = s_low.cpu().numpy(), s_high.cpu().numpy(), s_corr_raw.cpu().numpy()
@@ -496,9 +543,7 @@ def main():
     # high ell" answer the flat 2D-FFT power ratio above structurally cannot give
     # (bounded by that patch's own Nyquist wavenumber).
     if args.data_root:
-        nside = int(np.unique(meta["nside_source"])[0])
-        if len(np.unique(meta["nside_source"])) > 1:
-            raise RuntimeError(f"--patch-dir mixes multiple source nsides: {np.unique(meta['nside_source'])}")
+        nside = nside_src
         nside_centers = args.nside_centers or auto_nside_centers(nside, args.fullsky_patch_size)
         lmax = min(args.lmax, 3 * nside - 1)
         ells = np.arange(lmax + 1)
@@ -520,7 +565,17 @@ def main():
             z = np.array([0.5 * (rows_shell[0]["lower_z"] + rows_shell[0]["upper_z"])], dtype=np.float32)
             return cosmo_z_vector(cosmo_vec, z)[0]
 
-        def make_predict_batch_fs(cosmo_z_vec: np.ndarray | None):
+        def lookup_chi_fs(shell_idx: int) -> float:
+            """Comoving distance (Mpc/h) of one full-sky shell, from the patch
+            metadata -- the same field the dataset feeds training, so the filter here
+            is identical to the one the target was built with."""
+            rows_shell = meta[meta["shell_idx"] == shell_idx]
+            if len(rows_shell) == 0:
+                raise ValueError(f"lookup_chi_fs: no patch-dir metadata row for "
+                                 f"shell_idx={shell_idx} (any cosmology)")
+            return float(rows_shell[0]["shell_com"])
+
+        def make_predict_batch_fs(cosmo_z_vec: np.ndarray | None, shell_chi: float):
             cosmo_z_t = None if cosmo_z_vec is None else torch.from_numpy(cosmo_z_vec).to(dev)
 
             def predict_batch(low_batch: np.ndarray) -> np.ndarray:
@@ -529,13 +584,13 @@ def main():
                 cz = (None if cosmo_z_t is None else
                      cosmo_z_t.unsqueeze(0).expand(low_t.shape[0], -1).to(low_f.dtype))
                 with torch.no_grad():
-                    pred_f = sample(low_f, cz)
+                    pred_f = sample(low_f, cz, shell_chi)
                 return field_to_counts(pred_f, low_mean, space).squeeze(1).cpu().numpy()
             return predict_batch
 
         def reconstruct(low_shell, cosmo_name, shell_idx):
             cosmo_z_vec = lookup_cosmo_z_fs(cosmo_name, shell_idx) if use_cosmo_cond else None
-            predict_batch = make_predict_batch_fs(cosmo_z_vec)
+            predict_batch = make_predict_batch_fs(cosmo_z_vec, lookup_chi_fs(shell_idx))
             return reconstruct_shell(predict_batch, low_shell, nside_centers,
                                      args.fullsky_patch_size, args.eval_batch,
                                      taper_power=args.taper_power)

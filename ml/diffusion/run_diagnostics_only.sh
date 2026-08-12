@@ -15,7 +15,8 @@
 # retraining): apply_diffusion.py's full eval suite, including the full-sky section
 # (--data-root given) and --kappa. Sibling of unet/run_diagnostics_only.sh,
 # sphereflow/run_diagnostics_only.sh and transfer/run_diagnostic_only.sh -- same
-# shells (5 10 15 30 50), same kappa resolution -- so all four pipelines' eval dirs
+# shells (5 10 15 30 50), same kappa resolution (nside=512, lmax=1500 = the apply
+# defaults, matching the shell resolution) -- so all four pipelines' eval dirs
 # can be diffed plot-by-plot.
 #
 # WHY THIS EXISTS / WHEN TO USE IT: re-evaluate an already-trained checkpoint after
@@ -58,10 +59,15 @@ DIFFUSION=/users/damrein/masterProject/ml/diffusion
 # small-scale numbers are misleading, see dataset.raw_to_delta_pair.)
 DATA_ROOT=${DATA_ROOT:-/capstor/scratch/cscs/damrein/grid}
 PATCH_DIR=${PATCH_DIR:-/capstor/scratch/cscs/damrein/outputs/flowpatches/grid_nside512_256_100000}
-OUT_DIR=${OUT_DIR:-/capstor/scratch/cscs/damrein/outputs/flowruns/flow_delta_grid_nside512_patch256_n100000_ch32_b32_e200_lr3e-5_hp0.10_0.20_lossw}
+# The default below is the CURRENT (per-shell comoving cutoff, L=17 Mpc/h) run.
+# Checkpoints from before 2026-08-11 -- their directory names end in _hp<cutoff>_<transition>
+# -- were trained with the retired fixed ANGULAR filter and are REFUSED by apply
+# (hard error naming the setting), because filtering their residual per-shell would
+# cut at a scale they never saw. Point OUT_DIR at one of those only to confirm that.
+OUT_DIR=${OUT_DIR:-/capstor/scratch/cscs/damrein/outputs/diffusionruns/diffusion_delta_grid_nside512_patch256_n100000_ch32_b32_e200_lr3e-5_L17.0}
 
 # EDM sampler settings -- must match how you want to sample, NOT stored in the
-# checkpoint (unlike hp_cutoff/hp_transition/sigma_data, which apply_diffusion.py
+# checkpoint (unlike hp_scale_mpc_h/sigma_data, which apply_diffusion.py
 # reads back from ckpt["args"] so the composition can't drift from training).
 STEPS=${STEPS:-32}
 SIGMA_MIN=${SIGMA_MIN:-0.002}

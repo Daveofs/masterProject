@@ -61,6 +61,7 @@ DIFFUSION=/users/damrein/masterProject/ml/diffusion
 # where DISCO is already ~perfect (low/high Cl ratio ~1 almost everywhere) so there was
 # almost nothing to correct -- see diffusion-pipeline-build memory.
 NSIDE=${NSIDE:-512}
+LMAX=${LMAX:-1500}
 PATCH_SIZE=${PATCH_SIZE:-256}
 NPATCH=${NPATCH:-100000}
 EPOCHS=${EPOCHS:-200}
@@ -84,13 +85,21 @@ RHO=${RHO:-7.0}
 # EDM training noise schedule: ln(sigma) ~ N(P_MEAN, P_STD^2), Karras et al. defaults.
 P_MEAN=${P_MEAN:--1.2}
 P_STD=${P_STD:-1.2}
-# High-pass residual formulation (see model.py): the model diffuses only
-# highpass(high_log-low_log); scales below HP_CUTOFF*Nyquist are pinned to the low
-# (DISCO) map, fixing the large-scale kappa Cl the first full-field run destroyed.
-# Fractions of patch Nyquist. Passed to BOTH train (builds the target) and, via the
-# checkpoint, apply (composes the corrected map) -- they can't drift.
-HP_CUTOFF=${HP_CUTOFF:-0.05}
-HP_TRANSITION=${HP_TRANSITION:-0.12}
+# --- high-pass residual: WHERE the model is allowed to act -------------------------
+# The target is highpass(high - low) and the corrected patch is low + highpass(sample),
+# so scales the filter rejects are pinned to the low map by construction. The cutoff is
+# PER SHELL, from a fixed comoving scale L: ell_min = 2*pi*chi/L, i.e. r = 2*chi*dtheta/L
+# in units of the patch Nyquist. L=17 Mpc/h is the measured onset of the particle-mesh
+# deficit (17.0 +- 1.1 Mpc/h, constant to 4% over 25 shells spanning a factor 22 in chi).
+#
+# This replaced the fixed ANGULAR pair HP_CUTOFF/HP_TRANSITION, now REMOVED. That pair
+# could be right for at most one shell (hpc=0.05 put the cutoff at ell=79: too late for
+# the near shells, which are already deficient by ell=42, and 5-11x too early for the far
+# ones), and its raised-cosine ramp reached full transmission only at ell=393, admitting
+# just 11% of the corrective power at ell=200 -- the band the kappa spectra were worst in.
+# There is no ramp any more: below the cutoff the map is already correct, above it the
+# correction is wanted in full.
+HP_SCALE_MPC_H=${HP_SCALE_MPC_H:-17.0}
 # Field the residual is modelled in. 'delta' (linear overdensity) is the space
 # analysis.full_sky.od_cl actually measures. Training on 'log1p' was a FORMULATION BUG:
 # log1p compresses the density peaks so DISCO already looks ~correct there (low/high
@@ -111,8 +120,21 @@ if [ "${USE_COSMO_COND}" = "0" ]; then
 fi
 
 DATA_TAG=$(basename "${DATA_ROOT}")
-RUN_NAME=${RUN_NAME:-diffusion_${SPACE}_${DATA_TAG}_nside${NSIDE}_patch${PATCH_SIZE}_n${NPATCH}_ch${BASE_CH}_b${BATCH}_e${EPOCHS}_lr${LEARNING_RATE}_hpc${HP_CUTOFF}_hpt${HP_TRANSITION}${COSMO_SUFFIX}}
+RUN_NAME=${RUN_NAME:-diffusion_${SPACE}_${DATA_TAG}_nside${NSIDE}_patch${PATCH_SIZE}_n${NPATCH}_ch${BASE_CH}_b${BATCH}_e${EPOCHS}_lr${LEARNING_RATE}_L${HP_SCALE_MPC_H}${COSMO_SUFFIX}}
 KAPPA=${KAPPA:-1}
+# ---- common comparison footing (thesis Sec. "protocol") --------------------------
+# ALL pipelines are scored at N_side=512 -> lmax=1500, and the kappa maps are built at
+# the SAME resolution as the shells they integrate. Building kappa at a higher nside
+# than the shells is pure upsampling: it invents no information and produces spectra
+# past the shells' own band limit (3*512-1 = 1535) that are interpolation and
+# pixel-window artefacts. Derived, not hard-coded, so the two cannot drift apart.
+KAPPA_NSIDE=${KAPPA_NSIDE:-$NSIDE}
+KAPPA_LMAX=${KAPPA_LMAX:-$LMAX}
+if [ "$KAPPA_LMAX" -gt $((3 * KAPPA_NSIDE - 1)) ]; then
+    echo "[abort] KAPPA_LMAX=$KAPPA_LMAX exceeds band limit 3*KAPPA_NSIDE-1=$((3 * KAPPA_NSIDE - 1))" >&2
+    exit 1
+fi
+
 KAPPA_FLAG=""; [ "${KAPPA}" = "1" ] && KAPPA_FLAG="--kappa"
 # Stage-3 cost knobs. Each full-sky shell reconstruction is one Heun ODE per tile, so
 # these are what set the eval walltime: the Cl grid costs
@@ -179,7 +201,7 @@ srun --nodes=${SLURM_NNODES} --ntasks-per-node=1 --gres=gpu:4 uenv run pytorch/v
     --out-dir   '${OUT_DIR}' \
     --epochs ${EPOCHS} --batch-size ${BATCH} --base-channels ${BASE_CH} --lr ${LEARNING_RATE} \
     --p-mean ${P_MEAN} --p-std ${P_STD} ${SIGMA_DATA_FLAG} \
-    --hp-cutoff ${HP_CUTOFF} --hp-transition ${HP_TRANSITION} --space ${SPACE} \
+    --hp-scale-mpc-h ${HP_SCALE_MPC_H} --space ${SPACE} \
     --num-workers $((SLURM_CPUS_PER_TASK / 4)) ${COSMO_FLAG} ${NO_LR_SCALING_FLAG}
 "
 
@@ -211,6 +233,7 @@ srun --ntasks=${NNODES} --ntasks-per-node=1 --gres=gpu:${GPUS_PER_NODE} uenv run
     --shell-indices --example-shells 5 10 15 30 50 \
     --n-zbins ${N_ZBINS} --n-shells-per-zbin ${N_SHELLS_PER_ZBIN} \
     --max-cosmologies ${MAX_COSMOLOGIES} --kappa-max-cosmologies ${KAPPA_MAX_COSMOLOGIES} \
+    --lmax ${LMAX} --kappa-nside ${KAPPA_NSIDE} --kappa-lmax ${KAPPA_LMAX} \
     --fullsky-patch-size ${PATCH_SIZE} ${KAPPA_FLAG}
 "
 echo "diffusion job ${SLURM_JOB_ID} finished at $(date) -> ${OUT_DIR}/eval"
