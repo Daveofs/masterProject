@@ -89,13 +89,13 @@ def cutoff_from_chi(chi_mpc_h, reso_arcmin, scale_mpc_h: float):
     ell_min(s); the generative pipelines now use it too.
 
     In units of the patch Nyquist the 2*pi and the pi cancel:
-        r = ell/ell_Nyq = (2*pi*chi/L) / (pi/dtheta) = 2*chi*dtheta/L
+        r = ell/ell_Nyq = (2*pi*chi/L) / (pi/dtheta) = 2*chi*dtheta/L <- not a radius!
     dtheta comes from the patch metadata's reso_arcmin -- the scale the patch was
     actually cut at -- so a dataset built at another resolution cannot mismatch.
     """
     dtheta = reso_arcmin * (math.pi / (180.0 * 60.0))
     if torch.is_tensor(chi_mpc_h):
-        return (2.0 * chi_mpc_h * dtheta / scale_mpc_h).clamp(0.0, 1.0)
+        return (2.0 * chi_mpc_h * dtheta / scale_mpc_h).clamp(0.0, 1.0) # 0 -> no filtering, 1 -> full Nyquist (filter everything)
     return min(max(2.0 * float(chi_mpc_h) * float(dtheta) / scale_mpc_h, 0.0), 1.0)
 
 

@@ -168,13 +168,37 @@ def find_a_eq(bg: dict) -> float:
     return float(np.exp(ln_a))
 
 
-def _mark_a_eq(ax, a_eq, label_y=None):
-    """Vertical marker at matter-radiation equality."""
-    ax.axvline(a_eq, color=MUTED, lw=0.9, ls=(0, (4, 3)), zorder=1.5)
+def find_a_eq_no_nu(bg: dict) -> float:
+    """Scale factor matter-radiation equality would occur at if neutrinos
+    contributed to neither budget -- (cdm+b) against (g) alone, from the same
+    per-species rho columns the density figure already plots. Not a CLASS run
+    with neutrinos switched off (that would also change the expansion history
+    through N_eff); a synthetic ratio of the real background's own species,
+    isolating what the three neutrino states' presence shifts a_eq by.
+    """
+    a = 1.0 / (1.0 + bg["z"])
+    order = np.argsort(a)
+    a = a[order]
+    rho_m = bg["(.)rho_cdm"][order] + bg["(.)rho_b"][order]
+    rho_r = bg["(.)rho_g"][order]
+    ratio = np.log(rho_m / rho_r)
+    sign_change = np.where(np.diff(np.sign(ratio)) != 0)[0]
+    if len(sign_change) == 0:
+        raise RuntimeError("no photon/cdm+b crossing found in the background")
+    i = sign_change[0]
+    ln_a = np.interp(0.0, ratio[i:i + 2], np.log(a[i:i + 2]))
+    return float(np.exp(ln_a))
+
+
+def _mark_a_eq(ax, a_eq, label_y=None, color=MUTED, label=r"$a_{\rm eq}$",
+               ls=(0, (4, 3))):
+    """Vertical marker at matter-radiation equality. color/label/ls let a second
+    call draw the no-neutrino comparison line distinctly from the real a_eq."""
+    ax.axvline(a_eq, color=color, lw=0.9, ls=ls, zorder=1.5)
     ymin, ymax = ax.get_ylim()
     y = label_y if label_y is not None else ymax / 2.2
-    ax.annotate(r"$a_{\rm eq}$", xy=(a_eq, y), xytext=(3, 0),
-                textcoords="offset points", color=MUTED, fontsize=9,
+    ax.annotate(label, xy=(a_eq, y), xytext=(3, 0),
+                textcoords="offset points", color=color, fontsize=9,
                 ha="left", va="center",
                 bbox=dict(boxstyle="round,pad=0.15", fc="white", ec="none", alpha=0.85))
 
@@ -348,12 +372,23 @@ def run_spectra(case: str, f_nu: float = F_NU, want_cmb: bool = False,
 
 def figure_density(out_path: Path, m_ncdm=M_NCDM, both_panels: bool = False):
     """Omega_i(a) for every species. With both_panels=True the rho_i^(1/4) panel
-    of the original two-panel reference figure is drawn alongside it."""
+    of the original two-panel reference figure is drawn alongside it.
+
+    The marked a_eq is the SIMPLIFIED photon-vs-(cdm+b) crossing (find_a_eq_no_nu),
+    not the true equality epoch of the realized background (find_a_eq, still
+    computed and logged for comparison) -- the two differ by ~40% in a here, since
+    neutrinos are a real part of the radiation budget at this epoch. Labelled
+    plainly as a_eq on the figure by request."""
     print("[density] running CLASS background ...")
     bg, h = run_background(m_ncdm)
     a_eq = find_a_eq(bg)
     print(f"[density] matter-radiation equality at a_eq = {a_eq:.4g} "
           f"(z_eq = {1/a_eq - 1:.0f})")
+    a_eq_no_nu = find_a_eq_no_nu(bg)
+    shift_pct = 100.0 * (a_eq_no_nu - a_eq) / a_eq
+    print(f"[density] photon/cdm+b crossing WITHOUT neutrinos (what the figure "
+          f"marks as a_eq) at a_eq_no_nu = {a_eq_no_nu:.4g} (z = {1/a_eq_no_nu - 1:.0f}), "
+          f"{shift_pct:+.1f}% in a relative to the TRUE a_eq above")
 
     z = bg["z"]
     a = 1.0 / (1.0 + z)
@@ -402,7 +437,7 @@ def figure_density(out_path: Path, m_ncdm=M_NCDM, both_panels: bool = False):
         ax.set_xlabel(r"$a$")   # a_0 = 1 by the usual convention
         ax.set_ylabel(r"$\rho_i^{1/4}$   [eV]")
         _style_axes(ax, keep_top=True)
-        _mark_a_eq(ax, a_eq)
+        _mark_a_eq(ax, a_eq_no_nu)   # same simplified crossing as the Omega_i panel below
         t_nu0_ev = T_NU_OVER_T_CMB * T_CMB * K_B_EV_PER_K
         _add_temperature_axis(ax, t_nu0_ev, r"$T_\nu$   [eV]")
 
@@ -419,7 +454,12 @@ def figure_density(out_path: Path, m_ncdm=M_NCDM, both_panels: bool = False):
     ax.set_xlabel(r"$a$")   # a_0 = 1 by the usual convention
     ax.set_ylabel(r"$\Omega_i$")
     _style_axes(ax, keep_top=True)
-    _mark_a_eq(ax, a_eq)
+    # Marked line is the SIMPLIFIED two-species crossing (photon vs cdm+b), not the
+    # true equality epoch of this cosmology's realized background -- those differ by
+    # ~40% in a (find_a_eq's CLASS-budget value logged above), since neutrinos are a
+    # real part of the radiation budget at this epoch. Labelled plainly as a_eq by
+    # request; see find_a_eq's docstring for the exact definition it is NOT using here.
+    _mark_a_eq(ax, a_eq_no_nu)
 
     t_nu0_k = T_NU_OVER_T_CMB * T_CMB
     _add_temperature_axis(ax, t_nu0_k, r"$T_\nu$   [K]")
