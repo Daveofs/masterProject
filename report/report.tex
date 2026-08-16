@@ -936,7 +936,7 @@ Two subtleties matter only for the stochastic pipeline (diffusion). First, each 
 \subsection{Harmonic-Space Transfer-Function Pipeline}
 \label{subsec:pipe-transfer}
 
-The first pipeline (\texttt{ml/transfer/}) contains no image-level network at all: it exploits the phase-sharing fact of Eq.~\eqref{eq:phase_corr} and corrects only mode amplitudes, in the spherical-harmonic basis anticipated in Sec.~\ref{subsec:sr-problem}. Every shell is transformed to its harmonic coefficients $a_{\ell m}$ \new{(up to \mbox{$\ell_{\max}=1500$} in the production configuration, the band limit of the common \mbox{$N_{\mathrm{side}}=512$} footing of Sec.~\ref{sec:res-protocol})}, and each mode is rescaled by a per-shell transfer function \cite{feng_fastpm_2016, garrison_improving_2016}
+The first pipeline (\texttt{ml/transfer/}) contains no image-level network at all: it exploits the phase-sharing fact of Eq.~\eqref{eq:phase_corr} and corrects only mode amplitudes, in the spherical-harmonic basis anticipated in Sec.~\ref{subsec:sr-problem}. Every shell is transformed to its harmonic coefficients $a_{\ell m}$ (up to \mbox{$\ell_{\max}=1500$} in the production configuration, the band limit of the common \mbox{$N_{\mathrm{side}}=512$} footing of Sec.~\ref{sec:res-protocol}), and each mode is rescaled by a per-shell transfer function \cite{feng_fastpm_2016, garrison_improving_2016}
 \begin{equation}
   a_{\ell m}^{\mathrm{corr}} = a_{\ell m}^{\mathrm{low}} \cdot T(\ell, s),
   \qquad
@@ -949,13 +949,13 @@ The first pipeline (\texttt{ml/transfer/}) contains no image-level network at al
 \end{equation}
 which by construction matches the target power spectrum while preserving the (correct) phases, and leaves every mode below the per-shell onset $\ell_{\min}(s)$ of Eq.~\eqref{eq:ell_min} untouched. Both spectra are smoothed in $\log_{10}$-space with a boxcar filter before the ratio is taken: the physical $T(\ell)$ is smooth, whereas a single realisation's $C_\ell$ carries sample-variance and shot-noise scatter that would otherwise be fitted and amplified.
 
-\new{In the implementation the gain is never applied by rebuilding the map from the rescaled coefficients. It is applied as a \emph{residual} added onto the native map,}
+In the implementation the gain is never applied by rebuilding the map from the rescaled coefficients. It is applied as a \emph{residual} added onto the native map,
 \begin{equation}
   m^{\mathrm{corr}} \;=\; \underbrace{m^{\mathrm{native}}}_{\text{all scales, untouched}}
   \;+\; \mathrm{SHT}^{-1}\!\Big[\big(T(\ell,s) - 1\big)\, a_{\ell m}^{\mathrm{low}}\Big],
   \label{eq:transfer_residual}
 \end{equation}
-\new{which is algebraically identical to Eq.~\eqref{eq:transfer_def} for every \mbox{$\ell \le \ell_{\max}$}, since \mbox{$a_{\ell m} + (T-1)a_{\ell m} = T a_{\ell m}$}. The two differ only outside that band, and in exactly the way that matters: below \mbox{$\ell_{\min}(s)$} the bracket is zero, so nothing is added and the large scales stay \textsc{Disco-DJ}'s bit for bit, while above \mbox{$\ell_{\max}$} the native map keeps whatever structure it holds beyond the transform's band limit instead of being truncated to it.} Figure~\ref{fig:transfer_flow} shows the apply chain.
+which is algebraically identical to Eq.~\eqref{eq:transfer_def} for every \mbox{$\ell \le \ell_{\max}$}, since \mbox{$a_{\ell m} + (T-1)a_{\ell m} = T a_{\ell m}$}. The two differ only outside that band, and in exactly the way that matters: below \mbox{$\ell_{\min}(s)$} the bracket is zero, so nothing is added and the large scales stay \textsc{Disco-DJ}'s bit for bit, while above \mbox{$\ell_{\max}$} the native map keeps whatever structure it holds beyond the transform's band limit instead of being truncated to it. Figure~\ref{fig:transfer_flow} shows the apply chain.
 
 \begin{figure}[h!]
 \centering
