@@ -936,14 +936,26 @@ Two subtleties matter only for the stochastic pipeline (diffusion). First, each 
 \subsection{Harmonic-Space Transfer-Function Pipeline}
 \label{subsec:pipe-transfer}
 
-The first pipeline (\texttt{ml/transfer/}) contains no image-level network at all: it exploits the phase-sharing fact of Eq.~\eqref{eq:phase_corr} and corrects only mode amplitudes, in the spherical-harmonic basis anticipated in Sec.~\ref{subsec:sr-problem}. Every shell is transformed to its harmonic coefficients $a_{\ell m}$ (up to $\ell_{\max}=3000$), and each mode is rescaled by a per-shell transfer function \cite{feng_fastpm_2016, garrison_improving_2016}
+The first pipeline (\texttt{ml/transfer/}) contains no image-level network at all: it exploits the phase-sharing fact of Eq.~\eqref{eq:phase_corr} and corrects only mode amplitudes, in the spherical-harmonic basis anticipated in Sec.~\ref{subsec:sr-problem}. Every shell is transformed to its harmonic coefficients $a_{\ell m}$ \new{(up to \mbox{$\ell_{\max}=1500$} in the production configuration, the band limit of the common \mbox{$N_{\mathrm{side}}=512$} footing of Sec.~\ref{sec:res-protocol})}, and each mode is rescaled by a per-shell transfer function \cite{feng_fastpm_2016, garrison_improving_2016}
 \begin{equation}
   a_{\ell m}^{\mathrm{corr}} = a_{\ell m}^{\mathrm{low}} \cdot T(\ell, s),
   \qquad
-  T(\ell, s) = \sqrt{\frac{\big\langle C_\ell^{\mathrm{high}}(s) \big\rangle}{\big\langle C_\ell^{\mathrm{low}}(s) \big\rangle}},
+  T(\ell, s) =
+  \begin{cases}
+    \sqrt{\dfrac{\big\langle C_\ell^{\mathrm{high}}(s) \big\rangle}{\big\langle C_\ell^{\mathrm{low}}(s) \big\rangle}}, & \ell \ge \ell_{\min}(s),\\[2mm]
+    1, & \ell < \ell_{\min}(s),
+  \end{cases}
   \label{eq:transfer_def}
 \end{equation}
-which by construction matches the target power spectrum while preserving the (correct) phases. Both spectra are smoothed in $\log_{10}$-space with a boxcar filter before the ratio is taken: the physical $T(\ell)$ is smooth, whereas a single realisation's $C_\ell$ carries sample-variance and shot-noise scatter that would otherwise be fitted and amplified. Figure~\ref{fig:transfer_flow} shows the apply chain.
+which by construction matches the target power spectrum while preserving the (correct) phases, and leaves every mode below the per-shell onset $\ell_{\min}(s)$ of Eq.~\eqref{eq:ell_min} untouched. Both spectra are smoothed in $\log_{10}$-space with a boxcar filter before the ratio is taken: the physical $T(\ell)$ is smooth, whereas a single realisation's $C_\ell$ carries sample-variance and shot-noise scatter that would otherwise be fitted and amplified.
+
+\new{In the implementation the gain is never applied by rebuilding the map from the rescaled coefficients. It is applied as a \emph{residual} added onto the native map,}
+\begin{equation}
+  m^{\mathrm{corr}} \;=\; \underbrace{m^{\mathrm{native}}}_{\text{all scales, untouched}}
+  \;+\; \mathrm{SHT}^{-1}\!\Big[\big(T(\ell,s) - 1\big)\, a_{\ell m}^{\mathrm{low}}\Big],
+  \label{eq:transfer_residual}
+\end{equation}
+\new{which is algebraically identical to Eq.~\eqref{eq:transfer_def} for every \mbox{$\ell \le \ell_{\max}$}, since \mbox{$a_{\ell m} + (T-1)a_{\ell m} = T a_{\ell m}$}. The two differ only outside that band, and in exactly the way that matters: below \mbox{$\ell_{\min}(s)$} the bracket is zero, so nothing is added and the large scales stay \textsc{Disco-DJ}'s bit for bit, while above \mbox{$\ell_{\max}$} the native map keeps whatever structure it holds beyond the transform's band limit instead of being truncated to it.} Figure~\ref{fig:transfer_flow} shows the apply chain.
 
 \begin{figure}[h!]
 \centering
@@ -952,7 +964,7 @@ which by construction matches the target power spectrum while preserving the (co
   \node[databox] (shell) {low shell};
   \node[transbox, right=of shell] (sht) {SHT\\ \scriptsize \texttt{map2alm}};
   \node[transbox, right=of sht] (T) {$T(\ell, s)$\\ \scriptsize fit avg.\ or MLP};
-  \node[transbox, right=of T] (cut) {cutoff\\ \scriptsize $\ell_{\min}(s)$ from $17$ Mpc$/h$};
+  \node[transbox, right=of T] (cut) {cutoff: $T \to 1$ below\\ \scriptsize $\ell_{\min}(s)$ from $17$ Mpc$/h$, hard step};
   \node[transbox, right=of cut] (delta) {$\Delta a_{\ell m} = (T{-}1)\,a_{\ell m}$\\ \scriptsize \texttt{alm2map}};
   \node[keybox, right=of delta] (add) {$+$ native map};
   \node[databox, below=of add] (out) {corrected shell\\ \scriptsize continuous, \texttt{--no-clip}};
@@ -962,9 +974,9 @@ which by construction matches the target power spectrum while preserving the (co
   \draw[flow] (cut) -- (delta);
   \draw[flow] (delta) -- (add);
   \draw[flowacc] (add) -- (out);
-  \draw[flow] (shell.south) to[out=-25, in=180] node[pos=0.6, below, note] {all scales above $\ell_{\max}$ untouched} (out.west);
+  \draw[flow] (shell.south) to[out=-25, in=180] node[pos=0.6, below, note] {native map carries every scale;\\ the residual is non-zero only in $[\ell_{\min}(s),\, \ell_{\max}]$} (out.west);
 \end{tikzpicture}}
-\caption{The harmonic apply chain (\texttt{ml/transfer/apply\_transfer.py}). The correction is applied as a band-limited residual $(T-1)\,a_{\ell m}$ on top of the native full-resolution map: reconstructing purely through \texttt{alm2map} would band-limit the output to $\ell \le \ell_{\max}$ and discard genuine structure the $N_{\mathrm{side}}{=}2048$ map holds beyond it (up to $\ell \sim 3N_{\mathrm{side}}{-}1$). \cite{sullivan_methods_2024}}
+\caption{The harmonic apply chain (\texttt{ml/transfer/apply\_transfer.py}). The correction is applied as a band-limited residual $(T-1)\,a_{\ell m}$ on top of the native full-resolution map, as in Eq.~\eqref{eq:transfer_residual}. The residual is confined to a band at both ends, and the two edges have different origins. Below \mbox{$\ell_{\min}(s)$} the cutoff forces \mbox{$T = 1$}, so \mbox{$(T-1)\,a_{\ell m} = 0$} and \emph{nothing is added} there. Since the residual is added to the native map rather than replacing it, \mbox{$a_{\ell m}^{\mathrm{corr}} = a_{\ell m} + (T-1)\,a_{\ell m} = T\,a_{\ell m}$}, a vanishing residual leaves those modes exactly as \textsc{Disco-DJ} produced them: this is what pins the already-correct large scales, and it is a hard step rather than a taper (Eq.~\eqref{eq:ell_min}). Above \mbox{$\ell_{\max}$} the residual is simply never computed, the transform having been truncated there. Reconstructing purely through \texttt{alm2map} would band-limit the \emph{output} to $\ell \le \ell_{\max}$ and discard genuine structure the $N_{\mathrm{side}}{=}2048$ map holds beyond it (up to $\ell \sim 3N_{\mathrm{side}}{-}1$) \cite{sullivan_methods_2024}; adding the residual instead leaves both the large scales below \mbox{$\ell_{\min}$} and the small scales above \mbox{$\ell_{\max}$} exactly as the native map had them.}
 \label{fig:transfer_flow}
 \end{figure}
 
@@ -979,8 +991,8 @@ which by construction matches the target power spectrum while preserving the (co
     (\texttt{vis/plot\_transfer\_function.py}, run
     \texttt{2986895}, the same $\ell_{\max}=1500$ emulator that produces the results
     of Sec.~\ref{sec:res-transfer}). $T$ is shown as the emulator predicts it, before the
-    per-shell raised-cosine ramp of Eq.~\eqref{eq:ell_min} is applied at correction
-    time. Thin grey lines are the same two quantities predicted for the other 29
+    per-shell cutoff of Eq.~\eqref{eq:ell_min} forces \mbox{$T = 1$} below
+    \mbox{$\ell_{\min}(s)$} at correction time. Thin grey lines are the same two quantities predicted for the other 29
     held-out cosmologies at the same six shells: on the left they fan out visibly,
     showing that $T$ is genuinely cosmology-dependent and largest where the
     correction itself is largest; on the right they are invisible, coincident with
@@ -998,7 +1010,7 @@ held-out cosmology. Both behave exactly as the construction of
 Eq.~\eqref{eq:transfer_def} and the phase argument of Eq.~\eqref{eq:phase_corr}
 require, and both do so as a function of shell depth. The gain $T(\ell, s)$ sits
 at unity across the large scales on every shell -- the emulator recovers "no
-correction needed here" on its own, without being told, since the ramp of
+correction needed here" on its own, without being told, since the cutoff of
 Eq.~\eqref{eq:ell_min} is imposed only later at apply time -- and rises only once
 the multipole reaches the scale where the particle-mesh solver has begun to lose
 power. Where that happens tracks the shell's comoving distance, in the same way
@@ -1524,7 +1536,7 @@ Inference & closed form & 8 Euler steps & 32 Heun steps; shared noise; taper $p=
 \section{Transfer-Function Pipeline}
 \label{sec:res-transfer}
 
-\paragraph{Configuration and training.} The emulator was trained on the 168 training cosmologies with $\ell_{\max}=1500$, the band limit of the common $N_{\mathrm{side}}=512$ footing (Sec.~\ref{sec:res-protocol}), spectra smoothed with a 21-point boxcar (Sec.~\ref{subsec:pipe-transfer}), and the per-shell correction onset fixed at $17\,\mathrm{Mpc}/h$ with a raised-cosine transition of width $0.10\,\ell_{\max}$; the MLP ($256$--$256$--$128$, Adam, learning rate $10^{-4}$, batch $4096$, $L_2$ decay $10^{-4}$) is summarised in Table~\ref{tab:training}. Figure~\ref{fig:transfer_loss} shows its loss: training and validation track each other throughout, separated by a constant \mbox{$\approx 9\%$} that never widens, with only nine features and millions of rows there is far too little capacity per sample to memorise, and they converge within the first \mbox{$\sim 10^4$} gradient steps to a best validation loss of \mbox{$\tfrac12\mathrm{MSE} = 1.26\times10^{-4}$}, corresponding to an RMS error on the predicted transfer function of \mbox{$\sqrt{2 \times 1.26\times10^{-4}} \approx 1.6\%$} per \mbox{$(\ell, s)$} sample.
+\paragraph{Configuration and training.} The emulator was trained on the 168 training cosmologies with $\ell_{\max}=1500$, the band limit of the common $N_{\mathrm{side}}=512$ footing (Sec.~\ref{sec:res-protocol}), spectra smoothed with a 21-point boxcar (Sec.~\ref{subsec:pipe-transfer}), and the per-shell correction onset fixed at $17\,\mathrm{Mpc}/h$ as a hard step, with no transition band; the MLP ($256$--$256$--$128$, Adam, learning rate $10^{-4}$, batch $4096$, $L_2$ decay $10^{-4}$) is summarised in Table~\ref{tab:training}. Figure~\ref{fig:transfer_loss} shows its loss: training and validation track each other throughout, separated by a constant \mbox{$\approx 9\%$} that never widens, with only nine features and millions of rows there is far too little capacity per sample to memorise, and they converge within the first \mbox{$\sim 10^4$} gradient steps to a best validation loss of \mbox{$\tfrac12\mathrm{MSE} = 1.26\times10^{-4}$}, corresponding to an RMS error on the predicted transfer function of \mbox{$\sqrt{2 \times 1.26\times10^{-4}} \approx 1.6\%$} per \mbox{$(\ell, s)$} sample.
 
 \begin{figure}[h!]
     \centering
