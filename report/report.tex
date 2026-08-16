@@ -1189,45 +1189,48 @@ The conditioning channel ($\delta_{low}$) is neither noised nor rescaled by $c_{
 \centering
 \resizebox{\textwidth}{!}{%
 \begin{tikzpicture}[x=1cm, y=1cm]
-  \draw[hairc, rounded corners=4pt, fill=surfc!60] (-0.5,-3.5) rectangle (12.6,3.0);
-  \node[note, anchor=north] at (6.05,2.9)
+  % ================= top: the preconditioned denoiser =================
+  \draw[hairc, rounded corners=4pt, fill=surfc!60] (0.5,-3.5) rectangle (13.6,3.0);
+  \node[note, anchor=north] at (7.05,2.9)
       {\textbf{EDM denoiser} $D_\theta$ (Eq.~\ref{eq:edm_precond}): a preconditioning shell around the U-Net of Fig.~\ref{fig:film_unet}};
-  \node[databox, minimum width=10mm] (x) at (5.5,1.9) {$x$};
-  \node[box, font=\scriptsize] (cskip) at (9.7,1.9) {$\times\, c_{\mathrm{skip}}(\sigma)$};
-  \node[box, font=\scriptsize] (cin) at (0.5,0.4) {$\times\, c_{\mathrm{in}}(\sigma)$};
-  \node[circle, draw=hairc, fill=white, inner sep=1pt, font=\small] (cat) at (2.5,0.4) {$\oplus$};
-  \node[diffbox, font=\scriptsize, minimum height=6mm] (cond) at (2.5,-1.4) {cond $= \delta_{\mathrm{low}}$\\ \tiny full patch, never noised};
-  \node[unetbox, minimum width=24mm, minimum height=13mm] (unet) at (5.5,0.4) {$F_\theta$\\ \scriptsize U-Net, Fig.~\ref{fig:film_unet}};
-  \node[box, font=\scriptsize] (cout) at (8.2,0.4) {$\times\, c_{\mathrm{out}}(\sigma)$};
-  \node[circle, draw=hairc, fill=white, inner sep=1pt, font=\small] (add) at (9.7,0.4) {$+$};
-  \node[databox, minimum width=13mm] (dout) at (11.5,0.4) {$D_\theta(x)$};
-  \node[databox, font=\scriptsize, minimum width=8mm] (sig) at (5.5,-2.6) {$\sigma$};
-  \node[box, font=\scriptsize] (cnoise) at (5.5,-1.4) {$c_{\mathrm{noise}}(\sigma) = \tfrac14 \ln\sigma$};
-  \draw[flow] (x.west) -| (cin.north);                            
-  \draw[flow] (x.east) -- (cskip.west);                            
-  \draw[flow] (cskip.south) -- (add.north);                        
+  \node[databox, minimum width=10mm] (x) at (6.5,1.9) {$x$};
+  \node[box, font=\scriptsize] (cskip) at (10.7,1.9) {$\times\, c_{\mathrm{skip}}(\sigma)$};
+  \node[box, font=\scriptsize] (cin) at (1.5,0.4) {$\times\, c_{\mathrm{in}}(\sigma)$};
+  \node[circle, draw=hairc, fill=white, inner sep=1pt, font=\small] (cat) at (3.5,0.4) {$\oplus$};
+  \node[databox, font=\scriptsize, minimum height=6mm] (cond) at (3.5,-1.4) {cond $= \delta_{\mathrm{low}}$\\ \tiny full patch, never noised};
+  \node[unetbox, minimum width=24mm, minimum height=13mm] (unet) at (6.5,0.4) {$F_\theta$\\ \scriptsize U-Net, Fig.~\ref{fig:film_unet}};
+  \node[box, font=\scriptsize] (cout) at (9.2,0.4) {$\times\, c_{\mathrm{out}}(\sigma)$};
+  \node[circle, draw=hairc, fill=white, inner sep=1pt, font=\small] (add) at (10.7,0.4) {$+$};
+  \node[databox, minimum width=13mm] (dout) at (12.5,0.4) {$D_\theta(x)$};
+  \node[databox, font=\scriptsize, minimum width=8mm] (sig) at (6.5,-2.6) {$\sigma$};
+  \node[box, font=\scriptsize] (cnoise) at (6.5,-1.4) {$c_{\mathrm{noise}}(\sigma) = \tfrac14 \ln\sigma$};
+  % data flow: solid
+  \draw[flow] (x.west) -| (cin.north);
+  \draw[flow] (x.east) -- (cskip.west);
+  \draw[flow] (cskip.south) -- (add.north);
   \draw[flow] (cin) -- (cat);
   \draw[flow] (cond.north) -- (cat.south);
   \draw[flow] (cat) -- (unet);
   \draw[flow] (unet) -- (cout);
   \draw[flow] (cout) -- (add);
   \draw[flowacc] (add) -- (dout);
-  \draw[flow] (sig) -- (cnoise);                                   
-  \draw[flow] (cnoise) -- (unet.south)                             
-      node[pos=0.5, right=1mm, note] {FiLM};
-  \draw[flow] (sig.west) -| (cin.south);                           
-  \draw[flow] (sig.east) -| (cout.south);                          
+  % conditioning: dashed
+  \draw[skiparrow] (sig) -- (cnoise);
+  \draw[skiparrow] (cnoise) -- (unet.south) node[pos=0.5, right=1mm, note] {FiLM};
+  \draw[skiparrow] (sig.west) -| (cin.south);
+  \draw[skiparrow] (sig.east) -| (cout.south);
+  % ================= bottom: the sampling loop =================
   \node[diffbox, minimum width=26mm] (start) at (0.9,-5.5) {$x \sim \mathcal{N}(0, \sigma_{\max}^2 I)$\\ \scriptsize shared sphere noise};
   \node[diffbox, minimum width=30mm] (loop) at (4.75,-5.5) {Heun step $\sigma_i \to \sigma_{i+1}$\\ \scriptsize $\le 2$ calls of $D_\theta$ per step};
   \draw[flow] (start) -- (loop);
   \draw[flow] (loop.north) .. controls (4.15,-4.65) and (5.35,-4.65) .. (loop.70)
       node[pos=0.4, above, note] {$\times\,32$ down the Karras ladder (Eq.~\ref{eq:karras_schedule}): $\sigma\!: 80 \to \cdots \to 0.002 \to 0$};
-  \node[diffbox] (res) at (8.4,-5.5) {sample $=$\\ high-pass residual};
+  \node[diffbox, font=\scriptsize, minimum width=32mm] (res) at (8.7,-5.5) {sample\\ $x \to \delta_{\mathrm{high}} - \delta_{\mathrm{low}}$};
   \draw[flow] (loop) -- (res);
-  \node[keybox, minimum width=25mm] (comp) at (11.6,-5.5) {$\delta_{\mathrm{low}} + \mathrm{HP}(\cdot)$\\ \scriptsize corrected patch};
+  \node[keybox, font=\scriptsize, minimum width=40mm] (comp) at (12.6,-5.5) {$\delta_{\mathrm{low}} + \mathrm{HP}(\delta_{\mathrm{high}} - \delta_{\mathrm{low}})$\\ corrected patch};
   \draw[flowacc] (res) -- (comp);
 \end{tikzpicture}}
-\caption{The diffusion pipeline (\texttt{ml/diffusion/model.py}). Top: the EDM denoiser is the U-Net of Figure~\ref{fig:film_unet} wrapped in the four preconditioning coefficients of Eq.~\eqref{eq:edm_coeffs}. The input $x$ enters from above: it is variance-normalised by \mbox{$c_{\mathrm{in}}$} and concatenated with the (never-noised) low patch, while a skip path ($c_{\mathrm{skip}}\,x$) feeds directly to the addition node. The noise level $\sigma$ enters from below, setting \mbox{$c_{\mathrm{in}}$} and \mbox{$c_{\mathrm{out}}$} via Eq.~\eqref{eq:edm_coeffs}, and conditioning the U-Net through \mbox{$c_{\mathrm{noise}}$} via FiLM. The output blends the identity path with the network's contribution (\mbox{$c_{\mathrm{out}} F_\theta$}), shifting smoothly from ``pass through'' at low \mbox{$\sigma$} to ``generate'' at high \mbox{$\sigma$}. Bottom: sampling starts from pure noise and applies 32 Heun steps down the Karras schedule. The final sample is the high-pass residual, composed onto the low map so the large scales remain \textsc{Disco-DJ}'s exactly.}
+\caption{The diffusion pipeline (\texttt{ml/diffusion/model.py}). Top: the EDM denoiser is the U-Net of Figure~\ref{fig:film_unet} wrapped in the four preconditioning coefficients of Eq.~\eqref{eq:edm_coeffs}. Solid arrows carry data, dashed arrows carry conditioning. The input $x$ enters from above: it is variance-normalised by \mbox{$c_{\mathrm{in}}$} and concatenated with the (never-noised) low patch, while a skip path ($c_{\mathrm{skip}}\,x$) feeds directly to the addition node. The noise level $\sigma$ enters from below, setting \mbox{$c_{\mathrm{in}}$} and \mbox{$c_{\mathrm{out}}$} via Eq.~\eqref{eq:edm_coeffs}, and conditioning the U-Net through \mbox{$c_{\mathrm{noise}}$} via FiLM. The output blends the identity path with the network's contribution (\mbox{$c_{\mathrm{out}} F_\theta$}), shifting smoothly from ``pass through'' at low \mbox{$\sigma$} to ``generate'' at high \mbox{$\sigma$}. Bottom: sampling starts from pure noise and applies 32 Heun steps down the Karras schedule, producing a sample that targets the high-pass residual $\delta_{\mathrm{high}} - \delta_{\mathrm{low}}$; composing it back onto the low map, $\delta_{\mathrm{low}} + \mathrm{HP}(\delta_{\mathrm{high}} - \delta_{\mathrm{low}})$, is what keeps the large scales \textsc{Disco-DJ}'s exactly.}
 \label{fig:edm_sampling}
 \end{figure}
 
