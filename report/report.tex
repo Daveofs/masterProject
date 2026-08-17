@@ -965,7 +965,7 @@ which is algebraically identical to Eq.~\eqref{eq:transfer_def} for every \mbox{
   \node[transbox, right=of shell] (sht) {SHT\\ \scriptsize \texttt{map2alm}};
   \node[transbox, right=of sht] (T) {$T(\ell, s)$\\ \scriptsize fit avg.\ or MLP};
   \node[transbox, right=of T] (cut) {cutoff: $T \to 1$ below\\ \scriptsize $\ell_{\min}(s)$ from $17$ Mpc$/h$, hard step};
-  \node[transbox, right=of cut] (delta) {$\Delta a_{\ell m} = (T{-}1)\,a_{\ell m}$\\ \scriptsize \texttt{alm2map}};
+  \node[transbox, right=of cut] (delta) {$\Delta a_{\ell m} = (T{-}1)\,a_{\ell m}$\\ \scriptsize \texttt{alm2map} (SHT$^{-1}$)};
   \node[keybox, right=of delta] (add) {$+$ native map};
   \node[databox, below=of add] (out) {corrected shell\\ \scriptsize continuous, \texttt{--no-clip}};
   \draw[flow] (shell) -- (sht);
