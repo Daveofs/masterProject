@@ -1,77 +1,90 @@
-\contentsline {chapter}{Abstract}{3}{}%
-\contentsline {chapter}{\numberline {1}Introduction}{4}{}%
-\contentsline {section}{\numberline {1.1}Theoretical Background}{5}{}%
-\contentsline {subsection}{\numberline {1.1.1}Cosmological Framework}{5}{}%
-\contentsline {subsubsection}{The Cosmic Web}{5}{}%
-\contentsline {subsubsection}{Matter Power Spectrum and Transfer Function}{5}{}%
-\contentsline {subsubsection}{Lightcones and Snapshots}{6}{}%
-\contentsline {subsection}{\numberline {1.1.2}Cosmological Simulations}{7}{}%
-\contentsline {subsubsection}{Disco-DJ}{8}{}%
-\contentsline {subsubsection}{PkdGrav3}{8}{}%
-\contentsline {subsubsection}{CosmoGridV1}{8}{}%
-\contentsline {section}{\numberline {1.2}Super-Resolution Methods}{9}{}%
-\contentsline {subsection}{\numberline {1.2.1}The Memory Problem on the Sphere}{9}{}%
-\contentsline {subsection}{\numberline {1.2.2}Architectures}{10}{}%
-\contentsline {subsubsection}{U-Net}{10}{}%
-\contentsline {subsection}{\numberline {1.2.3}Generative Paradigms}{10}{}%
-\contentsline {subsubsection}{Flow Matching}{10}{}%
-\contentsline {subsubsection}{Diffusion}{11}{}%
-\contentsline {chapter}{\numberline {2}Methods and implementation}{13}{}%
-\contentsline {section}{\numberline {2.1}Pipeline Architecture}{13}{}%
-\contentsline {section}{\numberline {2.2}Initial-Condition Generation}{14}{}%
-\contentsline {subsection}{\numberline {2.2.1}Matching the CosmoGridV1 Linear Input}{14}{}%
-\contentsline {subsection}{\numberline {2.2.2}Backscaled Initial Conditions and Hand-Off}{15}{}%
-\contentsline {subsection}{\numberline {2.2.3}Validation against CosmoGridV1}{15}{}%
-\contentsline {section}{\numberline {2.3}Shell Builder}{16}{}%
-\contentsline {subsection}{\numberline {2.3.1}Streaming Shell Accumulation}{16}{}%
-\contentsline {paragraph}{Time discretization.}{16}{}%
-\contentsline {paragraph}{Accumulation.}{16}{}%
-\contentsline {subsection}{\numberline {2.3.2}Crossing Condition}{17}{}%
-\contentsline {paragraph}{Periodic replicas.}{17}{}%
-\contentsline {paragraph}{Linear crossing formula.}{17}{}%
-\contentsline {paragraph}{Shell assignment and pixelization.}{18}{}%
-\contentsline {section}{\numberline {2.4}Correction Pipelines}{19}{}%
-\contentsline {subsection}{\numberline {2.4.1}Patch Extraction and Full-Sky Reconstruction}{20}{}%
-\contentsline {subsection}{\numberline {2.4.2}Harmonic-Space Transfer-Function Pipeline}{21}{}%
-\contentsline {paragraph}{Two estimators of $T$.}{21}{}%
-\contentsline {paragraph}{Where to correct.}{22}{}%
-\contentsline {paragraph}{Negative pixels.}{22}{}%
-\contentsline {subsection}{\numberline {2.4.3}U-Net Flow-Matching Pipeline}{22}{}%
-\contentsline {paragraph}{Architecture.}{23}{}%
-\contentsline {subsection}{\numberline {2.4.4}Diffusion Pipeline (EDM)}{23}{}%
-\contentsline {paragraph}{Preconditioned denoiser.}{23}{}%
-\contentsline {paragraph}{Training.}{25}{}%
-\contentsline {paragraph}{Sampling.}{25}{}%
-\contentsline {section}{\numberline {2.5}Computational Infrastructure}{26}{}%
-\contentsline {subsection}{\numberline {2.5.1}Local Development}{26}{}%
-\contentsline {subsection}{\numberline {2.5.2}Euler (ETH Zurich)}{27}{}%
-\contentsline {subsection}{\numberline {2.5.3}CSCS (Alps)}{27}{}%
-\contentsline {section}{\numberline {2.6}Software Engineering}{28}{}%
-\contentsline {subsection}{\numberline {2.6.1}Code and Data Layout}{28}{}%
-\contentsline {subsection}{\numberline {2.6.2}Job Scheduling and Submission}{28}{}%
-\contentsline {subsection}{\numberline {2.6.3}Version Control}{28}{}%
-\contentsline {chapter}{\numberline {3}Results}{29}{}%
-\contentsline {section}{\numberline {3.1}Evaluation Protocol}{29}{}%
-\contentsline {paragraph}{Held-out cosmologies.}{29}{}%
-\contentsline {paragraph}{Statistics and resolutions.}{29}{}%
-\contentsline {paragraph}{Percentile bands.}{29}{}%
-\contentsline {section}{\numberline {3.2}Transfer-Function Pipeline}{30}{}%
-\contentsline {paragraph}{Configuration and training.}{30}{}%
-\contentsline {paragraph}{Full-sky $C_\ell $.}{30}{}%
-\contentsline {paragraph}{Patches.}{32}{}%
-\contentsline {paragraph}{Moments.}{33}{}%
-\contentsline {paragraph}{Weak lensing.}{33}{}%
-\contentsline {section}{\numberline {3.3}U-Net Flow-Matching Pipeline}{33}{}%
-\contentsline {paragraph}{Configuration and training.}{33}{}%
-\contentsline {paragraph}{Full-sky $C_\ell $.}{33}{}%
-\contentsline {paragraph}{Patches and moments.}{33}{}%
-\contentsline {paragraph}{Weak lensing.}{33}{}%
-\contentsline {section}{\numberline {3.4}Diffusion Pipeline}{35}{}%
-\contentsline {paragraph}{Configuration and training.}{35}{}%
-\contentsline {paragraph}{Full-sky $C_\ell $.}{36}{}%
-\contentsline {paragraph}{Patches and moments.}{36}{}%
-\contentsline {paragraph}{Weak lensing.}{36}{}%
-\contentsline {section}{\numberline {3.5}Synthesis}{37}{}%
-\contentsline {chapter}{\numberline {4}Conclusion}{45}{}%
-\contentsline {chapter}{\numberline {A}Implementation Details}{49}{}%
-\contentsline {section}{\numberline {A.1}Job Configuration}{49}{}%
+\contentsline {chapter}{Abstract}{1}{chapter*.1}%
+\contentsline {chapter}{\numberline {1}Introduction}{4}{chapter.1}%
+\contentsline {section}{\numberline {1.1}Theoretical Background}{6}{section.1.1}%
+\contentsline {subsection}{\numberline {1.1.1}Cosmological Framework}{6}{subsection.1.1.1}%
+\contentsline {subsubsection}{The Cosmic Web}{6}{section*.3}%
+\contentsline {subsubsection}{Matter Power Spectrum and Transfer Function}{6}{section*.4}%
+\contentsline {subsection}{\numberline {1.1.2}Cosmological Simulations}{8}{subsection.1.1.2}%
+\contentsline {subsubsection}{Lightcones and Snapshots}{9}{section*.5}%
+\contentsline {subsubsection}{\textsc {Disco-DJ}}{9}{section*.6}%
+\contentsline {subsubsection}{PkdGrav3}{9}{section*.7}%
+\contentsline {subsubsection}{\textsc {CosmoGridV1}}{10}{section*.8}%
+\contentsline {section}{\numberline {1.2}Super-Resolution Methods}{11}{section.1.2}%
+\contentsline {subsection}{\numberline {1.2.1}The Memory Problem on the Sphere}{11}{subsection.1.2.1}%
+\contentsline {subsection}{\numberline {1.2.2}Architectures}{12}{subsection.1.2.2}%
+\contentsline {subsubsection}{U-Net}{12}{section*.9}%
+\contentsline {subsection}{\numberline {1.2.3}Distribution-Matching Objectives}{12}{subsection.1.2.3}%
+\contentsline {subsubsection}{Flow Matching}{13}{section*.10}%
+\contentsline {subsubsection}{Diffusion}{13}{section*.11}%
+\contentsline {chapter}{\numberline {2}Methods and implementation}{15}{chapter.2}%
+\contentsline {section}{\numberline {2.1}Pipeline Architecture}{15}{section.2.1}%
+\contentsline {section}{\numberline {2.2}Initial-Condition Generation}{16}{section.2.2}%
+\contentsline {subsection}{\numberline {2.2.1}Reconstructing the Linear Input and Handing It Over}{16}{subsection.2.2.1}%
+\contentsline {paragraph}{Why a tabulated transfer function is needed at all.}{16}{section*.12}%
+\contentsline {paragraph}{Rebuilding it.}{17}{section*.13}%
+\contentsline {paragraph}{The hand-off.}{17}{section*.14}%
+\contentsline {section}{\numberline {2.3}Shell Builder}{18}{section.2.3}%
+\contentsline {subsection}{\numberline {2.3.1}Streaming Shell Accumulation}{18}{subsection.2.3.1}%
+\contentsline {paragraph}{Time discretization.}{18}{section*.15}%
+\contentsline {paragraph}{Accumulation.}{18}{section*.16}%
+\contentsline {subsection}{\numberline {2.3.2}Crossing Condition}{19}{subsection.2.3.2}%
+\contentsline {paragraph}{Periodic replicas.}{19}{section*.17}%
+\contentsline {paragraph}{Linear crossing formula.}{19}{section*.18}%
+\contentsline {paragraph}{Shell assignment and pixelization.}{20}{section*.19}%
+\contentsline {section}{\numberline {2.4}Correction Pipelines}{21}{section.2.4}%
+\contentsline {subsection}{\numberline {2.4.1}Patch Extraction and Full-Sky Reconstruction}{22}{subsection.2.4.1}%
+\contentsline {subsection}{\numberline {2.4.2}Harmonic-Space Transfer-Function Pipeline}{23}{subsection.2.4.2}%
+\contentsline {paragraph}{Estimating $T$.}{25}{section*.20}%
+\contentsline {paragraph}{What the emulator learns.}{25}{section*.21}%
+\contentsline {paragraph}{Where to correct.}{26}{section*.22}%
+\contentsline {paragraph}{Negative pixels.}{27}{section*.23}%
+\contentsline {subsection}{\numberline {2.4.3}U-Net Flow-Matching Pipeline}{27}{subsection.2.4.3}%
+\contentsline {paragraph}{Architecture.}{27}{section*.24}%
+\contentsline {subsection}{\numberline {2.4.4}Diffusion Pipeline (EDM)}{29}{subsection.2.4.4}%
+\contentsline {paragraph}{Preconditioned denoiser.}{29}{section*.25}%
+\contentsline {paragraph}{Training.}{29}{section*.26}%
+\contentsline {paragraph}{Sampling.}{29}{section*.27}%
+\contentsline {section}{\numberline {2.5}Computational Infrastructure}{31}{section.2.5}%
+\contentsline {subsection}{\numberline {2.5.1}Local Development}{31}{subsection.2.5.1}%
+\contentsline {subsection}{\numberline {2.5.2}Euler (ETH Zurich)}{31}{subsection.2.5.2}%
+\contentsline {subsection}{\numberline {2.5.3}CSCS (Alps)}{31}{subsection.2.5.3}%
+\contentsline {section}{\numberline {2.6}Software Engineering}{32}{section.2.6}%
+\contentsline {subsection}{\numberline {2.6.1}Code and Data Layout}{32}{subsection.2.6.1}%
+\contentsline {subsection}{\numberline {2.6.2}Job Scheduling and Submission}{32}{subsection.2.6.2}%
+\contentsline {subsection}{\numberline {2.6.3}Version Control}{32}{subsection.2.6.3}%
+\contentsline {chapter}{\numberline {3}Results}{33}{chapter.3}%
+\contentsline {section}{\numberline {3.1}Validating the Simulation Pipeline}{33}{section.3.1}%
+\contentsline {subsection}{\numberline {3.1.1}Reconstructing the Linear Input}{33}{subsection.3.1.1}%
+\contentsline {subsection}{\numberline {3.1.2}Validation against \textsc {CosmoGridV1}}{35}{subsection.3.1.2}%
+\contentsline {paragraph}{Lightcone geometry.}{35}{section*.28}%
+\contentsline {paragraph}{The backscaling trade-off.}{35}{section*.29}%
+\contentsline {paragraph}{The resolution deficit.}{36}{section*.30}%
+\contentsline {section}{\numberline {3.2}Evaluation Protocol}{38}{section.3.2}%
+\contentsline {paragraph}{Held-out cosmologies.}{38}{section*.31}%
+\contentsline {paragraph}{Statistics and resolutions.}{38}{section*.32}%
+\contentsline {paragraph}{A common evaluation footing.}{38}{section*.33}%
+\contentsline {paragraph}{Percentile bands.}{38}{section*.34}%
+\contentsline {section}{\numberline {3.3}Transfer-Function Pipeline}{39}{section.3.3}%
+\contentsline {paragraph}{Configuration and training.}{39}{section*.35}%
+\contentsline {paragraph}{Full-sky \mbox {$C_\ell $}.}{39}{section*.36}%
+\contentsline {paragraph}{Patches.}{39}{section*.37}%
+\contentsline {paragraph}{Moments.}{39}{section*.38}%
+\contentsline {paragraph}{Weak lensing.}{40}{section*.39}%
+\contentsline {section}{\numberline {3.4}U-Net Flow-Matching Pipeline}{43}{section.3.4}%
+\contentsline {paragraph}{Configuration and training.}{43}{section*.40}%
+\contentsline {paragraph}{Full-sky $C_\ell $.}{43}{section*.41}%
+\contentsline {paragraph}{Patches and moments.}{43}{section*.42}%
+\contentsline {paragraph}{Weak lensing.}{43}{section*.43}%
+\contentsline {section}{\numberline {3.5}Diffusion Pipeline}{46}{section.3.5}%
+\contentsline {paragraph}{Configuration and training.}{46}{section*.44}%
+\contentsline {paragraph}{Full-sky $C_\ell $.}{46}{section*.45}%
+\contentsline {paragraph}{Patches and moments.}{46}{section*.46}%
+\contentsline {paragraph}{Weak lensing.}{46}{section*.47}%
+\contentsline {section}{\numberline {3.6}Synthesis}{49}{section.3.6}%
+\contentsline {chapter}{\numberline {4}Conclusion}{51}{chapter.4}%
+\contentsline {chapter}{\numberline {A}Figures}{58}{appendix.A}%
+\contentsline {section}{\numberline {A.1}Held-out Cosmologies}{58}{section.A.1}%
+\contentsline {section}{\numberline {A.2}Cosmology Grid}{59}{section.A.2}%
+\contentsline {section}{\numberline {A.3}Patches}{60}{section.A.3}%
+\contentsline {section}{\numberline {A.4}$C_\ell $ Ratios for Single Shells}{63}{section.A.4}%
+\contentsline {section}{\numberline {A.5}Job Configuration}{64}{section.A.5}%
