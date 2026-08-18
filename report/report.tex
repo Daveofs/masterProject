@@ -1585,6 +1585,84 @@ The onset is monotonic in \mbox{$\chi$} and consistent with a single fixed comov
 Shell~60 is the instructive exception. Its marker sits at \mbox{$\ell = 1395$}, comfortably inside the measured range, yet no departure is visible there at all. The onset scale says where a deficit would begin if there were one; it says nothing about how large it is. By \mbox{$z \approx 2$} the field on these scales is still close to linear, so the particle-mesh solver has little non-linear structure to miss and the deficit never rises above the sample-variance scatter. The two statements are consistent: the correction is switched on for such shells and simply finds almost nothing to do, which is exactly what Sec.~\ref{sec:res-transfer} measures. The most distant redshift bin sits at \mbox{$0.998$}--\mbox{$1.004$} both before and after correction. \new{Finally, one feature should not be mistaken for a recovery. On shell~5 the ratio turns back upwards at the highest multipoles. Both runs contain the same number of particles, and once shot noise dominates \mbox{$C_\ell$} the ratio is driven towards unity regardless of how much clustering power \textsc{Disco-DJ} is missing. The apparent improvement beyond \mbox{$\ell \approx 2000$} is therefore an artefact of shot noise, not restored structure.} \jozef{I would not mention the upturn of shell 60; we have not investigated this (i.e. whether this is systematic at all) and are not sure what it is, anyway, it's very tiny.}
 
 \clearpage
+\section{Simulation Production Run}
+\label{sec:res-production}
+
+With the pipeline validated, the full grid was produced in a single \textsc{Slurm} array
+job (\texttt{disco/run\_disco\_gen\_all\_cscs.sh}): one array task per cosmology, 198
+tasks, each generating a complete 69-shell lightcone from the backscaled particle load of
+Sec.~\ref{sec:ic_generation}. All 198 finished with exit status 0; no task was resubmitted.
+This section reports what that cost, since the cost is the entire motivation for the
+thesis, and Figure~\ref{fig:production_timing} breaks it down.
+
+\paragraph{What one lightcone runs on.} A single lightcone is \emph{one} simulation
+distributed over \mbox{$8$} NVIDIA GH200 GPUs --- two Alps nodes with four GPUs each,
+launched as \texttt{srun -{}-ntasks=8} --- at \textsc{CosmoGridV1}'s own resolution of
+\mbox{$832^3$} particles in a \mbox{$900\,\mathrm{Mpc}/h$} box, with the force mesh at
+\mbox{$N_{\mathrm{pm}} = 1664$}. The eight tasks are not eight independent runs: \textsc{jax}
+shardes the particle load across all eight devices (\texttt{sharding=\{devices=[8]\}} on
+\texttt{jit(run\_nbody)}), so each holds roughly \mbox{$7.2\times10^{7}$} of the
+\mbox{$5.8\times10^{8}$} particles and every integration step is executed collectively.
+Each task writes its own view of the same step to the log, which is why the timings below
+are averaged over the eight tasks rather than summed.
+
+\paragraph{Cost per cosmology.} End to end, the median cosmology takes
+\mbox{$35.7$} minutes: \mbox{$66\,\mathrm{s}$} to convert the \texttt{tipsy} initial
+conditions to HDF5, \mbox{$40\,\mathrm{s}$} of \textsc{jax} setup and JIT compilation, and
+\mbox{$34.6$} minutes of integration. At two nodes that is \mbox{$1.19$} node-hours, or
+\mbox{$4.8$} GPU-hours, per cosmology, and \mbox{$236$} node-hours for the grid as a whole.
+The spread across the 198 runs is small --- \mbox{$33.6$} minutes at the fastest,
+\mbox{$34.6$} median, with a single outlier at \mbox{$53.3$} --- so the figure quotes
+medians rather than means throughout.
+
+\paragraph{The lightcone is not free.} The per-step breakdown in
+Figure~\ref{fig:production_timing}(a) is the more interesting result. The \textsc{Disco-DJ}
+integration step is flat at \mbox{$7.0\,\mathrm{s}$} across the entire lightcone,
+as it must be: the particle-mesh solve performs the same global FFT at every step,
+regardless of where the lightcone front happens to be. The shell builder does not behave
+that way at all. It costs \mbox{$9.3\,\mathrm{s}$} on the outermost shell and
+\mbox{$4.9\,\mathrm{s}$} on the innermost, and the lower panel shows why: the number of
+periodic box replicas that survive the radial reject of Eq.~\eqref{eq:replica_bounds}
+falls from \mbox{$572$} on average to \mbox{$1$} as the front comes in. The crossing test is evaluated
+once per replica (Sec.~\ref{sec:crossing}), so its cost tracks that count directly.
+
+Integrated over the lightcone the two are comparable --- \mbox{$481\,\mathrm{s}$} of
+\mbox{$N$}-body against \mbox{$437\,\mathrm{s}$} of shell building, a ratio of
+\mbox{$0.91$}. Building the lightcone is therefore not a by-product of the integration but
+a second cost of the same order, which is worth stating plainly because it is easy to
+assume otherwise. It also identifies where any future optimisation should go: the replica
+loop dominates at high redshift, and the transfer of particle positions to the device
+dominates at low redshift, where few replicas remain.
+
+One caveat is built into the figure. The two curves are the code's own internal timers,
+and they account for \mbox{$44\%$} of the wall-clock. The remaining \mbox{$18.8$} minutes
+per cosmology --- the pale band in Figure~\ref{fig:production_timing}(b) --- is framework
+overhead and untimed host-side work between the timed regions, and it is shown explicitly
+so that the timed kernels are not mistaken for the whole cost. The production figure quoted
+above, and used in every cost comparison in this thesis, is the full \mbox{$35.7$} minutes,
+not the \mbox{$15.2$} minutes the timers cover.
+
+\begin{figure}[h!]
+    \centering
+    \includegraphics[width=0.93\textwidth]{plots/production/production_timing.png}
+    \caption{Cost of the production campaign
+    (\texttt{vis/plot\_production\_timing.py}, \textsc{Slurm} job \texttt{2746372}).
+    \textbf{(a)} Timed wall-clock per integration step against the redshift of the shell
+    that step sweeps, averaged over all 198 cosmologies, with the band spanning the
+    16th--84th percentile across them. The integration runs from right to left. The
+    \mbox{$N$}-body step is flat because the particle-mesh solve is the same global FFT
+    every step; the shell builder is not, because the number of active periodic replicas
+    (lower panel) falls by nearly three orders of magnitude as the lightcone front
+    approaches the observer. Integrated, the two costs are within \mbox{$10\%$} of each
+    other. \textbf{(b)} The full per-cosmology budget, median over the 198 runs. The two
+    timed components together account for \mbox{$44\%$} of the run; the remainder is
+    framework overhead and untimed host work, shown rather than omitted so that the
+    quoted production cost of \mbox{$35.7$} minutes per cosmology on \mbox{$8$} GH200
+    GPUs is the complete one.}
+    \label{fig:production_timing}
+\end{figure}
+
+\clearpage
 \section{Evaluation Protocol}
 \label{sec:res-protocol}
 
@@ -1957,5 +2035,91 @@ accounting, bookkeeping, Sec.~\ref{sec:infrastructure}) followed by the executio
 body (environment activation, input paths, physical parameters, and the
 process-per-GPU launch).}
 \end{listing}
+
+\chapter{Code, Data and Tools}
+\label{app:code}
+
+\section{Code Availability}
+\label{app:code-availability}
+
+All code written for this thesis is public. The repository contains the three stages of
+the pipeline described in Chapter~\ref{ch:introduction} --- initial-condition generation,
+the shell builder, and the three correction pipelines --- together with the shared
+analysis library, every plotting script, and the \textsc{Slurm} batch scripts that
+reproduce the production runs.
+
+\begin{center}
+\begin{tabular}{@{}cl@{}}
+\raisebox{-0.32\height}{\includegraphics[height=4.2ex]{plots/github_mark.pdf}} &
+\begin{minipage}[c]{0.82\textwidth}
+\textbf{\href{https://github.com/Daveofs/masterProject}{github.com/Daveofs/masterProject}}\\[0.6mm]
+{\small Complete project: IC generation (\texttt{pkdgrav/}), the \textsc{Disco-DJ} shell
+builder (\texttt{shell\_builder/}), the three correction pipelines
+(\texttt{ml/transfer/}, \texttt{ml/unet/}, \texttt{ml/diffusion/}), the shared evaluation
+library (\texttt{ml/analysis/}), and all figure scripts (\texttt{vis/}).}
+\end{minipage}
+\end{tabular}
+\end{center}
+
+\noindent
+The repository's \texttt{README} gives the directory map and the order in which the
+stages are run. Two conventions are worth noting for anyone reading the code. The three
+correction pipelines are deliberately decoupled: they never import from one another, and
+small shared helpers are duplicated rather than factored out, so that changing one
+pipeline cannot silently alter the others; the single sanctioned shared module is
+\texttt{ml/analysis/}, which is precisely what makes the three comparable
+figure-by-figure. And every Python driver is paired with a batch script, so the same
+entry point runs unchanged from the local tests of Sec.~\ref{sec:local_dev} to a
+production allocation (Sec.~\ref{sec:infrastructure}).
+
+The shell builder is not distributed as a separate package: it is implemented inside
+\textsc{Disco-DJ}'s time integration and is versioned with the rest of the project, in
+\texttt{shell\_builder/}. The upstream solver it extends is \textsc{Disco-DJ} itself
+\cite{list_disco-dj_2026}, available at
+\href{https://github.com/cosmo-sims/DISCO-DJ}{github.com/cosmo-sims/DISCO-DJ}.
+
+Simulation outputs are not in the repository. The \textsc{CosmoGridV1} reference suite is
+public and documented by \citeauthor{kacprzak_cosmogridv1_2023}
+\cite{kacprzak_cosmogridv1_2023}; the \mbox{$\sim110\,\mathrm{TB}$} working copy, the
+generated lightcones, and the trained model checkpoints live on CSCS scratch storage
+(Sec.~\ref{sec:infrastructure}) rather than under version control, since they are bulk
+and regenerable from the code and the published reference.
+
+\section{Figure Provenance}
+\label{app:figure-provenance}
+
+Every figure in this thesis was produced by code in this repository, from the data the
+surrounding text describes. There are no reproduced or redrawn figures from other
+publications, with two explicitly marked exceptions: the multi-stepping diagram of
+Figure~\ref{fig:pkd_rungs} is a schematic redraw after
+\citeauthor{potter_pkdgrav3_2016} \cite{potter_pkdgrav3_2016}, and the generic U-Net
+topology of Figure~\ref{fig:unet_generic} follows
+\citeauthor{ronneberger_u-net_2015} \cite{ronneberger_u-net_2015}; both are drawn from
+scratch in Ti\emph{k}Z here rather than copied. The remaining diagrams are original
+Ti\emph{k}Z. All data figures are generated by the scripts in \texttt{vis/} and
+\texttt{ml/analysis/}, each named in the caption of the figure it produces, so any plot
+can be traced to the script and the run that made it.
+
+\section{Use of AI Tools}
+\label{app:ai-tools}
+
+AI-based writing assistants were used during the preparation of this thesis for language
+work on the manuscript: improving clarity and readability, correcting grammar and
+spelling, and suggesting rephrasings of text already drafted by the author. They were
+also used as a coding aid, in the way an autocomplete or a documentation search is used,
+for routine implementation and debugging.
+
+The substance of the thesis is the author's own. The research questions, the design of
+the pipeline and of the three corrections, the choice and execution of every experiment,
+the analysis of the results, and the conclusions drawn from them were carried out by the
+author. Every quantitative statement in this thesis was produced by the code in
+Appendix~\ref{app:code-availability} and verified against its output; no numerical result,
+measurement, or citation was taken from an AI tool. All references were checked against
+their primary sources.
+
+\clearpage
+\chapter{Declaration of Originality}
+\label{app:declaration}
+\includepdf[pages=-]{eth-template/declaration-originality.pdf}
 
 \end{document}
