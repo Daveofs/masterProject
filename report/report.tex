@@ -1575,7 +1575,7 @@ Figure~\ref{fig:cl_ratio_summary} exposes its defining property: it is a functio
 of comoving scale, not of multipole. \textsc{Disco-DJ}'s force resolution is capped
 by its particle-mesh cell, $L_{\mathrm{box}}/N_{\mathrm{pm}} = 900/1664 =
 0.54\,\mathrm{cMpc}/h$, a fixed physical length; through the flat-sky correspondence \mbox{$\ell \simeq 2\pi\chi/L$} of Eq.~\eqref{eq:limber}, with \mbox{$\chi$} the comoving distance to the shell and \mbox{$L$} the comoving length of the structure in question that one length maps to a different multipole
-on every shell, since $\chi$ grows with redshift. The dashed markers show where one fixed comoving scale of \mbox{$17\,\mathrm{cMpc}/h$} lands on each shell. \new{This scale is not chosen by hand: for each shell the multipole at which the particle-mesh spectrum first departs from the reference by more than the sample-variance scatter is read off and converted back to a comoving length through \mbox{$L = 2\pi\chi(s)/\ell$}. Across 25 shells spanning a factor \mbox{$22$} in comoving distance the result is constant to within \mbox{$4\%$}, giving \mbox{$L = 17.0 \pm 1.1\,\mathrm{cMpc}/h$}, and it is this measured onset at which all three corrections are switched on (Eq.~\ref{eq:ell_min}).} \jozef{how exactly was this number obtained?} The markers and they track the onset of the departure of the particle-mesh spectrum from the high-fidelity one shell by shell: the nearest
+on every shell, since $\chi$ grows with redshift. The dashed markers show where one fixed comoving scale of \mbox{$17\,\mathrm{cMpc}/h$} lands on each shell. \new{This scale is not chosen by hand but measured, by reading off the multipole at which each shell's spectrum first departs from the reference and converting it back to a comoving length; Sec.~\ref{sec:res-onset} gives the procedure and the fit in full.} \jozef{how exactly was this number obtained?} \fixed{The derivation is now its own subsection (Sec.~\ref{sec:res-onset}) with a figure showing both the per-shell measurement and the fit.} \new{The markers track the onset of the departure of the particle-mesh spectrum from the high-fidelity one shell by shell:} the nearest
 shell departs from unity around $\ell \sim 70$ and falls to $R \approx 0.24$ near
 $\ell \approx 2000$; shell~20 departs at $\ell \sim 300$ and reaches $R \approx
 0.56$ at $\ell = 3000$; shell~40 departs at $\ell \sim 600$ and reaches only
@@ -1584,38 +1584,134 @@ The onset is monotonic in \mbox{$\chi$} and consistent with a single fixed comov
 
 Shell~60 is the instructive exception. Its marker sits at \mbox{$\ell = 1395$}, comfortably inside the measured range, yet no departure is visible there at all. The onset scale says where a deficit would begin if there were one; it says nothing about how large it is. By \mbox{$z \approx 2$} the field on these scales is still close to linear, so the particle-mesh solver has little non-linear structure to miss and the deficit never rises above the sample-variance scatter. The two statements are consistent: the correction is switched on for such shells and simply finds almost nothing to do, which is exactly what Sec.~\ref{sec:res-transfer} measures. The most distant redshift bin sits at \mbox{$0.998$}--\mbox{$1.004$} both before and after correction. \new{Finally, one feature should not be mistaken for a recovery. On shell~5 the ratio turns back upwards at the highest multipoles. Both runs contain the same number of particles, and once shot noise dominates \mbox{$C_\ell$} the ratio is driven towards unity regardless of how much clustering power \textsc{Disco-DJ} is missing. The apparent improvement beyond \mbox{$\ell \approx 2000$} is therefore an artefact of shot noise, not restored structure.} \jozef{I would not mention the upturn of shell 60; we have not investigated this (i.e. whether this is systematic at all) and are not sure what it is, anyway, it's very tiny.}
 
+\subsection{Where the 17 Mpc/h Onset Comes From}
+\label{sec:res-onset}
+
+\new{All three corrections switch on at the same place: a per-shell multipole
+\mbox{$\ell_{\min}(s)$} obtained by projecting one fixed comoving length \mbox{$L$} onto
+each shell through Eq.~\eqref{eq:ell_min}. That single number is the only free parameter
+the three pipelines share, so it is worth showing how it was measured rather than
+asserting it. The procedure is the one plotted in Figure~\ref{fig:onset_scale} and
+implemented in \texttt{vis/plot\_onset\_scale.py}.}
+
+\paragraph{Measuring an onset.} \new{For each shell, the ratio
+\mbox{$C_\ell^{\mathrm{low}}/C_\ell^{\mathrm{high}}$} is formed from the stored harmonic
+coefficients at the native \mbox{$N_{\mathrm{side}}=2048$} resolution, out to
+\mbox{$\ell_{\max}=3000$}, and smoothed with a boxcar. The onset
+\mbox{$\ell_{\mathrm{onset}}$} is the first multipole at which the smoothed ratio falls one
+percent below unity and stays below it. A one-percent level is used deliberately: the
+question is where the deficit \emph{begins}, and that is the quantity which should be a
+fixed physical scale. A deeper threshold measures how fast the deficit grows once it has
+started, which is its shape rather than its onset, and the implied length is then no
+longer constant from shell to shell.}
+
+\new{Three guards make the measurement trustworthy, and each removes a distinct way a bare
+threshold test misleads. The shell must actually develop a deficit somewhere in the
+measured band, otherwise it has no onset to find: without this the distant, still-linear
+shells latch onto a noise excursion and report a spurious value, and 68 of 69 shells come
+out usable when only about half genuinely are. The departure must persist over a window of
+multipoles, since a single smoothed dip below the threshold is sample variance. And the
+ratio must still be above the threshold at the low-\mbox{$\ell$} end of the search,
+otherwise the onset lies below the measured band and cannot be located from it; the four
+innermost shells fail this test and are excluded rather than pinned to the edge of the
+search window. Of the 69 shells, 31 survive all three.}
+
+\paragraph{One length, every shell.} \new{Each surviving onset is converted back to a
+comoving length through \mbox{$L = 2\pi\chi(s)/\ell_{\mathrm{onset}}$}. If the deficit is
+really set by the particle-mesh force resolution, which is a fixed physical scale, then
+this length is the same on every shell, and \mbox{$\ell_{\mathrm{onset}}$} plotted against
+\mbox{$\chi$} is a straight line through the origin of slope \mbox{$2\pi/L$}.
+Figure~\ref{fig:onset_scale}(b) shows that it is. Fitting that slope over the 31 usable
+shells, which span a factor \mbox{$12$} in comoving distance from
+\mbox{$\chi = 159$} to \mbox{$1940\,\mathrm{Mpc}/h$}, gives}
+\begin{equation}
+  L \;=\; 16.7\,\mathrm{Mpc}/h ,
+  \label{eq:onset_L}
+\end{equation}
+\new{with a per-shell spread of only \mbox{$16.1$} to \mbox{$17.1\,\mathrm{Mpc}/h$} between
+the 16th and 84th percentiles. The production configuration uses
+\mbox{$L = 17\,\mathrm{Mpc}/h$}, which is this measurement rounded to the nearest
+megaparsec.}
+
+\new{Two limits of the calibration should be stated. It was carried out on a single
+cosmology and the resulting length is then held fixed across the whole grid, so
+\mbox{$17\,\mathrm{Mpc}/h$} is a representative value rather than one refitted per
+cosmology; since the onset marks where the correction begins, and the corrections are
+switched on for every shell regardless, an imperfect onset costs accuracy only in the
+narrow band where it is misplaced. And the length is a property of the solver pair rather
+than of any one shell: it is roughly \mbox{$30$} particle-mesh cells
+(\mbox{$L_{\mathrm{box}}/N_{\mathrm{pm}} = 0.54\,\mathrm{Mpc}/h$}), not the cell size
+itself, because force errors accumulate over several cells before they become visible in
+the spectrum. What matters for the pipelines is that one length describes every shell at
+once, which a single global \mbox{$\ell_{\min}$} demonstrably cannot: the same physical
+scale lands anywhere between \mbox{$\ell \approx 60$} and \mbox{$\ell \approx 1400$}
+depending on how far away the shell sits.}
+
+\begin{figure}[h!]
+    \centering
+    \includegraphics[width=\textwidth]{plots/ic/onset_scale.png}
+    \caption{How the correction onset scale is measured
+    (\texttt{vis/plot\_onset\_scale.py}, cosmology \texttt{cosmo\_000176}).
+    \textbf{(a)} The smoothed ratio of the two angular power spectra for four shells,
+    with the dotted line marking unity. Each curve sits on unity on large scales and then
+    peels away downwards as the particle-mesh solver starts losing power. The filled
+    marker on each curve is its measured onset: the first multipole at which that curve
+    has fallen one percent below unity and stays below, which is the definition used
+    throughout this section. The markers move to higher multipole for more distant
+    shells, which is the whole point --- the same physical scale subtends a smaller angle
+    further away. \textbf{(b)} Every usable shell, plotted
+    as its measured onset against its comoving distance. The points follow a straight line
+    through the origin, which is what it means for the deficit to begin at a fixed
+    comoving length rather than at a fixed angular scale. The fitted slope gives
+    Eq.~\eqref{eq:onset_L}; the dashed line is the \mbox{$17\,\mathrm{Mpc}/h$} used in
+    production, and the two are indistinguishable over the fitted range. Shells with no
+    measurable deficit, and those whose onset falls below the searched band, are excluded
+    rather than fitted.}
+    \label{fig:onset_scale}
+\end{figure}
+
 \clearpage
 \section{Simulation Production Run}
 \label{sec:res-production}
 
-With the pipeline validated, the full grid was produced in a single \textsc{Slurm} array
+\new{With the pipeline validated, the full grid was produced in a single \textsc{Slurm} array
 job (\texttt{disco/run\_disco\_gen\_all\_cscs.sh}): one array task per cosmology, 198
 tasks, each generating a complete 69-shell lightcone from the backscaled particle load of
 Sec.~\ref{sec:ic_generation}. All 198 finished with exit status 0; no task was resubmitted.
 This section reports what that cost, since the cost is the entire motivation for the
-thesis, and Figure~\ref{fig:production_timing} breaks it down.
+thesis, and Figure~\ref{fig:production_timing} breaks it down.}
 
-\paragraph{What one lightcone runs on.} A single lightcone is \emph{one} simulation
+\paragraph{What one lightcone runs on.} \new{A single lightcone is \emph{one} simulation
 distributed over \mbox{$8$} NVIDIA GH200 GPUs --- two Alps nodes with four GPUs each,
 launched as \texttt{srun -{}-ntasks=8} --- at \textsc{CosmoGridV1}'s own resolution of
 \mbox{$832^3$} particles in a \mbox{$900\,\mathrm{Mpc}/h$} box, with the force mesh at
 \mbox{$N_{\mathrm{pm}} = 1664$}. The eight tasks are not eight independent runs: \textsc{jax}
-shardes the particle load across all eight devices (\texttt{sharding=\{devices=[8]\}} on
+shards the particle load across all eight devices (\texttt{sharding=\{devices=[8]\}} on
 \texttt{jit(run\_nbody)}), so each holds roughly \mbox{$7.2\times10^{7}$} of the
 \mbox{$5.8\times10^{8}$} particles and every integration step is executed collectively.
 Each task writes its own view of the same step to the log, which is why the timings below
-are averaged over the eight tasks rather than summed.
+are averaged over the eight tasks rather than summed.}
 
-\paragraph{Cost per cosmology.} End to end, the median cosmology takes
-\mbox{$35.7$} minutes: \mbox{$66\,\mathrm{s}$} to convert the \texttt{tipsy} initial
-conditions to HDF5, \mbox{$40\,\mathrm{s}$} of \textsc{jax} setup and JIT compilation, and
-\mbox{$34.6$} minutes of integration. At two nodes that is \mbox{$1.19$} node-hours, or
-\mbox{$4.8$} GPU-hours, per cosmology, and \mbox{$236$} node-hours for the grid as a whole.
-The spread across the 198 runs is small --- \mbox{$33.6$} minutes at the fastest,
-\mbox{$34.6$} median, with a single outlier at \mbox{$53.3$} --- so the figure quotes
-medians rather than means throughout.
+\paragraph{Cost per cosmology.} \new{End to end, the median cosmology takes
+\mbox{$35.7$} minutes, and Figure~\ref{fig:production_timing}(b) shows where it goes:
+\mbox{$66\,\mathrm{s}$} to convert the \texttt{tipsy} initial conditions to HDF5,
+\mbox{$24\,\mathrm{s}$} to load them and compile the \textsc{jax} kernels,
+\mbox{$4.5$} minutes to integrate from the starting redshift down to the outermost shell,
+\mbox{$7.9$} minutes of on-lightcone integration, and \mbox{$7.2$} minutes of shell
+building. At two nodes that is \mbox{$1.19$} node-hours, or \mbox{$4.8$} GPU-hours, per
+cosmology, and \mbox{$236$} node-hours for the grid as a whole. The spread across the 198
+runs is small --- \mbox{$33.6$} minutes at the fastest, \mbox{$34.6$} median, with a single
+outlier at \mbox{$53.3$} --- so the figure quotes medians rather than means throughout.}
 
-\paragraph{The lightcone is not free.} The per-step breakdown in
+\new{The \mbox{$4.5$}-minute pre-lightcone phase is easy to overlook but is not overhead.
+The particle load starts at \mbox{$z = 99$} while the outermost shell sits at
+\mbox{$z = 3.5$}, so the integrator has to cross that entire range before the first shell
+can be written, and it does so without accumulating anything
+(Sec.~\ref{sec:shell_builder_core}). It is the price of starting the simulation early
+enough for the backscaled initial conditions to be valid, and it is charged once per
+lightcone regardless of how many shells are subsequently written.}
+
+\paragraph{The lightcone is not free.} \new{The per-step breakdown in
 Figure~\ref{fig:production_timing}(a) is the more interesting result. The \textsc{Disco-DJ}
 integration step is flat at \mbox{$7.0\,\mathrm{s}$} across the entire lightcone,
 as it must be: the particle-mesh solve performs the same global FFT at every step,
@@ -1624,23 +1720,25 @@ that way at all. It costs \mbox{$9.3\,\mathrm{s}$} on the outermost shell and
 \mbox{$4.9\,\mathrm{s}$} on the innermost, and the lower panel shows why: the number of
 periodic box replicas that survive the radial reject of Eq.~\eqref{eq:replica_bounds}
 falls from \mbox{$572$} on average to \mbox{$1$} as the front comes in. The crossing test is evaluated
-once per replica (Sec.~\ref{sec:crossing}), so its cost tracks that count directly.
+once per replica (Sec.~\ref{sec:crossing}), so its cost tracks that count directly.}
 
-Integrated over the lightcone the two are comparable --- \mbox{$481\,\mathrm{s}$} of
+\new{Integrated over the lightcone the two are comparable --- \mbox{$481\,\mathrm{s}$} of
 \mbox{$N$}-body against \mbox{$437\,\mathrm{s}$} of shell building, a ratio of
 \mbox{$0.91$}. Building the lightcone is therefore not a by-product of the integration but
 a second cost of the same order, which is worth stating plainly because it is easy to
 assume otherwise. It also identifies where any future optimisation should go: the replica
 loop dominates at high redshift, and the transfer of particle positions to the device
-dominates at low redshift, where few replicas remain.
+dominates at low redshift, where few replicas remain.}
 
-One caveat is built into the figure. The two curves are the code's own internal timers,
-and they account for \mbox{$44\%$} of the wall-clock. The remaining \mbox{$18.8$} minutes
-per cosmology --- the pale band in Figure~\ref{fig:production_timing}(b) --- is framework
-overhead and untimed host-side work between the timed regions, and it is shown explicitly
-so that the timed kernels are not mistaken for the whole cost. The production figure quoted
-above, and used in every cost comparison in this thesis, is the full \mbox{$35.7$} minutes,
-not the \mbox{$15.2$} minutes the timers cover.
+\new{One caveat is built into the figure. Every segment named above comes from the
+code's own internal timers, and together they account for \mbox{$58\%$} of the wall-clock.
+The remaining \mbox{$14.5$} minutes per cosmology --- the pale band in
+Figure~\ref{fig:production_timing}(b) --- is not attributable to any one timed kernel: it
+is the work that falls between them, chiefly asynchronous dispatch that the timers do not
+capture, host-side bookkeeping between steps, and writing the finished shells to disk. It
+is shown rather than omitted, because a figure that plotted only the timed kernels would
+imply a run half as long as the real one. The production cost quoted above, and used in
+every cost comparison in this thesis, is therefore the full \mbox{$35.7$} minutes.}
 
 \begin{figure}[h!]
     \centering
@@ -2042,11 +2140,11 @@ process-per-GPU launch).}
 \section{Code Availability}
 \label{app:code-availability}
 
-All code written for this thesis is public. The repository contains the three stages of
+\new{All code written for this thesis is public. The repository contains the three stages of
 the pipeline described in Chapter~\ref{ch:introduction} --- initial-condition generation,
 the shell builder, and the three correction pipelines --- together with the shared
 analysis library, every plotting script, and the \textsc{Slurm} batch scripts that
-reproduce the production runs.
+reproduce the production runs.}
 
 \begin{center}
 \begin{tabular}{@{}cl@{}}
@@ -2061,7 +2159,7 @@ library (\texttt{ml/analysis/}), and all figure scripts (\texttt{vis/}).}
 \end{tabular}
 \end{center}
 
-\noindent
+\new{\noindent
 The repository's \texttt{README} gives the directory map and the order in which the
 stages are run. Two conventions are worth noting for anyone reading the code. The three
 correction pipelines are deliberately decoupled: they never import from one another, and
@@ -2070,7 +2168,7 @@ pipeline cannot silently alter the others; the single sanctioned shared module i
 \texttt{ml/analysis/}, which is precisely what makes the three comparable
 figure-by-figure. And every Python driver is paired with a batch script, so the same
 entry point runs unchanged from the local tests of Sec.~\ref{sec:local_dev} to a
-production allocation (Sec.~\ref{sec:infrastructure}).
+production allocation (Sec.~\ref{sec:infrastructure}).}
 
 The shell builder is not distributed as a separate package: it is implemented inside
 \textsc{Disco-DJ}'s time integration and is versioned with the rest of the project, in
@@ -2078,17 +2176,17 @@ The shell builder is not distributed as a separate package: it is implemented in
 \cite{list_disco-dj_2026}, available at
 \href{https://github.com/cosmo-sims/DISCO-DJ}{github.com/cosmo-sims/DISCO-DJ}.
 
-Simulation outputs are not in the repository. The \textsc{CosmoGridV1} reference suite is
+\new{Simulation outputs are not in the repository. The \textsc{CosmoGridV1} reference suite is
 public and documented by \citeauthor{kacprzak_cosmogridv1_2023}
 \cite{kacprzak_cosmogridv1_2023}; the \mbox{$\sim110\,\mathrm{TB}$} working copy, the
 generated lightcones, and the trained model checkpoints live on CSCS scratch storage
 (Sec.~\ref{sec:infrastructure}) rather than under version control, since they are bulk
-and regenerable from the code and the published reference.
+and regenerable from the code and the published reference.}
 
 \section{Figure Provenance}
 \label{app:figure-provenance}
 
-Every figure in this thesis was produced by code in this repository, from the data the
+\new{Every figure in this thesis was produced by code in this repository, from the data the
 surrounding text describes. There are no reproduced or redrawn figures from other
 publications, with two explicitly marked exceptions: the multi-stepping diagram of
 Figure~\ref{fig:pkd_rungs} is a schematic redraw after
@@ -2098,24 +2196,24 @@ topology of Figure~\ref{fig:unet_generic} follows
 scratch in Ti\emph{k}Z here rather than copied. The remaining diagrams are original
 Ti\emph{k}Z. All data figures are generated by the scripts in \texttt{vis/} and
 \texttt{ml/analysis/}, each named in the caption of the figure it produces, so any plot
-can be traced to the script and the run that made it.
+can be traced to the script and the run that made it.}
 
 \section{Use of AI Tools}
 \label{app:ai-tools}
 
-AI-based writing assistants were used during the preparation of this thesis for language
+\new{AI-based writing assistants were used during the preparation of this thesis for language
 work on the manuscript: improving clarity and readability, correcting grammar and
 spelling, and suggesting rephrasings of text already drafted by the author. They were
 also used as a coding aid, in the way an autocomplete or a documentation search is used,
-for routine implementation and debugging.
+for routine implementation and debugging.}
 
-The substance of the thesis is the author's own. The research questions, the design of
+\new{The substance of the thesis is the author's own. The research questions, the design of
 the pipeline and of the three corrections, the choice and execution of every experiment,
 the analysis of the results, and the conclusions drawn from them were carried out by the
 author. Every quantitative statement in this thesis was produced by the code in
 Appendix~\ref{app:code-availability} and verified against its output; no numerical result,
 measurement, or citation was taken from an AI tool. All references were checked against
-their primary sources.
+their primary sources.}
 
 \clearpage
 \chapter{Declaration of Originality}

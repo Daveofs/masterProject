@@ -50,7 +50,7 @@ import matplotlib.pyplot as plt
 
 FS_AXIS, FS_TICK, FS_LEGEND = 14, 12, 11
 C_NBODY, C_SHELL, C_GATHER, C_REPL = "#B85F34", "#3F63A6", "#8E9BC4", "#5C6480"
-C_SETUP, C_REST, C_IC = "#C9CEDC", "#E3E6EF", "#28866A"
+C_SETUP, C_REST, C_IC, C_PRE = "#C9CEDC", "#E3E6EF", "#28866A", "#E0A87C"
 
 RE_NB = re.compile(r"running run_nbody_step:\s*([\d.]+)\s*s")
 RE_GC = re.compile(r"\[jax_shell\]\s+gather/cast\s+([\d.]+)s\s+r_step=\[([\d.]+),([\d.]+)\]")
@@ -61,6 +61,10 @@ RE_FIN = re.compile(r"\[([\d\-T:+]+)\] Finished \(exit=(\d+)")
 RE_IC0 = re.compile(r"\[([\d\-T:+]+)\] Converting tipsy IC")
 RE_IC1 = re.compile(r"\[([\d\-T:+]+)\] IC conversion complete")
 RE_W = re.compile(r"^W\d{4} (\d{2}:\d{2}:\d{2})\.")
+RE_PRE = re.compile(r"running run_nbody_prestep:\s*([\d.]+)\s*s")
+RE_REORD = re.compile(r"running initial_reorder:\s*([\d.]+)\s*s")
+RE_LOAD = re.compile(r"load data from IC file:\s*([\d.]+)\s*s")
+RE_COMP = re.compile(r"compiling [a-z_]+:\s*([\d.]+)\s*(s|ms)")
 
 
 def parse_steps(path: Path):
@@ -143,9 +147,13 @@ def parse_budget(out_path: Path, ntask: int = 8):
     nb = sum(float(x) for x in RE_NB.findall(t)) / ntask
     gc = sum(float(m[0]) for m in RE_GC.findall(t)) / ntask
     sh = sum(float(m[2]) for m in RE_SH.findall(t)) / ntask
+    pre = sum(float(x) for x in RE_PRE.findall(t)) / ntask
+    comp = sum(float(v) / (1000 if u == "ms" else 1) for v, u in RE_COMP.findall(t)) / ntask
+    boot = (sum(float(x) for x in RE_REORD.findall(t))
+            + sum(float(x) for x in RE_LOAD.findall(t))) / ntask + comp
     return dict(total=(t1 - t0).total_seconds(), exit=int(f.group(2)),
                 ic=(P(i1.group(1)) - P(i0.group(1))).total_seconds() if (i0 and i1) else np.nan,
-                setup=setup, nb=nb, gc=gc, sh=sh)
+                setup=setup, nb=nb, gc=gc, sh=sh, pre=pre, boot=boot)
 
 
 def main():
@@ -199,14 +207,15 @@ def main():
     B = [b for f in sorted(glob.glob(f"{a.log_dir}/disco_gen_{a.job}_*.out"))
          if (b := parse_budget(Path(f), a.ntask)) is not None]
     M = lambda k: float(np.nanmedian([b[k] for b in B]))
-    tot, ic, setup = M("total"), M("ic"), M("setup")
-    t_nb, t_gc, t_sh = M("nb"), M("gc"), M("sh")
-    timed = t_nb + t_gc + t_sh
-    rest = tot - setup - timed
+    tot, ic = M("total"), M("ic")
+    t_nb, t_gc, t_sh, t_pre, t_boot = M("nb"), M("gc"), M("sh"), M("pre"), M("boot")
+    timed = t_nb + t_gc + t_sh + t_pre + t_boot
+    rest = tot - timed
     e2e = tot + ic
     print(f"\n[campaign] {len(B)} cosmologies, {sum(b['exit']==0 for b in B)} exited 0")
-    print(f"  IC conversion {ic:6.0f} s | setup+compile {setup:5.0f} s | timed kernels {timed:6.0f} s "
-          f"({100*timed/tot:.0f}% of sim) | untimed {rest:6.0f} s")
+    print(f"  IC conv {ic:5.0f} s | load+JIT {t_boot:5.0f} s | prestep {t_pre:6.0f} s | "
+          f"N-body {t_nb:6.0f} s | shell {t_gc+t_sh:6.0f} s | untimed {rest:6.0f} s "
+          f"({100*timed/tot:.0f}% accounted)")
     print(f"  end-to-end per cosmology {e2e/60:5.1f} min  "
           f"= {a.nodes*e2e/3600:.2f} node-h = {a.ntask*e2e/3600:.2f} GPU-h")
     print(f"  campaign total {len(B)*e2e/3600:.0f} h wall = {a.nodes*len(B)*e2e/3600:.0f} node-h")
@@ -239,14 +248,16 @@ def main():
     axr.grid(alpha=0.25, lw=0.5); axr.set_axisbelow(True)
     axr.set_xlim(z.max() * 1.02, -0.05); axr.set_ylim(0, rep.max() * 1.15)
 
-    segs = [("IC conversion", ic, C_IC), ("setup + JIT", setup, C_SETUP),
-            ("N-body (timed)", t_nb, C_NBODY), ("shell builder (timed)", t_gc + t_sh, C_SHELL),
-            ("framework overhead + I/O (untimed)", rest, C_REST)]
+    segs = [("IC conversion", ic, C_IC), ("load + JIT", t_boot, C_SETUP),
+            ("pre-lightcone integration ($z\\!=\\!99\\to3.5$)", t_pre, C_PRE),
+            ("N-body, on-lightcone", t_nb, C_NBODY),
+            ("shell builder", t_gc + t_sh, C_SHELL),
+            ("untimed (dispatch, host, I/O)", rest, C_REST)]
     left = 0.0
     for lab, val, col in segs:
         axb.barh(0, val / 60, left=left / 60, height=0.55, color=col,
                  edgecolor="white", lw=1.0)
-        if val / e2e > 0.10:
+        if val / e2e > 0.08:
             axb.text((left + val / 2) / 60, 0, f"{val/60:.1f}", ha="center", va="center",
                      fontsize=FS_LEGEND - 1, color="#1a1a1a")
         left += val
