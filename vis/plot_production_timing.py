@@ -267,8 +267,8 @@ def main():
     axb.set_title(f"(b)  full budget: {e2e/60:.1f} min per cosmology",
                   fontsize=FS_AXIS, loc="left", pad=9)
     axb.legend(handles=[plt.Rectangle((0, 0), 1, 1, fc=c, ec="white") for _, _, c in segs],
-               labels=[s[0] for s in segs], fontsize=FS_LEGEND - 1.5, loc="upper center",
-               bbox_to_anchor=(0.5, -0.75), ncol=3, frameon=False, handlelength=1.4)
+               labels=[s[0] for s in segs], fontsize=FS_AXIS, loc="upper center",
+               bbox_to_anchor=(0.5, -0.85), ncol=2, frameon=False, handlelength=1.4)
 
     out = out_dir / "production_timing.png"
     fig.savefig(out, dpi=200, bbox_inches="tight"); plt.close(fig)
