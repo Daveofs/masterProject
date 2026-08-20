@@ -136,7 +136,7 @@ the \textcolor{accentc}{Shell~Builder}, and the \textcolor{accentc}{Correction}.
     \end{center}
     \vfill
     \begin{flushright}
-        Advisors: Jozef Bucko, Alexandre Refregier \\
+        Advisors: Dr. Jozef Bucko, Prof. Alexandre Refregier \\
         Department of Physics, ETH Zurich
     \end{flushright}
 \end{titlepage}
@@ -144,13 +144,13 @@ the \textcolor{accentc}{Shell~Builder}, and the \textcolor{accentc}{Correction}.
 \chapter*{Abstract}
 \addcontentsline{toc}{chapter}{Abstract}
 
-Map-level, simulation-based inference is becoming the standard way to extract cosmological information from large-scale-structure surveys. Working with the field itself, rather than with compressed summary statistics, buys three things. It retains the non-Gaussian information that gravitational collapse imprints on small scales. It allows systematic effects to be modelled in the forward direction, where they physically act and let the different probes be described self-consistently within a single simulated universe \cite{jeffrey_dark_2024, gatti_dark_2024, lemos_simbig_2023}. The cost is borne entirely by simulation. The likelihood is never written down, so every analysis consumes a suite of forward-modelled mocks spanning the parameter space. Gravity-only lightcone suites built for exactly this purpose exist, \textsc{CosmoGridV1} \cite{kacprzak_cosmogridv1_2023} among them, but each is a \emph{fixed} grid of cosmologies, and each realisation is an \mbox{$N$}-body run costing many node-hours. A recent DES-Y3 analysis built on that suite required of order one million map-level mocks \cite{thomsen_dark_2026}; reproducing such coverage at the volume Stage-IV surveys demand is prohibitive.
+Map-level, simulation-based inference (SBI) is becoming the standard way to extract cosmological information from large-scale-structure surveys. \jozef{Simulating the cosmological field directly during analyses, rather than emulating specific compressed summary statistics of interest}, provides three main advantages. It retains the non-Gaussian information that gravitational collapse imprints on small scales. It allows systematic effects to be modelled in the forward direction, where they physically act and allows the different probes to be described self-consistently within a single simulated universe \cite{jeffrey_dark_2024, gatti_dark_2024, lemos_simbig_2023}. The cost \jozef{of such analysis} is borne \jozef{almost} entirely by simulation. \sout{The likelihood is never written down, so every analysis consumes} \jozef{It typically requires} a suite of forward-modelled mocks spanning a large parameter space. Gravity-only lightcone suites built for exactly this purpose exist, \textsc{CosmoGridV1} \cite{kacprzak_cosmogridv1_2023} \jozef{GowerStreet cite or SimBIG cite} among them. However, these provide simulations on a \emph{fixed} grid of cosmologies, each realisation being an \mbox{$N$}-body run costing significant computational resources. A recent DES-Y3 analysis built on \textsc{CosmoGridV1} suite required of order one million map-level mocks \cite{thomsen_dark_2026}; reproducing such coverage at the volume Stage-IV surveys demand is prohibitive.
 
-Fast approximate solvers are the natural alternative. Particle-mesh codes such as \textsc{Disco-DJ} ({Differentiable Simulations for Cosmology -- Done with JAX}) \cite{list_disco-dj_2026} evolve the same initial conditions in minutes rather than hours. Their force resolution is capped by the mesh, however, so they progressively lose small-scale power. That is precisely the regime that motivated working at the map level in the first place. This thesis asks whether the deficit can be repaired.
+Fast approximate solvers are the natural alternative. Particle-mesh codes such as \textsc{Disco-DJ} ({Differentiable Simulations for Cosmology -- Done with JAX}) \cite{list_disco-dj_2026} \jozef{or FastPM cite} evolve the same initial conditions in minutes rather than hours. Their force resolution is capped by the mesh, however, so they progressively lose small-scale power. That is precisely the regime that motivated working at the map level in the first place. This thesis asks whether the deficit can be repaired.
 
-Answering it required first constructing a controlled comparison. \textsc{CosmoGridV1} does not distribute initial conditions, so for every cosmology the linear input is therefore reconstructed from the published perturbations and handed to \textsc{PkdGrav3}, which generates a backscaled particle load. The \textsc{Disco-DJ} run is started from that load, while the reference remains \textsc{CosmoGridV1}'s own lightcone. A shell builder embedded in \textsc{Disco-DJ}'s time integration reproduces \textsc{PkdGrav3}'s moving-lightcone crossing condition on \textsc{CosmoGridV1}'s exact radial shell grid. The two lightcones are therefore defined shell by shell on identical radial bins, and their difference is dominated by the force solver; the residual from the reconstructed initial conditions stays sub-percent on large scales. On these pairs three corrections are trained and compared on held-out cosmologies: a deterministic per-multipole transfer-function rescaling in harmonic space, a conditional flow-matching U-Net that transports each map patch from low to high fidelity, and a conditional diffusion model in the Elucidated Diffusion Model (EDM) formulation, which generates the missing small-scale residual from noise.
+Answering it required first constructing a controlled comparison. \textsc{CosmoGridV1} does not distribute initial conditions, so for every cosmology the linear input is therefore reconstructed from the published perturbations and handed to \textsc{PkdGrav3}, which generates a backscaled particle load. The \textsc{Disco-DJ} run is started from that load, while the reference remains \textsc{CosmoGridV1}'s own lightcone. A shell builder embedded in \textsc{Disco-DJ}'s time integration reproduces \textsc{PkdGrav3}'s moving-lightcone crossing condition on \textsc{CosmoGridV1}'s exact radial shell grid. The two lightcones are therefore defined shell by shell on identical radial bins, and their difference is dominated by the force solver; the residual from the reconstructed initial conditions stays sub-percent on large scales. On these pairs three correction schemes are trained and compared on held-out cosmologies: a deterministic per-multipole transfer-function rescaling in harmonic space, a conditional flow-matching U-Net that transports each map patch from low \jozef{(DISCO-DJ)} to high \jozef{(Cosmogrid)} fidelity, and a conditional diffusion model in the Elucidated Diffusion Model (EDM) formulation, which generates the missing small-scale residual from noise.
 
-Evaluated on a common footing, all three restore the angular power spectrum to within a few percent on the scales they act on. The two patch-based models go further. They recover most of the non-Gaussian one-point and weak-lensing convergence signal that a per-multipole rescaling by construction cannot: the flow lifts the convergence excess kurtosis from \mbox{$0.54$} to \mbox{$0.98$} of its reference value, where the transfer function reaches only \mbox{$0.64$}. Corrected fast lightcones thus approach the reference simulations at a small fraction of their cost, which is  what would allow full \mbox{$N$}-body runs to be reserved for validation rather than production.
+Evaluated on a common footing, all three restore the angular power spectrum to within a few percent on the scales \jozef{up to lmax... - be specific}\sout{they act on}. The two \sout{patch-based}latter models go even further. They recover \sout{most of} the non-Gaussian one-point \jozef{statistics, specifically third and fourth moments of the} weak-lensing convergence signal that a per-multipole rescaling by construction cannot: for example, the flow \jozef{matching scheme} lifts the convergence maps excess kurtosis from \mbox{$0.54$} to \mbox{$0.98$} of its reference value, where the transfer function reaches only \mbox{$0.64$}. Corrected fast lightcones thus approach the reference simulations at a small fraction of the cost \jozef{at the two-point level and depending on the correction scheme even beyond}, which allows full \mbox{$N$}-body runs to be reserved for validation rather than production \jozef{and enables SBI via coupling the fast simulators with the AI-based corrections developed in this thesis}.
 
 \tableofcontents
 
@@ -165,13 +165,13 @@ Three recent analyses show what this buys and what it costs. \citeauthor{jeffrey
 
 The term \emph{simulation-based} covers two distinct things, and it is worth separating them. The first is the absence of a prediction from first principles. For the linear power spectrum one exists: an Einstein--Boltzmann solver integrates the perturbation equations directly and returns \mbox{$P(k)$} without simulating anything \cite{seljak_line_1996}. At the map level there is no such shortcut. The statistics of an evolved, non-linear density field on the sky can only be obtained by evolving that field end to end. That means a many-body system under gravity, which is what \textsc{CosmoGridV1} does \cite{kacprzak_cosmogridv1_2023, potter_pkdgrav3_2016}. Where baryonic physics must be modelled explicitly rather than absorbed into a correction, it means full hydrodynamics. The hydrodynamical suites that reach the volume and resolution a cosmological analysis needs currently number of order ten realisations, far too few to serve as a theory prediction across a parameter space.
 
-The second is how the likelihood is then treated, which is a separate choice. One can write down an explicit form for it and evaluate it at the field level or even decline to write it at all. A neural network could learn the likelihood or the posterior from simulated pairs -- neural likelihood and neural posterior estimation, the route \citeauthor{jeffrey_dark_2024} take for DES-Y3 \cite{jeffrey_dark_2024}. Both consume the same resource: entire suites of forward-simulated lightcones spanning the parameter space, each realisation an expensive \textsc{PkdGrav3} run (Sec.~\ref{sec:pkdgrav}) \cite{potter_pkdgrav3_2016}. It is this demand, not the inference machinery, that sets the cost of a map-level analysis.
+The second is how the likelihood is then treated, which is a separate choice. One can write down an explicit form for it and evaluate it at the field level or even decline to write it at all. \jozef{Alternatively,} a neural network could learn the likelihood or the posterior from simulated pairs -- neural likelihood and neural posterior estimation, the route \citeauthor{jeffrey_dark_2024} take for DES-Y3 \cite{jeffrey_dark_2024}. Both consume the same resource: entire suites of forward-simulated lightcones spanning the parameter space, each realisation an expensive \textsc{PkdGrav3} run (Sec.~\ref{sec:pkdgrav}) \cite{potter_pkdgrav3_2016}. It is this demand, not the inference machinery, that sets the cost of a map-level analysis.
 
 Fast approximate solvers are a promising alternative. Two established examples show the range of approach. COLA hands the large-scale motion to Lagrangian perturbation theory, which knows it analytically, and asks the integrator only for what perturbation theory cannot supply; a handful of time steps then suffices \cite{tassev_solving_2013}. FastPM instead constrains a particle-mesh solver so that the linear growth comes out right however few steps it is given \cite{feng_fastpm_2016}. \textsc{Disco-DJ} belongs to the same family but is the most modern of them, written for GPUs and differentiable end to end \cite{hahn_disco-dj_2024, list_disco-dj_2026}. That is why it is the solver used here. Such particle-mesh (PM) codes evolve the same initial conditions in minutes on a single GPU (Sec.~\ref{sec:discodj}). Their force resolution is capped by the mesh, however, so small-scale power is progressively suppressed \cite{schneider_matter_2015} -- and with it exactly the non-Gaussian content that motivates map-level inference in the first place. The question this thesis addresses is therefore: can the small-scale content of an expensive reference simulation be restored onto a cheap particle-mesh lightcone, accurately enough for map-level statistics, at negligible additional cost?
 
 Answering it requires two ingredients that are as much infrastructure as machine learning. The first is a controlled learning problem: the low- and high-fidelity maps must differ through the force solver and as little else as possible. That demands two things. Initial conditions matched as closely as the published reference allows (Sec.~\ref{sec:ic_generation}), and lightcones defined on identical radial shells. The latter is provided by a shell builder implemented inside \textsc{Disco-DJ}'s time integration (Sec.~\ref{sec:shell_builder}), since the code's native lightcone support does not reach \textsc{CosmoGridV1}'s depth.
 
-The second ingredient is the corrections themselves (Sec.~\ref{sec:correction-pipelines}). Three are built and compared here, and they were not chosen arbitrarily: they span a deliberate range, from an emulation technique the community already trusts to two learned, patch-based approaches that are new to this particular problem.
+The second ingredient is the corrections themselves (Sec.~\ref{sec:correction-pipelines}). Three are built and compared here, and they were not chosen arbitrarily: they span a deliberate range, from an emulation technique the community already trusts to two learned, patch-based approaches that are new to this particular problem\jozef{? Maybe something similar exists}.
 
 The first is the conservative baseline. Rescaling mode amplitudes so that a cheap simulation reproduces the power spectrum of an expensive one is standard practice: it is how fast solvers are calibrated against full \mbox{$N$}-body runs \cite{feng_fastpm_2016}, how initial-condition transients are removed \cite{garrison_improving_2016}, and how a single simulation is rescaled to other cosmologies \cite{angulo_one_2009}. Its appeal here is directness. The quantity being learned is the transfer function between the high- and low-fidelity runs, one correction factor per multipole and shell. It is fitted against the angular power spectrum itself, which is the statistic the corrected lightcones are ultimately scored on. The method therefore optimises exactly what is measured, with no proxy objective in between. A small network predicts the transfer function from the cosmological parameters, which is what allows it to be applied to cosmologies never run at high fidelity.
 
@@ -1407,7 +1407,7 @@ Development proceeded through three tiers of increasing scale -- a local worksta
 \begin{tikzpicture}[node distance=10mm and 25mm]
   \node[databox, minimum width=37mm, minimum height=17mm] (local) {\textbf{Workstation}\\ \scriptsize $16^3$ end-to-end tests\\ \scriptsize $<1$ min, instant feedback};
   \node[box, minimum width=37mm, minimum height=17mm, right=of local] (euler) {\textbf{Euler (ETH)}\\ \scriptsize full $832^3$ runs, GPU builds\\ \scriptsize per-code environments};
-  \node[keybox, minimum width=40mm, minimum height=17mm, right=of euler] (alps) {\textbf{Alps (CSCS)}\\ \scriptsize GH200, 120 GB/node\\ \scriptsize production sims $+$ training};
+  \node[keybox, minimum width=40mm, minimum height=17mm, right=of euler] (alps) {\textbf{Alps (CSCS)}\\ \scriptsize GH200, 96 GB/gpu\\ \scriptsize production sims $+$ training};
   \draw[flowacc] (local) -- (euler) node[midway, above, note] {memory-\\bound};
   \draw[flowacc] (euler) -- (alps) node[midway, above, note] {finer PM mesh,\\ larger batches};
   \node[note] at (6.0,-1.7) {debugging loop: seconds \quad $\longleftrightarrow$ \quad headroom: Eq.~\eqref{eq:phasespace_mem} $\times$ code-specific overheads};
@@ -1460,25 +1460,20 @@ The whole project, the analysis and ML pipelines together with the modified \tex
 \chapter{Results}
 \label{ch:results}
 
-This chapter reports the results in the order they were obtained. Sec.~\ref{sec:res-validation} establishes the two things every later number rests on: that both solvers start from the same linear input, and that \textsc{Disco-DJ} reproduces \textsc{CosmoGridV1}'s lightcone on its own radial grid. The rest of the chapter then evaluates the three correction pipelines of Sec.~\ref{sec:correction-pipelines} on cosmologies held out of all fitting and training. Sec.~\ref{sec:res-protocol} fixes the evaluation protocol -- the held-out split, the statistics, and how the uncertainty bands are constructed -- and the three sections that follow present and discuss each pipeline in turn, on the same set of diagnostics: training behaviour, full-sky angular power spectra, example patches, one-point moments, and weak-lensing convergence. Sec.~\ref{sec:res-synthesis} draws the comparison.
+This chapter reports the results in the order they were obtained. Sec.~\ref{sec:res-validation} establishes the two things every later number rests on: that the reconstructed linear input brings \textsc{Disco-DJ} onto \textsc{CosmoGridV1}'s large-scale amplitude, at matched phases but deliberately different normalisation, and that \textsc{Disco-DJ} reproduces \textsc{CosmoGridV1}'s lightcone on its own radial grid. The rest of the chapter then evaluates the three correction pipelines of Sec.~\ref{sec:correction-pipelines} on cosmologies held out of all fitting and training. Sec.~\ref{sec:res-protocol} fixes the evaluation protocol -- the held-out split, the statistics, and how the uncertainty bands are constructed -- and the three sections that follow present and discuss each pipeline in turn, on the same set of diagnostics: training behaviour, full-sky angular power spectra, example patches, one-point moments, and weak-lensing convergence. Sec.~\ref{sec:res-synthesis} draws the comparison.
 
 \section{Validating the Simulation Pipeline}
 \label{sec:res-validation}
 
-Before any correction can be trained, the two lightcones it learns from have to be
-shown to be what they claim: generated from the same linear input, and binned on the same
-radial grid. Both are results of this work rather than inherited machinery, and both are
-established here. Sec.~\ref{subsec:res-ic} follows the linear input through the four fixes
-that brought \textsc{Disco-DJ} onto \textsc{PkdGrav3}; Sec.~\ref{sec:shell_validation}
-compares the resulting lightcone against the published \textsc{CosmoGridV1} one, shell by
-shell. Only then does the chapter turn to the corrections themselves.
+Both lightcones are built in this work and further checked before any correction is trained. Sec.~\ref{subsec:res-ic} follows the linear input through the four fixes that brought \textsc{Disco-DJ} onto \textsc{PkdGrav3}; Sec.~\ref{sec:shell_validation}
+compares the resulting lightcone against the published \textsc{CosmoGridV1} one, shell by shell. Only then does the chapter turn to the corrections themselves.
 
 \subsection{Reconstructing the Linear Input}
 \label{subsec:res-ic}
 
 Getting the linear input right took four attempts, and the route to it is a result in its
 own right. Figure~\ref{fig:ic_error_budget} shows the steps that brought the large-scale power
-of the \textsc{Disco-DJ} runs onto the \textsc{CosmoGridV1} reference: four matter power spectra,
+of the \textsc{Disco-DJ} runs onto the \textsc{PkdGrav3} reference: four matter power spectra,
 each from a simulation of the same cosmology that was actually performed, divided by the
 \textsc{PkdGrav3} run started from the same initial conditions. Each stage fixes one ingredient.
 
@@ -1503,8 +1498,7 @@ Backscaling carries a \mbox{$z=0$} spectrum to the starting redshift with a sing
 since the \textsc{Disco-DJ} background has no massive neutrinos in it, that growth factor is not
 the one \textsc{CosmoGridV1} evolved with. The remedy is to backscale from a deliberately
 larger \mbox{$\sigma_8$}, chosen together with the shifted \mbox{$\Omega_r$} so that a \textsc{Disco-DJ}
-run started from those initial conditions arrives at \mbox{$z=0$} with the same large-scale power as the
-reference. Handing both codes the same \emph{theory} is not the same as handing them the same
+run started from those initial conditions arrives at \mbox{$z=0$} with the same large-scale power as the  \textsc{PkdGrav3} reference. Handing both codes the same \emph{theory} is not the same as handing them the same
 \emph{initial conditions}; this stage brings the offset to \mbox{$-0.8\%$}.
 
 Stage~(4) closes the last of it, and concerns which field the table describes. The particle load
@@ -1540,7 +1534,7 @@ the pairing is a real choice; making it consistently leaves \mbox{$-0.2\%$}.
 \subsection{Validation against \textsc{CosmoGridV1}}
 \label{sec:shell_validation}
 
-The shell builder is validated end-to-end at the high-fidelity side, where a published reference exists to compare against: \textsc{PkdGrav3} is run with its native lightcone module on the exact box, resolution, and cosmology used by \textsc{CosmoGridV1}, and the resulting matter angular power spectrum $C_\ell$ is compared shell-by-shell against the corresponding published \textsc{CosmoGridV1} lightcone. Agreement here confirms that the reconstructed transfer function, the derived parameters of Sec.~\ref{subsec:ic_linear}, and the run configuration together reproduce the reference suite; only then is the same IC handed to \textsc{Disco-DJ}, whose shell output additionally validates the shell builder itself (\texttt{pkdgrav/validate\_shell\_builder.py}). Both runs describe the same cosmology
+\textsc{PkdGrav3} is run with its native lightcone module on the exact box, resolution, and cosmology used by \textsc{CosmoGridV1}, and the resulting matter angular power spectrum $C_\ell$ is compared shell-by-shell against the corresponding published \textsc{CosmoGridV1} lightcone. Agreement here confirms that the reconstructed transfer function, the derived parameters of Sec.~\ref{subsec:ic_linear}, and the run configuration together reproduce the reference suite; only then is the same IC handed to \textsc{Disco-DJ}, whose shell output additionally validates the shell builder itself (\texttt{pkdgrav/validate\_shell\_builder.py}). Both runs describe the same cosmology
 on the same 69-shell radial grid, so their angular power spectra can be compared
 shell by shell (Figure~\ref{fig:cl_comparison}) and quantified through the ratio
 \begin{equation}
@@ -1549,9 +1543,9 @@ shell by shell (Figure~\ref{fig:cl_comparison}) and quantified through the ratio
 \end{equation}
 shown in Figure~\ref{fig:cl_ratio_summary}, at the native $N_{\mathrm{side}} =
 2048$ out to $\ell_{\max} = 3000$ for four shells spanning the depth of the
-lightcone. On the logarithmic scale of Figure~\ref{fig:cl_comparison} the two
+lightcone. Here \mbox{$s$} indexes the radial shell and \mbox{$\ell$} the multipole, so \mbox{$R(\ell, s)$} is one ratio curve per shell. On the logarithmic scale of Figure~\ref{fig:cl_comparison} the two
 simulations are visually indistinguishable over most of the range, itself the
-first result, separating only at high \mbox{$\ell$}, and only on the nearer shells. Here \mbox{$s$} indexes the radial shell and \mbox{$\ell$} the multipole, so \mbox{$R(\ell, s)$} is one ratio curve per shell. The ratio resolves what that
+first result, separating only at high \mbox{$\ell$}, and only on the nearer shells. The ratio resolves what that
 comparison cannot, and three distinct effects emerge from it.
 
 \paragraph{Lightcone geometry.} Figure~\ref{fig:cl_ratio_summary} validates the shell builder itself. An
@@ -1566,8 +1560,7 @@ multipole, most conspicuously at the largest scales. No such corruption is prese
     \includegraphics[width=0.7\textwidth]{plots/cl_ratio/cl_comparison.png}
     \caption{Angular power spectra of four shells spanning the lightcone, for the
     \textsc{Disco-DJ} run (solid) and the reference \textsc{CosmoGridV1} lightcone (dashed), at
-    $N_{\mathrm{side}} = 2048$ (cosmology \texttt{cosmo\_000001}, PM grid
-    $L_{\mathrm{box}}/N_{\mathrm{pm}} = 0.54\,\mathrm{cMpc}/h$). Colour identifies
+    $N_{\mathrm{side}} = 2048$ (cosmology \texttt{cosmo\_000001}). Colour identifies
     the shell, line style the simulation. Dashed vertical markers show where the
     measured deficit onset scale of \mbox{$17\,\mathrm{cMpc}/h$} falls on each shell. The two
     simulations track each other over the whole range except at high $\ell$ on the
@@ -1580,15 +1573,8 @@ multipole, most conspicuously at the largest scales. No such corruption is prese
     \includegraphics[width=0.7\textwidth]{plots/cl_ratio/cl_ratio.png}
     \caption{The same four shells as Figure~\ref{fig:cl_comparison}, shown as the
     ratio of Eq.~\eqref{eq:shell_validation_ratio}, which resolves differences
-    invisible on a six-decade logarithmic axis. At \mbox{$\ell \lesssim 100$} all four shells
-    scatter about unity with no systematic offset, within a few tenths of a
-    percent on the nearer shells, degrading to a few percent below \mbox{$\ell \approx 20$}
-    on the most distant ones, where few independent modes contribute per multipole.
-    That this residual is noise shrinking with mode count, rather than a coherent
-    offset, is the result that validates the shell builder, while the small-scale deficit sets in at a
-    fixed comoving scale and therefore at a higher multipole for each more distant
-    shell. The upturn at the highest multipoles on shells~5 and~60 is the common
-    shot-noise floor of the two runs, not recovered structure.}
+    invisible on a six-decade logarithmic axis. The two simulations agree on large
+    scales and disagree on small ones. Below \mbox{$\ell \approx 100$} all four shells sit on unity with no systematic offset; the scatter that remains is sample variance, largest on the most distant shells where fewest modes contribute. The small-scale falloff is the resolution deficit the corrections exist to remove. It begins at a fixed comoving scale, so the further away the shell, the higher the multipole at which it sets in.}
     \label{fig:cl_ratio_summary}
 \end{figure}
 
@@ -1694,9 +1680,8 @@ A limit of the calibration should be stated. It was carried out on a single cosm
 With the pipeline validated, the full grid was produced in a single \textsc{Slurm} array
 job \\(\texttt{disco/run\_disco\_gen\_all\_cscs.sh}): one array task per cosmology, 198
 tasks, each generating a complete 69-shell lightcone from the backscaled particle load of
-Sec.~\ref{sec:ic_generation}. All 198 finished with exit status 0; no task was resubmitted.
-This section reports what that cost, since the cost is the entire motivation for the
-thesis, and Figure~\ref{fig:production_timing} breaks it down.
+Sec.~\ref{sec:ic_generation}. 
+This section reports what that cost, since the cost is the entire motivation for the thesis, and Figure~\ref{fig:production_timing} breaks it down.
 
 \paragraph{What one lightcone runs on.} A single lightcone is \emph{one} simulation
 distributed over \mbox{$8$} NVIDIA GH200 GPUs --- two Alps nodes with four GPUs each,
@@ -1714,19 +1699,15 @@ are averaged over the eight tasks rather than summed.
 \mbox{$66\,\mathrm{s}$} to convert the \texttt{tipsy} initial conditions to HDF5,
 \mbox{$24\,\mathrm{s}$} to load them and compile the \textsc{jax} kernels,
 \mbox{$4.5$} minutes to integrate from the starting redshift down to the outermost shell,
-\mbox{$7.9$} minutes of on-lightcone integration, and \mbox{$7.2$} minutes of shell
-building. At two nodes that is \mbox{$1.19$} node-hours, or \mbox{$4.8$} GPU-hours, per
+\mbox{$7.9$} minutes of on-lightcone integration, \mbox{$7.2$} minutes of shell building, and \mbox{$14.5$} minutes for dispatch, host and Input/Output (I/O). At two nodes that is \mbox{$1.19$} node-hours, or \mbox{$4.8$} GPU-hours, per
 cosmology, and \mbox{$236$} node-hours for the grid as a whole. The spread across the 198
 runs is small --- \mbox{$33.6$} minutes at the fastest, \mbox{$34.6$} median, with a single
 outlier at \mbox{$53.3$} --- so the figure quotes medians rather than means throughout.
 
 The \mbox{$4.5$}-minute pre-lightcone phase is easy to overlook but is not overhead.
 The particle load starts at \mbox{$z = 99$} while the outermost shell sits at
-\mbox{$z = 3.5$}, so the integrator has to cross that entire range before the first shell
-can be written, and it does so without accumulating anything
-(Sec.~\ref{sec:shell_builder_core}). It is the price of starting the simulation early
-enough for the backscaled initial conditions to be valid, and it is charged once per
-lightcone regardless of how many shells are subsequently written.
+\mbox{$z = 3.5$}, so the integrator has to cross that entire range before the first shell can be written, and it does so without accumulating anything
+(Sec.~\ref{sec:shell_builder_core}). It is the price of starting the simulation early enough for the backscaled initial conditions to be valid, and it is charged once per lightcone regardless of how many shells are subsequently written.
 
 \paragraph{The lightcone is not free.} The per-step breakdown in
 Figure~\ref{fig:production_timing}(a) is the more interesting result. The \textsc{Disco-DJ}
@@ -1748,14 +1729,8 @@ loop dominates at high redshift, and the transfer of particle positions to the d
 dominates at low redshift, where few replicas remain.
 
 One caveat is built into the figure. Every segment named above comes from the
-code's own internal timers, and together they account for \mbox{$58\%$} of the wall-clock.
-The remaining \mbox{$14.5$} minutes per cosmology --- the pale band in
-Figure~\ref{fig:production_timing}(b) --- is not attributable to any one timed kernel: it
-is the work that falls between them, chiefly asynchronous dispatch that the timers do not
-capture, host-side bookkeeping between steps, and writing the finished shells to disk. It
-is shown rather than omitted, because a figure that plotted only the timed kernels would
-imply a run half as long as the real one. The production cost quoted above, and used in
-every cost comparison in this thesis, is therefore the full \mbox{$35.7$} minutes.
+code's own internal timers, and together they account for \mbox{$58\%$} of the wall-clock. The remaining \mbox{$14.5$} minutes per cosmology --- the pale band in
+Figure~\ref{fig:production_timing}(b) --- is not attributable to any one timed kernel: it is the work that falls between them, chiefly asynchronous dispatch that the timers do not capture, host-side bookkeeping between steps, and writing the finished shells to disk. Future work should focus on minimizing it. The production cost quoted above, and used in every cost comparison in this thesis, is therefore the full \mbox{$35.7$} minutes.
 
 \begin{figure}[h!]
     \centering
@@ -1781,33 +1756,68 @@ every cost comparison in this thesis, is therefore the full \mbox{$35.7$} minute
 \section{Evaluation Protocol}
 \label{sec:res-protocol}
 
-\paragraph{Held-out cosmologies.} All pipelines share one split convention (\texttt{transfer\_function.split\_val\_cosmos}, \texttt{dataset.split\_by\_cosmo}): of the 198 grid cosmologies with both a \textsc{Disco-DJ} and a \textsc{CosmoGridV1} lightcone available, whole cosmologies are shuffled with a fixed seed and 30 ($15\%$) are withheld from every fit and training run. Figure~\ref{fig:heldout_params} shows where they sit in parameter space; Table~\ref{tab:heldout} lists their parameters. All 30 are used for every diagnostic, including the compute-heavy full-sky and weak-lensing ones, and the same 30 for every pipeline, so all figures of this chapter are directly comparable.
+\paragraph{Held-out cosmologies.} All pipelines share one split convention (\texttt{transfer\_function.split\_val\_cosmos}, \texttt{dataset.split\_by\_cosmo}): of the 198 grid cosmologies with both a \textsc{Disco-DJ} and a \textsc{CosmoGridV1} lightcone available, whole cosmologies are shuffled with a fixed seed and 30 ($15\%$) are withheld from every fit and training run. Figure~\ref{fig:heldout_params} shows where they sit in parameter space and Table~\ref{tab:heldout} lists their parameters. All 30 are used for every diagnostic, including the compute-heavy full-sky and weak-lensing ones, and the same 30 for every pipeline, so all figures of this chapter are directly comparable.
 
-\paragraph{Statistics and resolutions.} Every pipeline is scored with the same shared diagnostics (\texttt{ml/analysis/}): per-shell full-sky angular power spectra pooled into three redshift bins, one-point moments (variance, skewness, excess kurtosis) as a function of shell depth, and weak-lensing convergence maps. The $\kappa$ maps are built with the \textsc{UFalcon} lightcone integration \cite{sgier_fast_2018} (\texttt{ml/analysis/weak\_lensing.py}): all corrected shells within a source bin's redshift range are combined into one convergence map per cosmology at the same $N_{\mathrm{side}}=512$, $\ell \le 1500$ as the shells they integrate -- building $\kappa$ at a finer resolution than its input shells would only upsample, producing spectra above the shells' own band limit that are pixel-window artefacts rather than signal -- using the DES-Y3 \textsc{metacal} source redshift distributions of tomographic bins 1 ($z \lesssim 1.05$) and 4 ($z \lesssim 1.85$) -- the lowest- and highest-redshift bins, which weight the nearby (hardest) and distant (easiest) shells respectively. 
+\paragraph{Statistics and resolutions.} Every pipeline is scored with the same shared diagnostics (\texttt{ml/analysis/}): per-shell full-sky angular power spectra pooled into three redshift bins, one-point moments (variance, skewness, excess kurtosis) as a function of shell depth, and weak-lensing convergence maps. The $\kappa$ maps are built with the \textsc{UFalcon} lightcone integration \cite{sgier_fast_2018} (\texttt{ml/analysis/weak\_lensing.py}): all corrected shells within a source bin's redshift range are combined into one convergence map per cosmology at the same $N_{\mathrm{side}}=512$, $\ell \le 1500$ as the shells they integrate using the DES-Y3 \textsc{metacal} source redshift distributions of tomographic bins 1 ($z \lesssim 1.05$) and 4 ($z \lesssim 1.85$) -- the lowest- and highest-redshift bins, which weight the nearby (hardest) and distant (easiest) shells respectively. 
 
-\paragraph{A common evaluation footing.} All three pipelines are scored on the same maps. The flow and diffusion models work on flat \mbox{$256\times256$} patches cut from shells at \mbox{$N_{\mathrm{side}}=512$}; the transfer function works on those same shells in harmonic space, transformed to \mbox{$\ell_{\max}=1500$}. That is simply the band such a map contains -- a HEALPix map at \mbox{$N_{\mathrm{side}}=512$} carries no information above \mbox{$\ell \approx 1535$} -- so the two representations cover the same scales. All three corrections then switch on at the same place, the fixed comoving scale \mbox{$L = 17\,\mathrm{Mpc}/h$} of Eq.~\eqref{eq:ell_min}, and so act on the same range of every shell, differing only in what they do there.
+\paragraph{A common evaluation footing.} The flow and diffusion models work on flat \mbox{$256\times256$} patches cut from shells at \mbox{$N_{\mathrm{side}}=512$}; the transfer function works on those same shells in harmonic space, transformed to \mbox{$\ell_{\max}=1500$}. That is simply the band such a map contains -- a HEALPix map at \mbox{$N_{\mathrm{side}}=512$} carries no information above \mbox{$\ell \approx 1535$} -- so the two representations cover the same scales. All three corrections then switch on at the same place, the fixed comoving scale \mbox{$L = 17\,\mathrm{Mpc}/h$} of Eq.~\eqref{eq:ell_min}, and so act on the same range of every shell, differing only in what they do there.
 
-\paragraph{Percentile bands.} The shaded bands in the $C_\ell$-ratio figures are \emph{percentile bands across the held-out evaluation set}, not error bars on a mean. For the shell-level grids (e.g.\ Figure~\ref{fig:transfer_cl}), five shells are sampled from each redshift bin for each of the 30 cosmologies, and the ratio \mbox{$C_\ell/C_\ell^{\mathrm{true}}$} is computed per (cosmology, shell) pair, 150 samples per bin. The solid line is their median; the band spans the 16th to 84th percentile, i.e.\ the central 68\% of the actual cosmology-to-cosmology and shell-to-shell scatter. A narrow band therefore means the correction is \emph{uniformly} good across cosmologies and depths, not merely good on average; for the $\kappa$ figures the band is taken across the 30 cosmologies at fixed $\ell$.
+\paragraph{Percentile bands.} The shaded bands in the $C_\ell$-ratio figures are \emph{percentile bands across the held-out evaluation set}, not error bars on a mean. For the shell-level grids (e.g.\ Figure~\ref{fig:transfer_cl}), five shells are sampled from each redshift bin for each of the 30 cosmologies, and the ratio \mbox{$C_\ell/C_\ell^{\mathrm{true}}$} is computed per (cosmology, shell) pair, 150 samples per bin. The solid line is their median; the band spans the 16th to 84th percentile, i.e.\ the central 68\% of the actual cosmology-to-cosmology and shell-to-shell scatter. A narrow band therefore means the correction is \emph{uniformly} good across cosmologies and depths, not merely good on average; for the $\kappa$ figures the band is taken across the 30 cosmologies at fixed $\ell$. Figure~\ref{fig:band_construction} shows the construction.
 
-\begin{table}[h!]
+\begin{figure}[h!]
 \centering
-\small
-\begin{tabular}{@{}lp{3.7cm}p{3.7cm}p{3.7cm}@{}}
-\toprule
- & \textcolor{ctrans}{\textbf{transfer}} & \textcolor{cunet}{\textbf{unet-flow}} & \textcolor{cdiff}{\textbf{diffusion}} \\
-\midrule
-Training data & smoothed $C_\ell$ of 168 cosmologies, $\ell \le 1500$ & \multicolumn{2}{p{7.6cm}}{$10^5$ paired $256^2$ patches at $N_{\mathrm{side}}=512$, drawn from the same 168 training cosmologies (15\% of cosmologies held out)} \\
-Model size & MLP $256$--$256$--$128$ & \multicolumn{2}{p{7.6cm}}{4-level FiLM U-Net, base width 32 (Fig.~\ref{fig:film_unet})} \\
-Epochs & $\le 200$, early stop (patience 10) & 200 (best epoch 109) & 200 (best epoch 165) \\
-Optimiser / LR & Adam, $10^{-4}$, batch 4096 & Adam, $3\times10^{-5}$ $\times$ 16 ranks $= 4.8\times10^{-4}$, cosine-annealed, batch 32/rank & Adam, $3\times10^{-5}$ (unscaled), cosine-annealed, batch 32/rank \\
-Hardware & 1 GH200 & \multicolumn{2}{p{7.6cm}}{16-rank DDP: 4 Alps nodes $\times$ 4 GH200 (\texttt{torchrun}, Appendix~\ref{app:slurm})} \\
-Key settings & smooth window 21; onset $L = 17$ Mpc$/h$, hard step; $L_2$ $\alpha=10^{-4}$ & same per-shell onset $L = 17$ Mpc$/h$; grad clip 1; Eq.~\eqref{eq:flow_loss} & same per-shell onset $L = 17$ Mpc$/h$; $\sigma_d = 1.149$ (measured); $\ln\sigma \sim \mathcal{N}(-1.2, 1.2^2)$; Eq.~\eqref{eq:edm_loss} \\
-Inference & closed form & 8 Euler steps & 32 Heun steps; taper \mbox{$p=32$} \\
-\bottomrule
-\end{tabular}
-\caption{Production training configurations of the three pipelines (from the runs' \texttt{args.json} and \texttt{run\_transfer.sh} / \texttt{run\_flow.sh} / \texttt{run\_diffusion.sh}).}
-\label{tab:training}
-\end{table}
+\begin{tikzpicture}[x=1cm, y=1cm]
+  % ============ (a) the 150 individual ratio curves ============
+  \begin{scope}
+    \draw[flow, color=mutedc] (0,0.55) -- (5.0,0.55) node[right, note] {$\ell$};
+    \draw[flow, color=mutedc] (0,0.55) -- (0,3.45);
+    \draw[mutedc, dotted] (0,2.4) -- (4.7,2.4) node[right, note] {$1$};
+    \foreach \s in {-1,-0.62,-0.34,-0.13,0.13,0.34,0.62,1}{
+      \draw[hairc, thin] plot[domain=0:4.7, samples=30] (\x, {2.4+\s*0.62*(\x/4.7)^2});}
+    \draw[accentc, densely dashed] (3.6,0.75) -- (3.6,3.35);
+    \foreach \s in {-1,-0.62,-0.34,-0.13,0.13,0.34,0.62,1}{
+      \fill[accentc] (3.6,{2.4+\s*0.62*(3.6/4.7)^2}) circle (1.1pt);}
+    \node[note] at (2.35,3.5) {150 ratios: 30 cosmologies $\times$ 5 shells};
+    \node[note] at (2.35,-0.05) {(a) one curve per (cosmology, shell)};
+  \end{scope}
+  \draw[flowacc] (5.5,2.0) -- (6.7,2.0) node[midway, above, note] {at each $\ell$:};
+  \node[note, align=center] at (6.1,1.5) {median,\\ 16th--84th};
+  % ============ (b) median + band ============
+  \begin{scope}[shift={(7.3,0)}]
+    \draw[flow, color=mutedc] (0,0.55) -- (5.0,0.55) node[right, note] {$\ell$};
+    \draw[flow, color=mutedc] (0,0.55) -- (0,3.45);
+    \draw[mutedc, dotted] (0,2.4) -- (4.7,2.4) node[right, note] {$1$};
+    % full range of the 150 samples -- the envelope of panel (a)
+    \fill[ctrans!8] plot[domain=0:4.7, samples=30] (\x, {2.4+0.62*(\x/4.7)^2})
+      -- plot[domain=4.7:0, samples=30] (\x, {2.4-0.62*(\x/4.7)^2}) -- cycle;
+    % central 68 per cent
+    \fill[ctrans!25] plot[domain=0:4.7, samples=30] (\x, {2.4+0.40*(\x/4.7)^2})
+      -- plot[domain=4.7:0, samples=30] (\x, {2.4-0.40*(\x/4.7)^2}) -- cycle;
+    \draw[ctrans, very thick] plot[domain=0:4.7, samples=30] (\x, {2.4-0.06*(\x/4.7)^2});
+    \draw[accentc, densely dashed] (3.6,0.75) -- (3.6,3.35);
+    \draw[{Bar[width=1.1mm]}-{Bar[width=1.1mm]}, accentc, thin]
+      (3.6,{2.4-0.62*(3.6/4.7)^2}) -- (3.6,{2.4+0.62*(3.6/4.7)^2});
+    \draw[{Bar[width=1.9mm]}-{Bar[width=1.9mm]}, accentc, semithick]
+      (3.6,{2.4-0.40*(3.6/4.7)^2}) -- (3.6,{2.4+0.40*(3.6/4.7)^2});
+    % mini legend
+    \fill[ctrans!8]  (0.2,3.65) rectangle (0.6,3.34);
+    \node[note, anchor=west] at (0.55,3.5) {full range};
+    \fill[ctrans!25] (2.0,3.65) rectangle (2.4, 3.34);
+    \node[note, anchor=west] at (2.4,3.5) {central $68\%$};
+    \node[note] at (2.35,-0.05) {(b) median (line) and bands (shaded)};
+  \end{scope}
+\end{tikzpicture}
+\caption{How the percentile bands are built. (a) For every held-out cosmology and every
+sampled shell, the ratio \mbox{$C_\ell/C_\ell^{\mathrm{true}}$} is computed as a function of
+multipole, giving 150 curves per redshift bin. (b) At each \mbox{$\ell$} independently, the
+median of those 150 values is drawn as the solid line, the 16th--84th percentile range as the
+inner shaded band, and the full range of the 150 samples as the outer one --- the latter is
+the envelope of the curves in (a), and is shown here only to place the \mbox{$68\%$} band in
+context; the results figures plot the inner band alone. The band is therefore the spread of
+the evaluation set itself, not an uncertainty on the mean: a narrow band means the correction
+is uniformly good across cosmologies and shell depths, not merely good on average.}
+\label{fig:band_construction}
+\end{figure}
 
 \clearpage
 \section{Transfer-Function Pipeline}
@@ -1986,16 +1996,23 @@ The same picture holds in bin~4 with uniformly smaller gaps (flow \mbox{$0.992/0
 \chapter{Conclusion}
 \label{ch:conclusion}
 
-This thesis set out to answer a practical question at the heart of map-level, simulation-based cosmological inference: can the small-scale accuracy of an expensive reference $N$-body lightcone be restored onto a cheap particle-mesh lightcone, well enough for the statistics such analyses actually consume? The answer, on held-out cosmologies spanning the full \textsc{CosmoGridV1} $w$CDM grid, is yes, with the qualification that which correction suffices depends on which statistic must be right.
+This thesis addressed a practical question: can a fast particle-mesh simulation be corrected retrospectively so that it yields the same results as a computationally expensive N-body simulation, at a fraction of the cost? The idea is to pair \textsc{Disco-DJ}, which runs in minutes, with a learned correction that restores the small-scale structure its mesh cannot resolve. Stage-III-like weak-lensing convergence maps serve as the testbed observable, since they are what map-level analyses actually consume. The answer is yes, with one qualification: which correction suffices depends on which statistic has to be right.
 
-The foundation was infrastructural. By reconstructing each \textsc{CosmoGridV1} cosmology's exact linear input -- transfer function, $\sigma_8$, and radiation density, massive neutrinos included -- and letting \textsc{PkdGrav3} generate one backscaled initial condition that \textsc{Disco-DJ} consumes unmodified (Sec.~\ref{sec:ic_generation}), and by embedding a shell builder into \textsc{Disco-DJ}'s time integration that reproduces \textsc{PkdGrav3}'s moving-lightcone crossing condition on \textsc{CosmoGridV1}'s radial shell grid within constant memory (Sec.~\ref{sec:shell_builder}), the learning problem was reduced to its irreducible core: paired full-sky lightcones whose difference is dominated by the force solver, with a sub-percent initial-condition residual quantified in Sec.~\ref{sec:res-validation}. Every result in Chapter~\ref{ch:results} rests on this controlled setup.
+Reaching that answer took three pieces of infrastructure and three models. The first piece is the initial conditions (Sec.~\ref{sec:ic_generation}). \textsc{CosmoGridV1} was run with \textsc{PkdGrav3}, which carries massive neutrinos as their own linear species; \textsc{Disco-DJ} cannot. The neutrinos are therefore declared massless, and the resulting shifts in the radiation density and in the growth normalisation are absorbed by adjusting the transfer function and the background parameters. A \textsc{Disco-DJ} run started from those initial conditions then matches \textsc{CosmoGridV1} on large scales with an accuracy of less than a percent, across the cosmologies and redshifts used here (Sec.~\ref{sec:res-validation}). The small-scale deficit that remains is expected, and is exactly what the rest of the thesis repairs.
 
-On these pairs, three corrections were built (Sec.~\ref{sec:correction-pipelines}), sharing one measured insight -- \textsc{Disco-DJ}'s small-scale deficit is primarily one of \emph{amplitude}, its phases remaining correlated with the truth deep into the nonlinear regime -- and one shared guarantee, the high-pass residual formulation that pins the already-correct large scales to the fast simulation exactly. The deterministic transfer-function pipeline holds shell and weak-lensing convergence spectra to within half a percent of the reference across the band it acts on, at essentially zero inference cost and with the tightest cosmology-to-cosmology scatter of the three; where an analysis consumes two-point statistics it remains the pragmatic choice, being competitive on convergence variance (\mbox{$0.967$} against the flow's \mbox{$0.973$}) at a small fraction of the cost. What it cannot do -- by construction, not by failure -- is supply the one-point non-Gaussianity of the missing structure. The two patch-based pipelines close exactly that gap: both the flow-matching U-Net and the EDM diffusion model restore skewness and excess kurtosis at shell and convergence level on cosmologies they never saw, the flow most completely -- recovering the convergence excess kurtosis to \mbox{$0.979 \pm 0.037$} of the reference, against \mbox{$0.537$} uncorrected -- and with the tightest cosmology-to-cosmology scatter, the diffusion consistently further short on every moment. Their convergence spectra differ over most of the band, the flow leading by three to five percentage points through the intermediate multipoles, the two converging near \mbox{$0.90$} only at the \mbox{$\ell = 1500$} band limit where both are resolution-bound rather than correction-bound. That a 32-step stochastic sampler, evaluated on thousands of overlapping tiles each drawing its own noise, reassembles into consistent full-sky maps also validates the overlap-tile machinery itself as a general route for applying patch-based generative models to the sphere.
+The second piece is the shell builder (Sec.~\ref{sec:shell_builder}). It accumulates the lightcone inside \textsc{Disco-DJ}'s time integration reproducing \textsc{PkdGrav3}'s moving-lightcone crossing condition on \textsc{CosmoGridV1}'s radial shell grid. Compared against matched \textsc{CosmoGridV1} lightcones it agrees on large scales with no coherent offset, which is what validates the geometry (Sec.~\ref{sec:shell_validation}).
 
-Several limitations bound these conclusions and set the agenda.
-All three pipelines were evaluated at $N_{\mathrm{side}}=512$, with the band capped at $\ell_{\max}=1500$ -- a common footing chosen so that the comparison measures the corrections themselves rather than the resolutions they were given (Sec.~\ref{sec:res-protocol}). Retraining the patch models on $N_{\mathrm{side}}=2048$ tiles, which the patch machinery already supports, is the most direct extension, and is what would turn the present ordering into a statement about the methods at full resolution. The corrected fields are continuous overdensities, not integer count maps, which downstream weak-lensing statistics tolerate but a consumer requiring per-pixel count validity would not. The corrections were validated on matter shells and derived convergence maps at fixed total neutrino mass, without baryonic feedback, which operates on precisely the scales corrected here and would need its own treatment \cite{schneider_matter_2015, fluri_full_2022}. And each cosmology entered with a single realisation, so realisation-to-realisation generalisation at fixed cosmology remains to be quantified.
+The third piece is the production run (Sec.~\ref{sec:res-production}): 198 lightcones, one per grid cosmology and each paired to its \textsc{CosmoGridV1} counterpart, giving 13\,662 shell maps out to \mbox{$z = 3.5$}. One lightcone costs \mbox{$35.7$} minutes on eight GH200 GPUs.
 
-The direction, however, is clear. A \textsc{Disco-DJ} lightcone costs minutes where the reference costs node-hours, and the corrections add almost nothing to that, so corrected fast lightcones can populate the simulation demand of deep-learning analyses of current surveys \cite{thomsen_dark_2026, fluri_full_2022} at a small fraction of the reference suite's cost, reserving full \mbox{$N$}-body runs for validation rather than production. The longer-term prospect is tighter still: \textsc{Disco-DJ} is differentiable end-to-end \cite{list_disco-dj_2026}, and a differentiable corrected forward model, from cosmological parameters through the corrected lightcone to the map-level statistic, would put gradient-based inference within reach of the same pipeline.
+On these pairs three corrections were trained and compared on cosmologies none of them saw (Sec.~\ref{sec:correction-pipelines}). They share one guarantee: each acts only above a per-shell cutoff, so the large scales, which \textsc{Disco-DJ} already gets right, are left untouched.
+
+All three repair the angular power spectrum. At the convergence level the variance ratio rises from \mbox{$0.803$} uncorrected to \mbox{$0.973$} for the flow, \mbox{$0.967$} for the transfer function and \mbox{$0.948$} for the diffusion model. Beyond two-point statistics they separate. A per-multipole rescaling preserves phases and therefore cannot manufacture one-point non-Gaussianity: the transfer function lifts the convergence excess kurtosis only from \mbox{$0.537$} to \mbox{$0.638$}. The two patch-based models do far better, the flow reaching \mbox{$0.979 \pm 0.037$} and the diffusion \mbox{$0.772$}. The flow is the most robust of the three. It leads on every moment in both source bins, with the tightest cosmology-to-cosmology scatter, and it costs a single deterministic ODE integration rather than a 32-step sampler.
+
+Several directions follow. The most direct is resolution. All three pipelines were scored on the same footing, maps at \mbox{$N_{\mathrm{side}} = 512$} and multipoles up to \mbox{$\ell_{\max} = 1500$}, chosen so that the comparison measures the corrections rather than the resolutions they were given. Retraining the patch models at \mbox{$N_{\mathrm{side}} = 2048$}, which the patch machinery already supports, would push that limit towards \mbox{$\ell \sim 6000$} and let fast simulations mimic full-gravity ones over the whole range a Stage-IV analysis uses.
+
+The corrections should also be tested against more of the statistics a map-level analysis consumes. Peak counts and Minkowski functionals are the obvious next ones, since the convergence moments used here probe only part of the non-Gaussian information. On the modelling side, architectures that act natively on the sphere are the natural benchmark: \textsc{DeepSphere} \cite{perraudin_deepsphere_2019, defferrard_deepsphere_2020}, or transformers on the \textsc{HEALPix} grid. Either would remove the patch-and-stitch step altogether and allow training and inference on the full map. Two gaps also remain from this work. Each cosmology entered with a single realisation, so realisation-to-realisation generalisation is still to be quantified; and baryonic feedback, which acts on precisely the scales corrected here, would need its own treatment \cite{schneider_matter_2015, fluri_full_2022}.
+
+The prospect that motivates all of it is inference. A corrected fast lightcone costs minutes rather than node-hours, so the mock suites that deep-learning analyses consume \cite{thomsen_dark_2026, fluri_full_2022} could be produced at a small fraction of the reference cost, with full \mbox{$N$}-body runs reserved for validation. \textsc{Disco-DJ} is differentiable end to end \cite{list_disco-dj_2026}, so a differentiable corrected forward model --- from cosmological parameters through the corrected lightcone to the map-level statistic --- would put gradient-based inference within reach of the same pipeline. Running a full mock cosmological analysis on this setup is the natural next test, and on the present evidence a promising route to fast and robust simulation-based inference.
 
 \printbibliography
 % =========== Appendix ===========
@@ -2065,7 +2082,7 @@ held-out cosmology & $\Omega_m$ & $\sigma_8$ & $w_0$ & $H_0$ & $n_s$ & $\Omega_b
 \begin{figure}[h!]
     \centering
     \includegraphics[width=\textwidth]{plots/results/flow/example_patches.png}
-    \caption{Held-out test patches for the flow pipeline (rows: shells 5--50; columns: \textsc{Disco-DJ}, flow-corrected, \textsc{CosmoGridV1}, per-patch 2D power ratio). The corrected sample restores both the visual texture and the small-scale power that the low maps lack. All three pipelines draw these rows from one shared plan (\texttt{ml/analysis/example\_patches.py}), so Figures~\ref{fig:transfer_patches}, \ref{fig:flow_patches} and~\ref{fig:diff_patches} show the \emph{same} five patches of sky, at the same shells and orientations, and can be compared row by row; each is cut from that pipeline's own full-sky reconstruction rather than from an isolated training tile. The elongated patterns are gone in this version: they were not a property of the models but a data-preparation bug, in which full-sky shells stored in \textsc{ring} order were degraded to $N_{\mathrm{side}}=512$ under a \textsc{nested} assumption, so \texttt{ud\_grade} averaged pixels that are not sky neighbours. Every $N_{\mathrm{side}}=512$ map was regenerated and both \new{patch-based} models retrained on the corrected data.}
+    \caption{Held-out test patches for the flow pipeline (rows: shells 5--50; columns: \textsc{Disco-DJ}, flow-corrected, \textsc{CosmoGridV1}, per-patch 2D power ratio). The corrected sample restores both the visual texture and the small-scale power that the low maps lack. All three pipelines draw these rows from one shared plan (\texttt{ml/analysis/example\_patches.py}), so Figures~\ref{fig:transfer_patches}, \ref{fig:flow_patches} and~\ref{fig:diff_patches} show the \emph{same} five patches of sky, at the same shells and orientations, and can be compared row by row; each is cut from that pipeline's own full-sky reconstruction rather than from an isolated training tile. The elongated patterns are gone in this version: they were not a property of the models but a data-preparation bug, in which full-sky shells stored in \textsc{ring} order were degraded to $N_{\mathrm{side}}=512$ under a \textsc{nested} assumption, so \texttt{ud\_grade} averaged pixels that are not sky neighbours. Every $N_{\mathrm{side}}=512$ map was regenerated and both patch-based models retrained on the corrected data.}
     \label{fig:flow_patches}
 \end{figure}
 \begin{figure}[h!]
