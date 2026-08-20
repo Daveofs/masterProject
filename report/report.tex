@@ -1101,7 +1101,7 @@ The diffusion model is a genuine sampler, and for it the same average is destruc
 \label{fig:tiling}
 \end{figure}
 
-
+\clearpage
 \subsection{Harmonic-Space Transfer-Function Pipeline}
 \label{subsec:pipe-transfer}
 
@@ -1190,6 +1190,7 @@ entirely by how far away that shell is. The phase correlation \mbox{$r(\ell, s)$
 
 
 \paragraph{Negative pixels.} The corrected field inevitably contains negative pixels, and it is worth being precise about why. The truth is a non-negative, integer count map, and on the nearest, sparsest shells the mean count per pixel lies far below unity, so most pixels are exactly zero. The correction, by contrast, is a band-limited real-space fluctuation field: the residual $(T-1)\,a_{\ell m}$ reconstructed by the inverse SHT is a smooth, zero-mean oscillation with both signs. Adding such a field onto a map dominated by empty pixels necessarily drives every pixel where the negative half-wave exceeds the local count below zero. Negativity is a structural consequence of representing a boosted continuous overdensity on top of a nearly empty discrete map, not a numerical defect of the method. These are also the shells on which \mbox{$r$} has collapsed, and the coincidence is not accidental. Where the phases have decorrelated, the field being amplified is \textsc{Disco-DJ}'s own shot noise rather than recovered structure, and band-limited shot noise is a symmetric oscillation about zero. Every cheap pixel-wise repair was measured and rejected: flooring at zero deletes only the negative excursions, which raises the mean and injects spurious power exactly on the small scales the correction just restored, and re-balancing the mean afterwards or correcting the logarithm of the density instead merely redistributes the same bias. The corrected field is therefore deliberately not post-processed: it is treated as a continuous overdensity field (\texttt{--no-clip}) and passed unchanged into every downstream statistic -- angular power spectra, moments, and the weak-lensing convergence maps of Chapter~\ref{ch:results} -- none of which requires per-pixel count validity.
+
 
 \subsection{U-Net Flow-Matching Pipeline}
 \label{subsec:pipe-unet-flow}
@@ -1679,7 +1680,7 @@ A limit of the calibration should be stated. It was carried out on a single cosm
 
 \begin{figure}[h!]
     \centering
-    \includegraphics[width=\textwidth]{plots/ic/onset_scale.png}
+    \includegraphics[width=0.8\textwidth]{plots/ic/onset_scale.png}
     \caption{How the correction onset scale is measured
     (\texttt{vis/plot\_onset\_scale.py}, cosmology \texttt{cosmo\_000176}).
     \textbf{(a)} The smoothed ratio of the two angular power spectra for four shells,
@@ -1700,7 +1701,6 @@ A limit of the calibration should be stated. It was carried out on a single cosm
     \label{fig:onset_scale}
 \end{figure}
 
-\clearpage
 \section{Simulation Production Run}
 \label{sec:res-production}
 
@@ -1764,7 +1764,7 @@ Figure~\ref{fig:production_timing}(b) -- is not attributable to any one timed ke
 
 \begin{figure}[h!]
     \centering
-    \includegraphics[width=0.7\textwidth]{plots/production/production_timing.png}
+    \includegraphics[width=0.6\textwidth]{plots/production/production_timing.png}
     \caption{Cost of the production campaign
     (\texttt{vis/plot\_production\_timing.py}, \textsc{Slurm} job \texttt{2746372}).
     \textbf{(a)} Timed wall-clock per integration step against the redshift of the shell
@@ -1897,8 +1897,8 @@ The convergence maps also carry one-point information, and Figure~\ref{fig:trans
 
 \begin{figure}[h!]
     \centering
-    \includegraphics[width=\textwidth]{plots/results/transfer/kappa_moments_scatter_bin1.png}\\[1mm]
-    \includegraphics[width=\textwidth]{plots/results/transfer/kappa_moments_scatter_bin4.png}
+    \includegraphics[width=0.95\textwidth]{plots/results/transfer/kappa_moments_scatter_bin1.png}\\[1mm]
+    \includegraphics[width=0.95\textwidth]{plots/results/transfer/kappa_moments_scatter_bin4.png}
     \caption{Convergence-map moments per evaluation cosmology for the transfer pipeline (top: source bin 1; bottom: bin 4). The corrected variance tracks the truth; skewness and excess kurtosis close only part of the gap -- consistent with Figure~\ref{fig:transfer_moments}.}
     \label{fig:transfer_kappa_moments}
 \end{figure}
