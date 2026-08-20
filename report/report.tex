@@ -15,33 +15,16 @@
 \usepackage[left=25mm,top=11mm,right=25mm,bottom=20mm]{geometry}
 \usepackage{amsmath}
 % sorting=none numbers the bibliography in ORDER OF FIRST CITATION, so the first
-% reference in the abstract is [1]. Default biblatex sorting is nty (name-title-
-% year), which is what produced the high numbers on the first citations.
 \usepackage[sorting=none]{biblatex}
 % normalem is essential: plain \usepackage{ulem} redefines \emph to UNDERLINE
-% instead of italicise, which silently underlined all 48 \emph{...} in this
-% document. normalem keeps \sout available while restoring normal emphasis.
 \usepackage[normalem]{ulem} % for \sout
 \addbibresource{references.bib}
 \newcommand{\jozef}[1]{\textcolor{orange}{JB: #1}}
-% Responses to Jozef's notes. His \jozef{...} comments are left in place
-% untouched; each \fixed{...} states what was changed in response, so the
-% review trail stays readable side by side.
 \definecolor{fixedc}{HTML}{15795E}
 \newcommand{\fixed}[1]{\textcolor{fixedc}{\textbf{DA:} #1}}
-
-% Newly written prose, highlighted so the rewrite is visible against the version
-% Jozef reviewed. \hl (soul) is used rather than \colorbox because it breaks across
-% lines; soul cannot see inside macros or math, so every command that occurs inside a
-% highlighted run is registered below and inline math is wrapped in \mbox at the point
-% of use. Marking is at SENTENCE granularity: word-level marking produced runs that
-% straddled brace and $...$ boundaries and would not have compiled.
-%
-% If soul chokes on something, comment out the \hl line and uncomment the \textcolor
-% line -- \new then degrades to coloured text and the document still builds.
 \usepackage{soul}
-\definecolor{newc}{HTML}{FFF1C2}     % pale amber page-safe highlight
-\definecolor{newtxtc}{HTML}{8A6100}  % fallback ink, same hue
+\definecolor{newc}{HTML}{FFF1C2}    
+\definecolor{newtxtc}{HTML}{8A6100} 
 \sethlcolor{newc}
 \soulregister{\cite}{7}
 \soulregister{\citeauthor}{7}
@@ -54,24 +37,10 @@
 \soulregister{\textit}{7}
 \soulregister{\texttt}{7}
 \soulregister{\Lambda}{7}
-% Robust, not \newcommand: three of these land inside \caption{}, a moving argument,
-% where a fragile command would break when the caption is written to the .lof file.
-% ONE SWITCH for both markers. \hlmarkstrue = background highlighting via soul;
-% \hlmarksfalse = coloured text, which cannot fail. soul is powerful but brittle: it
-% cannot see inside an unregistered macro, cannot break inside math (hence the \mbox
-% wrapping at every use site), and cannot span a display equation or a list. If the
-% document stops compiling with errors pointing at \hl, flip this to \hlmarksfalse and
-% the marks degrade to colour without any other change.
 \newif\ifhlmarks
 \hlmarkstrue
 \DeclareRobustCommand{\new}[1]{\ifhlmarks\hl{#1}\else\textcolor{newtxtc}{#1}\fi}
 
-% Punctuation-only edits: sentences whose em-dashes were converted to commas or
-% split in two (2026-08-12). Marked in a DIFFERENT colour from \new so the two kinds
-% of change stay distinguishable -- \new is text that was rewritten, \dashfix is text
-% whose wording is unchanged and whose punctuation is not. The group around
-% \sethlcolor is what lets two highlight colours coexist: soul keeps one global
-% colour, so it is set locally and restored on leaving the group.
 \definecolor{dashc}{HTML}{CFE4FF}    % pale blue, distinct from the amber of \new
 \definecolor{dashtxtc}{HTML}{1F4E9C}  % fallback ink for \dashfix
 \DeclareRobustCommand{\dashfix}[1]{\ifhlmarks{\sethlcolor{dashc}\hl{#1}}\else\textcolor{dashtxtc}{#1}\fi}
@@ -102,6 +71,7 @@
   skiparrow/.style={flow, dashed, color=mutedc},
   note/.style={font=\scriptsize, text=mutedc, align=center},
   tinylabel/.style={font=\scriptsize\ttfamily, text=mutedc},
+  cap/.style={font=\small\itshape, text=black},
 }
 
 \begin{document}
@@ -175,7 +145,7 @@ The second ingredient is the corrections themselves (Sec.~\ref{sec:correction-pi
 
 The first is the conservative baseline. Rescaling mode amplitudes so that a cheap simulation reproduces the power spectrum of an expensive one is standard practice: it is how fast solvers are calibrated against full \mbox{$N$}-body runs \cite{feng_fastpm_2016}, how initial-condition transients are removed \cite{garrison_improving_2016}, and how a single simulation is rescaled to other cosmologies \cite{angulo_one_2009}. Its appeal here is directness. The quantity being learned is the transfer function between the high- and low-fidelity runs, one correction factor per multipole and shell. It is fitted against the angular power spectrum itself, which is the statistic the corrected lightcones are ultimately scored on. The method therefore optimises exactly what is measured, with no proxy objective in between. A small network predicts the transfer function from the cosmological parameters, which is what allows it to be applied to cosmologies never run at high fidelity.
 
-Its limitation is equally clear, and is the reason for the other two. A per-mode correction factor multiplies amplitudes and leaves phases untouched. It can therefore restore how much power sits at each scale, but not the spatial arrangement that carries it. That is exactly right as long as the fast solver has placed the structure correctly, and Sec.~\ref{sec:correction-pipelines} shows that it usually has. Where the two simulations have genuinely decorrelated, rescaling amplifies the fast solver's own noise instead of recovering the missing structure. No amount of tuning changes that: the one-point statistics a map-level analysis consumes are precisely the ones a phase-preserving operation cannot manufacture.
+Its limitation is equally clear, and is the reason for the other two. A per-mode correction factor multiplies amplitudes and leaves phases untouched. It can therefore restore how much power sits at each scale, but not the spatial arrangement that carries it. That is exactly right as long as the fast solver has placed the structure correctly, and Sec.~\ref{sec:correction-pipelines} shows that it usually has. Where the two simulations have genuinely decorrelated, rescaling amplifies the fast solver's own noise instead of recovering the missing structure. No amount of tuning changes that: the higher-order moments a map-level analysis consumes are precisely the ones a phase-preserving operation cannot manufacture.
 
 A learned map between the two fidelities is the natural answer, but only if it is trained on the right objective. A regression trained on paired maps with a per-pixel squared error converges to the conditional mean \cite{hastie_elements_2009}. That mean is smooth by construction, and it under-disperses exactly the small-scale variance the correction exists to restore \cite{ledig_photo-realistic_2017}. What is needed instead is a model trained to reproduce the \emph{distribution} of the high-fidelity field, so that its small-scale structure has the right statistics rather than the right average. That is what a \emph{distribution-matching} objective delivers, and both learned corrections built in this thesis rest on one. Such objectives come from generative modelling, which already has a short but encouraging history in cosmology. Deep networks have been trained to super-resolve cosmological fields \cite{ramanah_super-resolution_2020, li_ai-assisted_2020, ni_ai-assisted_2021} and to emulate \mbox{$N$}-body displacements directly \cite{he_learning_2018, jamieson_field_2022}; diffusion models have more recently joined them \cite{mudur_can_2022, rouhiainen_super-resolution_2023}, and have been extended to galaxy surveys at the field level \cite{cuesta-lazaro_point_2024}.
 
@@ -254,11 +224,9 @@ Figure~\ref{fig:neutrinos_effect} shows the net effect on the linear power spect
 
 Both features matter for this thesis for a practical reason. \textsc{CosmoGridV1} was run with massive neutrinos and \textsc{Disco-DJ} cannot follow them, so \textsc{CosmoGridV1}'s own initial conditions cannot simply be reused here, and the offsets of Figure~\ref{fig:neutrinos_effect} are exactly what the shared initial conditions of Sec.~\ref{sec:ic_generation} have to be built to absorb before the two simulations can be compared at all.
 
-Obtaining \mbox{$P(k)$} at this precision requires solving the coupled linear Einstein--Boltzmann equations for the perturbed Friedmann--Lema\^itre--Robertson--Walker metric together with the phase-space distributions of all matter and radiation species. This is the system solved by the \textsc{class} code used in Sec.~\ref{sec:ic_generation}, and by the differentiable Einstein--Boltzmann module of the \textsc{Disco-DJ} framework \cite{hahn_disco-dj_2024}.
-
 \subsection{Cosmological Simulations}
 
-Cosmological $N$-body simulations have historically tracked, and in some respects driven, the development of high-performance computing: the number of particles that can be evolved in a fixed wall-clock time has grown by many orders of magnitude, both through raw hardware improvements and through continual gains in the efficiency of the gravity solvers themselves \cite{potter_pkdgrav3_2016}. The scientific payoff lies in modelling the LSS of the Universe to the non-linear precision that the cosmological surveys require. LSS observables are particularly sensitive to the present-day matter density $\Omega_m$ and the clustering amplitude $\sigma_8$; because a lightcone simulation can be sliced into tomographic redshift bins, it further tracks the growth of structure over cosmic time, which is what makes such simulations sensitive to the dark-energy equation-of-state parameter $w_0$ and hence to the physical origin of cosmic acceleration \cite{kacprzak_cosmogridv1_2023}.
+Cosmological $N$-body simulations have historically tracked, and in some respects driven, the development of high-performance computing: the number of particles that can be evolved in a fixed wall-clock time has grown by many orders of magnitude, both through raw hardware improvements and through continual gains in the efficiency of the gravity solvers themselves \cite{potter_pkdgrav3_2016}. The scientific payoff lies in modelling the LSS of the Universe to the non-linear precision that the cosmological surveys require. While LSS observables are primarily sensitive to the present-day matter density $\Omega_m$ and the clustering amplitude $\sigma_8$, slicing a lightcone into tomographic redshift bins additionally tracks the growth of structure over cosmic time -- making such simulations sensitive to the dark-energy equation-of-state parameter $w_0$, and hence to the physical origin of cosmic acceleration \cite{kacprzak_cosmogridv1_2023}.
 
 The method itself is simple to state. The continuous matter distribution is discretised into a finite set of massive \emph{superparticles}, each standing for a large parcel of the underlying phase-space distribution, and those particles are advanced under their mutual gravity \cite{dehnen_n-body_2011}. Richer physics can be layered on -- gas dynamics, radiative cooling, star formation, feedback -- and the hydrodynamical suites that result are what galaxy-formation studies rest on \cite{vogelsberger_cosmological_2019}, at rapidly increasing cost. For the weak-lensing and clustering statistics considered here, a gravity-only treatment is an adequate approximation, and gravity-only (\mbox{$N$}-body) simulation is the central tool of this work.
 
@@ -268,12 +236,6 @@ Species other than cold dark matter and baryons complicate the picture: photons,
 
 This thesis works between the two ends of that design space, and both solvers are described in turn below: the particle-mesh \textsc{Disco-DJ} (Sec.~\ref{sec:discodj}), fast enough to generate the large volume of training data the approach requires, and the tree-based \textsc{PkdGrav3} (Sec.~\ref{sec:pkdgrav}), which anchors the accurate \textsc{CosmoGridV1} reference simulations. 
 
-\subsubsection{Lightcones and Snapshots}
-\label{sec:lightcones}
-
-An $N$-body simulation naturally outputs \emph{snapshots}: the full particle phase-space (positions and velocities) within a periodic box of fixed comoving side length, at a fixed time. Reproducing how we actually observe the Universe, however, requires a \emph{lightcone}: an observer at a fixed spacetime point receives light emitted from progressively more distant (and hence earlier) regions as one looks to higher redshift, so a simulated lightcone must record particles at the redshift-dependent comoving distance from which they are being observed, not at a single global time. Because the lightcone is organised by radius in this way, it is naturally stored as a set of \emph{shells}: concentric radial slices centred on the observer, each spanning a narrow range of comoving distance and therefore of redshift, and each recorded as a full-sky map of the particles that crossed the lightcone within it \cite{kacprzak_cosmogridv1_2023}.
-
-Because the depth of the desired lightcone (out to some $z_{\max}$) is typically larger than a single simulation box, the box is periodically replicated around a centrally placed observer: replication exploits the fact that a simulation with periodic boundary conditions can, in principle, represent an arbitrarily large volume, at the cost of the same structures reappearing at multiple replica images along a given line of sight \cite{kacprzak_cosmogridv1_2023}. The trade-off between box size, structure repetition, and the resulting bias or excess variance in projected lightcone statistics is discussed in more detail by \citeauthor{kacprzak_cosmogridv1_2023} \cite{kacprzak_cosmogridv1_2023}, who additionally introduce a shell-permutation scheme that mitigates the repeated-structure problem by drawing different radial shells of a single lightcone from independent simulations of the same cosmology. The shell builder developed in this thesis (Sec.~\ref{sec:shell_builder}) implements the same replication idea directly inside the time integration, rather than as a post-processing step.
 
 \subsubsection{\textsc{Disco-DJ}}
 \label{sec:discodj}
@@ -291,34 +253,116 @@ What sets the PM scheme apart from the tree/FMM solver of Sec.~\ref{sec:pkdgrav}
 \subsubsection{PkdGrav3}
 \label{sec:pkdgrav}
 
-The gravity solver \textsc{PkdGrav3} takes the opposite approach: rather than a fixed mesh, it computes the gravitational force with a binary-tree FMM. A Barnes--Hut tree expands at one end only: a distant cell is replaced by a multipole approximation, and the field that approximation produces is then evaluated separately at every particle receiving it \cite{barnes_hierarchical_1986}. FMM expands at both ends. It describes how the distant cell's field varies \emph{across} the receiving cell as a whole, so a single cell-to-cell interaction serves every particle inside the receiver instead of one particle at a time. Removing that per-particle bookkeeping is what brings a full force evaluation from \mbox{$\mathcal{O}(N\log N)$} down to \mbox{$\mathcal{O}(N)$} \cite{potter_pkdgrav3_2016}.
+The gravity solver \textsc{PkdGrav3} takes the opposite approach: rather than a fixed mesh, it computes the gravitational force with a binary-tree FMM. A Barnes--Hut tree expands at one end only: a distant cell is replaced by a multipole approximation, and the field that approximation produces is then evaluated separately at every particle receiving it \cite{barnes_hierarchical_1986}. FMM expands at both ends. It describes how the distant cell's field varies \emph{across} the receiving cell as a whole, so a single cell-to-cell interaction serves every particle inside the receiver instead of one particle at a time. A simplified comparison is given in Fig. \ref{fig:bh-vs-fmm}. Removing that per-particle bookkeeping is what brings a full force evaluation from \mbox{$\mathcal{O}(N\log N)$} down to \mbox{$\mathcal{O}(N)$} \cite{potter_pkdgrav3_2016}.
+
+
+\begin{figure}[htbp]
+  \centering
+  \begin{tikzpicture}[
+    ptc/.style   = {circle, fill=inkc!70, inner sep=0pt, minimum size=2.4pt},
+    expc/.style  = {circle, fill=accentc, inner sep=0pt, minimum size=5pt},
+    halo/.style  = {draw=accentc!45, line width=0.3pt},
+    ray/.style   = {flowacc, -{Latex[length=1.6mm]}, line width=0.35pt,
+                    shorten >=2pt, shorten <=11pt},
+    trunk/.style = {flowacc, -{Latex[length=2.4mm]}, line width=1.1pt,
+                    shorten >=11pt, shorten <=11pt},
+    stub/.style  = {flowacc, draw=accentc!70, -{Latex[length=1.2mm]},
+                    line width=0.3pt, shorten >=1.5pt},
+    p2m/.style   = {flowacc, draw=accentc!55, -{Latex[length=1.2mm]},
+                    line width=0.3pt, shorten >=11pt, shorten <=1.5pt},
+  ]
+
+  %% ---------- (a) Barnes--Hut ----------
+  \begin{scope}
+    \draw[databox] (0,0) rectangle (2.2,2.2);
+    \foreach \i/\x/\y in {1/0.45/0.5, 2/1.6/0.4, 3/0.7/1.6, 4/1.7/1.5, 5/0.4/1.05}
+      \node[ptc] (sa\i) at (\x,\y) {};
+    \node[expc] (Ma) at (1.05,1.0) {};
+    \foreach \r in {0.16,0.27,0.38} \draw[halo] (1.05,1.0) circle (\r);
+    \foreach \i in {1,...,5} \draw[p2m] (sa\i) -- (Ma);
+
+    \draw[box, dashed] (6.0,0) rectangle (8.4,2.2);
+    \foreach \i/\x/\y in {1/6.35/0.45, 2/8.0/0.4, 3/6.5/1.75, 4/7.9/1.7, 5/7.55/0.55}
+      \node[ptc] (a\i) at (\x,\y) {};
+
+    \foreach \i in {1,...,5} \draw[ray] (Ma) -- (a\i);
+
+    \node[note, anchor=south, text=accentc] at (1.1,2.3) {expansion here: multipole $M$};
+    \node[note, anchor=south, text=mutedc!55] at (7.2,2.3) {no expansion here};
+    \node[note, anchor=north] at (1.1,-0.12) {distant cell};
+    \node[note, anchor=north] at (7.2,-0.12) {receiving cell};
+    \node[note, anchor=north] at (4.2,-0.62)
+      {(a) Barnes--Hut: one evaluation per receiving particle};
+  \end{scope}
+
+  %% ---------- (b) FMM ----------
+  \begin{scope}[yshift=-4.3cm]
+    \draw[databox] (0,0) rectangle (2.2,2.2);
+    \foreach \i/\x/\y in {1/0.45/0.5, 2/1.6/0.4, 3/0.7/1.6, 4/1.7/1.5, 5/0.4/1.05}
+      \node[ptc] (sb\i) at (\x,\y) {};
+    \node[expc] (Mb) at (1.05,1.0) {};
+    \foreach \r in {0.16,0.27,0.38} \draw[halo] (1.05,1.0) circle (\r);
+    \foreach \i in {1,...,5} \draw[p2m] (sb\i) -- (Mb);
+
+    \draw[box, dashed] (6.0,0) rectangle (8.4,2.2);
+    \foreach \i/\x/\y in {1/6.35/0.45, 2/8.0/0.4, 3/6.5/1.75, 4/7.9/1.7, 5/7.55/0.55}
+      \node[ptc] (b\i) at (\x,\y) {};
+
+    \node[expc, minimum size=6.5pt] (L) at (7.2,1.1) {};
+    \foreach \r in {0.16,0.27,0.38} \draw[halo] (7.2,1.1) circle (\r);
+    \draw[trunk] (Mb) -- node[note, above, text=accentc] {$M \rightarrow L$} (L);
+    \foreach \i in {1,...,5} \draw[stub] (L) -- (b\i);
+
+    \node[note, anchor=south, text=accentc] at (1.1,2.3) {expansion here: multipole $M$};
+    \node[note, anchor=south, text=accentc] at (7.2,2.3) {\emph{and} here: local expansion $L$};
+    \node[note, anchor=north] at (1.1,-0.12) {distant cell};
+    \node[note, anchor=north] at (7.2,-0.12) {receiving cell};
+    \node[note, anchor=north] at (4.2,-0.62)
+      {(b) FMM: one translation per receiving cell};
+  \end{scope}
+
+  \end{tikzpicture}
+  \caption[Barnes--Hut versus FMM expansion]{%
+    Expansion at one end versus at both. In (a) the distant cell is compressed
+    into a multipole about its centre of mass (filled dot), but that expansion
+    remains a function of position and must be evaluated separately at every
+    particle in the receiver. In (b) the same multipole is first translated into
+    a local expansion about the receiver's centre (larger dot), which describes
+    how the distant field varies across the receiving cell; every particle
+    inside then reads off that one expansion. The number of expensive
+    interactions is set by the number of cells rather than by cells times
+    particles.}
+  \label{fig:bh-vs-fmm}
+\end{figure}
 
 This accuracy is not free: particles in different regions of a cosmological box span many orders of magnitude in local density, and hence in dynamical time, so a single global time step would be highly wasteful. \textsc{PkdGrav3} instead assigns each particle to one of several time-step ``rungs'', advancing only the particles active on a given rung at each sub-step, and additionally builds a second, smaller tree restricted to the small subset of particles on the shortest (``very active'') rungs so that this frequently-rebuilt tree stays cheap. The combination is summarised by the kick-drift-kick ``umbrella'' diagram over one base time step shown in Figure~\ref{fig:pkd_rungs}; it keeps the tree-construction cost from dominating the runtime even though the shortest rungs may be walked hundreds of times per base step \cite{potter_pkdgrav3_2016}.
 
 \begin{figure}[h!]
 \centering
-\begin{tikzpicture}[x=1cm, y=1cm]
+\begin{tikzpicture}[x=0.85cm, y=1cm]
   % ---- time axis ----
   \draw[-{Stealth[length=2.4mm]}, semithick, inkc] (0,0) -- (12.9,0);
   \node[note] at (6.3,-0.4) {time};
   % ---- rung 0: one base step ----
   \draw[inkc, semithick] (0.3,0) arc (180:0:6 and 3);
-  % ---- rung 1: two arches, half the step (half width, half height of rung 0) ----
-  \draw[inkc, semithick] (0.3,0) arc (180:0:3 and 1.5);
-  \draw[inkc, semithick] (6.3,0) arc (180:0:3 and 1.5);
+  % ---- rung 1: two arches, half the step ----
+  \draw[inkc, semithick] (0.3,0) arc (180:0:3 and 1.92);
+  \draw[inkc, semithick] (6.3,0) arc (180:0:3 and 1.92);
   \draw[flow, color=inkc] (6.3,4.0) -- (6.3,3.3) node[pos=0, above, font=\small] {Kick};
   % ---- rungs 2+3 ("very active", frequently rebuilt small tree) ----
   \foreach \s in {0.3, 3.3, 6.3, 9.3}{
-    \draw[red!75!black, semithick] (\s,0) arc (180:0:1.5 and 0.75);}
+    \draw[red!75!black, semithick] (\s,0) arc (180:0:1.5 and 1.23);}
   \foreach \s in {0.3, 1.8, 3.3, 4.8, 6.3, 7.8, 9.3, 10.8}{
-    \draw[red!75!black, thin] (\s,0) arc (180:0:0.75 and 0.375);}
-  \node[note, rotate=90, text=red!75!black] at (-0.45,0.55) {very active};
+    \draw[red!75!black, thin] (\s,0) arc (180:0:0.75 and 0.79);}
+  \node[note, rotate=90, text=red!75!black] at (-0.6,0.75) {very active};
   % ---- inactive-tree arrows: the big tree is reused across the small sub-steps ----
+  % aimed at the apexes of three rung-3 arches (x = 5.55, 7.05, 8.55) rather than at
+  % their start points, so each head sits on the sub-step it refers to
   \foreach \c in {6.3}{
-    \draw[flow, color=ctrans] (\c,1.8) -- (\c-1.5,0.85);
-    \draw[flow, color=ctrans] (\c,1.8) -- (\c,0.85);
-    \draw[flow, color=ctrans] (\c,1.8) -- (\c+1.5,0.85);}
-  \node[font=\small, text=ctrans] at (6.3,2.05) {inactive tree};
+    \draw[flow, color=ctrans] (\c,2.2) -- (4.9,1.2);
+    \draw[flow, color=ctrans] (\c,2.2) -- (6.3,1.2);
+    \draw[flow, color=ctrans] (\c,2.2) -- (7.7,1.2);}
+  \node[font=\small, text=ctrans] at (6.3,2.6) {inactive tree};
 \end{tikzpicture}
 \caption{Kick--drift--kick ``umbrella'' diagram of \textsc{PkdGrav3}'s hierarchical multi-stepping over one base time step (schematic redraw after \cite{potter_pkdgrav3_2016}). Each lower rung halves the step size, and only the particles active on that rung are advanced at its sub-steps (red arches). The tree built for the slow, inactive particles is reused across many of these short sub-steps (blue arrows); only the small ``very active'' subset gets its own frequently-rebuilt tree, which keeps tree construction from dominating the runtime.}
 \label{fig:pkd_rungs}
@@ -333,6 +377,15 @@ It is precisely this combination of a per-particle tree, per-particle rung state
 
 \textsc{CosmoGridV1} is a large, publicly released suite of lightcone $N$-body simulations built specifically for map-level (rather than two-point-function-only) cosmological inference from large-scale-structure probes such as weak lensing and galaxy clustering, targeting Stage-III survey requirements such as those of DES-Y3 and KiDS-1000 \cite{kacprzak_cosmogridv1_2023, thomsen_dark_2026}. Its coverage of parameter space is a Sobol sequence of 2500 points in six flat-\mbox{$w$}CDM dimensions -- \mbox{$\Omega_m$}, \mbox{$\sigma_8$}, \mbox{$w_0$}, \mbox{$H_0$}, \mbox{$n_s$} and \mbox{$\Omega_b$}, with the total neutrino mass held fixed -- and each of those points carries 7 independent realisations. Two further sets sit beside the grid. One is 200 realisations at a single fiducial cosmology, paired so that parameter derivatives can be taken; the other is a smaller, higher-resolution benchmark set whose function is to confirm that the production runs' box size, particle count and shell thickness were chosen finely enough to be trusted \cite{kacprzak_cosmogridv1_2023}. Every simulation is run with \textsc{PkdGrav3} in a periodic box of $900\,\mathrm{Mpc}/h$ with $832^3$ particles, and stores its lightcone as HEALPix particle-count maps at $N_{\rm side}=2048$ out to $z=3.5$, together with friends-of-friends halo catalogues at each output step \cite{kacprzak_cosmogridv1_2023}. These raw particle-count shells are the basis from which observable maps of weak-lensing convergence, galaxy clustering, and intrinsic alignment are subsequently constructed, and the same dataset has previously been used, together with a shell-based baryon correction model, for a deep-learning cosmological parameter analysis of the KiDS-1000 weak-lensing survey \cite{fluri_full_2022}, and for a simulation-based inference analysis of DES-Y3 \cite{thomsen_dark_2026}. It is this suite that the pipeline of Sec.~\ref{sec:pipeline} takes as its accuracy target.
 
+
+\subsubsection{Lightcones and Snapshots}
+\label{sec:lightcones}
+
+An $N$-body simulation naturally outputs \emph{snapshots}: the full particle phase-space (positions and velocities) within a periodic box of fixed comoving side length, at a fixed time. Reproducing how we actually observe the Universe, however, requires a \emph{lightcone}: an observer at a fixed spacetime point receives light emitted from progressively more distant (and hence earlier) regions as one looks to higher redshift, so a simulated lightcone must record particles at the redshift-dependent comoving distance from which they are being observed, not at a single global time. Because the lightcone is organised by radius in this way, it is naturally stored as a set of \emph{shells}: concentric radial slices centred on the observer, each spanning a narrow range of comoving distance and therefore of redshift, and each recorded as a full-sky map of the particles that crossed the lightcone within it \cite{kacprzak_cosmogridv1_2023}.
+
+Because the depth of the desired lightcone (out to some $z_{\max}$) is typically larger than a single simulation box, the box is periodically replicated around a centrally placed observer: replication exploits the fact that a simulation with periodic boundary conditions can, in principle, represent an arbitrarily large volume, at the cost of the same structures reappearing at multiple replica images along a given line of sight \cite{kacprzak_cosmogridv1_2023}. The trade-off between box size, structure repetition, and the resulting bias or excess variance in projected lightcone statistics is discussed in more detail by \citeauthor{kacprzak_cosmogridv1_2023} \cite{kacprzak_cosmogridv1_2023}, who additionally introduce a shell-permutation scheme that mitigates the repeated-structure problem by drawing different radial shells of a single lightcone from independent simulations of the same cosmology. The shell builder developed in this thesis (Sec.~\ref{sec:shell_builder}) implements the same replication idea directly inside the time integration, rather than as a post-processing step.
+
+\clearpage
 \section{Machine-Learning Background}
 \label{sec:sr-methods}
 
@@ -341,9 +394,11 @@ The resolution deficit between \textsc{Disco-DJ}'s particle-mesh force solve and
 \subsection{The Memory Problem on the Sphere}
 \label{subsec:sr-problem}
 
-Cosmological and astrophysical observables are frequently recorded as spherical sky maps: the Cosmic Microwave Background, neutral-hydrogen intensity maps, galaxy clustering, and gravitational lensing have all been analysed in this form. The conventional route is to compress such a map into a summary statistic -- a power spectrum, a higher-order correlation function \cite{gatti_dark_2024} -- and to analyse that instead of the map. Convolutional neural networks (CNNs) offer a different bargain, and it is the one this thesis ultimately depends on: rather than fixing the statistic in advance and hoping it is sufficient, one lets the network discover whatever compression of the map carries the most information about the parameters \cite{jeffrey_dark_2024}, learning it from simulations that already contain the noise it will have to tolerate \cite{fluri_full_2022, perraudin_deepsphere_2019}.
+Cosmological and astrophysical observables are frequently recorded as spherical sky maps: the Cosmic Microwave Background, neutral-hydrogen intensity maps, galaxy clustering, and gravitational lensing have all been analysed in this form. The conventional route is to compress such a map into a summary statistic -- a power spectrum, a higher-order correlation function \cite{gatti_dark_2024} -- and to analyse that instead of the map. Convolutional neural networks (CNNs) offer a different bargain, and it is the one that
+motivates working at the map level at all: rather than fixing the statistic in advance and hoping it is sufficient, one lets the network discover whatever compression of the map carries the most information about the parameters \cite{jeffrey_dark_2024}, learning it from simulations that already contain the noise it will have to tolerate \cite{fluri_full_2022, perraudin_deepsphere_2019}.
 
-Applying a CNN directly on the sphere, however, is not a straightforward extension of the flat-image case, and raises two distinct challenges. First, a square pixel grid has discrete translation symmetries that make convolution, and the shift of a filter by one pixel, well defined; no grid on the sphere shares a perfectly symmetric structure of this kind, so moving a spherical filter requires some form of interpolation. Second, cost. Equivariance under rotation is the property one would want such a network to have, but the rotation group \mbox{$SO(3)$} is three-dimensional, and a correlation computed over it therefore carries three angular integrals rather than the two of a flat convolution.
+
+Applying a CNN directly on the sphere, however, is not a straightforward extension of the flat-image case, and raises two distinct challenges. First, a square pixel grid has discrete translation symmetries that make convolution, and the shift of a filter by one pixel, well defined; no grid on the sphere shares a perfectly symmetric structure of this kind, so moving a spherical filter requires some form of interpolation \cite{cohen_spherical_2018}. Second, cost. Equivariance under rotation is the property one would want such a network to have, but the rotation group \mbox{$SO(3)$} is three-dimensional, and a correlation computed over it therefore carries three angular integrals rather than the two of a flat convolution \cite{cohen_spherical_2018}.
 
 Two classical tools mitigate the cost of working at full spherical resolution. The first is a change of basis: expanding a field in spherical harmonics rather than pixels, made fast in practice by the spherical-harmonic transform (SHT) of the HEALPix pixelisation \cite{gorski_healpix_2005}.
 
@@ -365,7 +420,7 @@ The second tool is architectural: rather than making the transform cheaper, avoi
 \subsubsection{U-Net}
 \label{sssec:unet-arch}
 
-The U-Net was designed for segmenting biomedical images, a setting in which labelled examples are scarce enough that the architecture has to be economical with them \cite{ronneberger_u-net_2015}. Its shape gives it both -- its name and its behaviour (Figure~\ref{fig:unet_generic}). The network first descends a contracting path (encoder), trading spatial precision for an ever wider view of the image, and then climbs back out along a mirrored expanding path (decoder) that restores the resolution surrendered on the way down. The two halves answer different questions -- what is here, and exactly where is it -- and the architecture is built so that neither answer has to be sacrificed for the other.
+The U-Net was designed for segmenting biomedical images, a setting in which labelled examples are scarce enough that the architecture has to be economical with them \cite{ronneberger_u-net_2015}. Its shape gives it both -- its name and its behaviour (Figure~\ref{fig:unet_generic}). The network first descends a contracting path (encoder), trading spatial precision for an ever wider view of the image, and then climbs back out along a mirrored expanding path (decoder) that restores the resolution surrendered on the way down. The two halves answer different questions -- what is here, and exactly where is it -- and the architecture is built so that neither answer has to be sacrificed for the other \cite{ronneberger_u-net_2015}.
 
 In the encoder, each pooling step halves the grid and doubles the number of channels, and the effect is the one you get by stepping back from a picture: the deeper a unit sits, the wider the region of the input it draws on, and the better it can say \emph{what} is in that region -- but the coarser the grid it sits on, so the less precisely it can say \emph{where}. Depth buys context at the cost of location. The decoder undoes the resolution loss, doubling the grid at each step, and at every level it is handed the encoder's feature map of matching size to place alongside its own. This is the \emph{skip connection}, and it is what makes the architecture work: the upsampled path knows what is present but has lost track of exactly where, while the encoder map at that same resolution still knows. Combining the two gives the decoder both, and the positional detail never has to pass through the coarse bottleneck at all \cite{ronneberger_u-net_2015}.
 
@@ -410,7 +465,6 @@ In the encoder, each pooling step halves the grid and doubles the number of chan
 \caption{Generic U-Net topology \cite{ronneberger_u-net_2015}: a contracting path (left) halves the resolution and doubles the channel count $C$ at every level, a bottleneck (centre) holds the coarsest, most contextual representation, and an expanding path (right) mirrors the contraction. Skip connections (dashed) concatenate each encoder level's feature map into the decoder level of equal resolution, so fine spatial detail bypasses the bottleneck. The concrete instantiation used by the correction pipelines ($C=32$, four levels, FiLM conditioning) is described in Sec.~\ref{subsec:pipe-unet-flow}.}
 \label{fig:unet_generic}
 \end{figure}
-
 
 \subsection{Distribution-Matching Objectives}
 \label{subsec:generative-paradigms}
@@ -463,12 +517,14 @@ Two properties of this construction are used directly in Sec.~\ref{subsec:pipe-u
 \label{fig:flow_interp}
 \end{figure}
 
+\clearpage
 \subsubsection{Diffusion}
 \label{sssec:diffusion-theory}
 
 Diffusion models \cite{ho_denoising_2020, song_score-based_2021} approach generation from the opposite end: an image is progressively destroyed by noise, and the network is trained to undo that destruction one step at a time. The construction works as readily with conditioning as without it, and on image quality it has drawn level with generative adversarial networks (GANs) and in places moved past them \cite{karras_elucidating_2022}. Denoting the data distribution $p_{\mathrm{data}}(x)$ with standard deviation $\sigma_{\mathrm{data}}$, one considers the family of mollified distributions $p(x;\sigma)$ obtained by adding i.i.d.\ Gaussian noise of standard deviation $\sigma$ to the data; for $\sigma_{\max}\gg\sigma_{\mathrm{data}}$, $p(x;\sigma_{\max})$ is practically indistinguishable from pure Gaussian noise. A diffusion model samples a noise image $x_0\sim\mathcal{N}(0,\sigma_{\max}^2 I)$ and sequentially denoises it through decreasing noise levels $\sigma_{\max}=\sigma_0>\sigma_1>\dots>\sigma_N=0$, so that the endpoint is distributed according to the data \cite{karras_elucidating_2022}. The process can equivalently be described by a probability-flow ODE that continuously raises or lowers the noise level as time runs forward or backward; \cite{karras_elucidating_2022} disentangle the design choices this leaves open -- noise schedule, network preconditioning, loss weighting, and ODE solver -- into the modular ``EDM'' (Elucidated Diffusion Model)formulation whose concrete instantiation in this thesis is given in Sec.~\ref{subsec:pipe-diffusion} \cite{karras_elucidating_2022}. Compared to the flow above, which starts from the low-fidelity map rather than from noise and therefore travels a short, nearly straight path, a diffusion sampler always starts from pure noise. Its trajectory is genuinely curved and needs materially more solver steps, and its output changes with the noise draw. That is the price, and the point, of a genuinely generative process: it is the one model in this thesis that can supply small-scale structure it did not receive from the input.
 
-Figure~\ref{fig:generative_objectives} is a synthetic illustration rather than a measurement: one low-fidelity input is constructedto be consistent with \emph{two} equally plausible small-scale outcomes, drawn as the two humps of the target distribution \mbox{$p(x_1 \mid x_0)$}. That is the essential feature of the real correction problem reduced to one dimension.
+\vspace{0.5cm}
+Figure~\ref{fig:generative_objectives} is a synthetic illustration rather than a measurement: one low-fidelity input is constructed to be consistent with \emph{two} equally plausible small-scale outcomes, drawn as the two humps of the target distribution \mbox{$p(x_1 \mid x_0)$}. That is the essential feature of the real correction problem reduced to one dimension.
 
 \paragraph{(a) What squared error returns.} The pale histogram is the true target
 distribution, sampled: two well-separated modes, one near \mbox{$-2$} and one near
@@ -584,10 +640,10 @@ The aim of this work is therefore to keep \textsc{Disco-DJ}'s speed while recove
   f\!\left(\mathrm{Map}_{\textsc{disco}}\right) \;\approx\; \mathrm{Map}_{\textsc{CosmoGridV1}},
   \label{eq:correction_goal}
 \end{equation}
-where both maps are generated from the same cosmology and the same realisation of the initial density field, so that \mbox{$f$} has only to model the resolution-dependent difference between the two solvers, not any change of phases. The match is close but not exact: the reference is \textsc{CosmoGridV1}'s own lightcone, evolved from \textsc{concept}'s forward linear input, whereas \textsc{Disco-DJ} starts from the backscaled load rebuilt here, and Sec.~\ref{sec:shell_validation} measures what that leaves behind -- a sub-percent, redshift-dependent offset in the large-scale amplitude, an order of magnitude below the deficit \mbox{$f$} exists to repair. This requirement -- \emph{matched initial conditions, same output format} -- dictates the entire architecture of the pipeline (Figure~\ref{fig:pipeline_overview}), which consists of three stages:
+where both maps are generated from the same cosmology and the same realisation of the initial density field, so that \mbox{$f$} has only to model the resolution-dependent difference between the two solvers, not any change of phases. The match is close but not exact: the reference is CosmoGridV1's own lightcone, evolved from concept's forward linear input, whereas Disco-DJ starts from the backscaled load rebuilt here. Sec.~\ref{sec:shell_validation} measures what that leaves behind — a sub-percent, redshift-dependent offset in the large-scale amplitude. The requirement -- \emph{matched initial conditions, same output format} -- dictates the entire architecture of the pipeline (Figure~\ref{fig:pipeline_overview}), which consists of three stages:
 
 \begin{enumerate}
-  \item \textbf{Initial-condition generation} (Sec.~\ref{sec:ic_generation}). \textsc{CosmoGridV1} publishes its cosmologies and shell tables, but not initial conditions that \textsc{Disco-DJ} could consume directly. For every cosmology we therefore rebuild the exact linear input: the \emph{CDM+baryon} transfer function, extracted from the run's own stored \textsc{concept} perturbations, with a matched \textsc{class} solve supplying the derived radiation density. The table describes the CDM+baryon field rather than the total matter field, because the particles carry cold dark matter and baryons only and neutrinos never become particles. This does not discard the neutrinos: the table is extracted from a solve that contained them, so their free-streaming suppression of CDM+baryon growth is already imprinted on it, and their mass is separately retained in the background expansion both codes integrate (Sec.~\ref{sec:power_spectrum}).\textsc{PkdGrav3} then generates backscaled initial conditions from it, and the resulting particle state is handed to \textsc{Disco-DJ} unmodified. The residual difference between the two output maps is then dominated by the force solvers, which is precisely the difference \mbox{$f$} must learn.
+  \item \textbf{Initial-condition generation} (Sec.~\ref{sec:ic_generation}). \textsc{CosmoGridV1} publishes its cosmologies and shell tables, but not initial conditions that \textsc{Disco-DJ} could consume directly. For every cosmology we therefore rebuild the exact linear input: the \emph{CDM+baryon} transfer function, extracted from the \textsc{CosmoGridV1} run's stored \textsc{concept} perturbations, with a matched \textsc{class} solve supplying the derived radiation density. The table describes the CDM+baryon field rather than the total matter field, because the particles carry cold dark matter and baryons only and neutrinos never become particles. This does not discard the neutrinos: the table is extracted from a solve that contained them, so their free-streaming suppression of CDM+baryon growth is already imprinted on it, and their mass is separately retained in the background expansion both codes integrate (Sec.~\ref{sec:power_spectrum}).\textsc{PkdGrav3} then generates backscaled initial conditions from it, and the resulting particle state is handed to \textsc{Disco-DJ} unmodified. The residual difference between the two output maps is then dominated by the force solvers, which is precisely the difference \mbox{$f$} must learn.
   \item \textbf{Shell building} (Sec.~\ref{sec:shell_builder}). \textsc{CosmoGridV1} stores its lightcone as 69 HEALPix particle-count shells out to $z=3.5$ at $N_{\mathrm{side}}=2048$ \cite{kacprzak_cosmogridv1_2023}. \textsc{Disco-DJ}, however, ships only a restricted lightcone mode limited to the simulation box volume, far short of the \mbox{$z=3.5$} depth, which requires many periodic box replications (Sec.~\ref{sec:lightcones}). We therefore implemented a dedicated \emph{shell builder} inside \textsc{Disco-DJ}'s time integration (\texttt{shell\_builder/}) that reproduces \textsc{PkdGrav3}'s moving-lightcone crossing condition and \textsc{CosmoGridV1}'s shell binning exactly, so the low- and high-fidelity maps are defined shell-by-shell on identical radial bins.
   \item \textbf{Correction pipelines} (Sec.~\ref{sec:correction-pipelines}). On the resulting paired shells, three independent corrections $f$ are built and compared: a deterministic \emph{transfer-function} rescaling in harmonic space, a \emph{flow-matching U-Net} that transports each map patch from low to high fidelity, and an \emph{EDM diffusion} model that generates the missing small-scale residual from noise. All three are evaluated with the same shared statistics (per-shell and tomographic $C_\ell$, one-point moments, and weak-lensing convergence maps built from the corrected lightcone).
 \end{enumerate}
@@ -914,8 +970,6 @@ and the pair is kept only if its crossing radius falls inside the shell bounds,
 \end{equation}
 Surviving crossings are pixelised with the equal-area HEALPix \textsc{ring} scheme at resolution $N_{\mathrm{side}}$ from the unit vector $\hat{\mathbf{x}}_{\mathrm{cross}} = \mathbf{x}_{\mathrm{cross}}/r_{\mathrm{cross}}$, and the corresponding pixel of $\mathbf{M}_s^{(j)}$ is incremented. In the implementation, the loop over all active replicas runs inside a single JIT-compiled JAX kernel (\texttt{jax.lax.fori\_loop}), so the per-replica work is dispatched to the GPU as one program rather than from Python making it more efficient.
 
-
-
 This procedure reproduces \textsc{PkdGrav3}'s box-replication lightcone
 \cite{noauthor_examplepkdgrav3_lightcone_2022}. The replica set \mbox{$\mathcal{D}$}
 of Eq.~\eqref{eq:replica_set} is sized here from \mbox{$(\chi_{\max}, L)$} alone --- every
@@ -924,8 +978,7 @@ cannot meet a given step's annulus are rejected by Eq.~\eqref{eq:replica_bounds}
 (\texttt{shell\_builder/utils/compute\_replica\_offsets}) --- so the number of replicas
 never has to be set by hand.
 
-
-Together, Secs.~\ref{sec:ic_generation} and \ref{sec:shell_builder} deliver what the learning problem needs: for every cosmology, two lightcones on identical shells whose remaining difference is dominated by the force solver, the initial-condition residual sitting an order of magnitude below it (Sec.~\ref{sec:shell_validation}). The next section builds the corrections that close that difference.
+Together, Secs.~\ref{sec:ic_generation} and \ref{sec:shell_builder} deliver what the learning problem needs: for every cosmology, two lightcones on \new{matched initial conditions and} identical shells, whose remaining difference is dominated by the force solver (Sec.~\ref{sec:shell_validation}). The next section builds the corrections that close that difference.
 
 \clearpage
 \section{Correction Pipelines}
@@ -970,11 +1023,10 @@ distant shells stay within half a percent of unity across the whole measured ran
 What it does not say is whether multiplying by that factor is a legitimate way to supply it, and that is
 the second measurement. The per-multipole cross-correlation \cite{feng_fastpm_2016}
 \begin{equation}
-  r(\ell, s) \;=\; \frac{\big\langle C_\ell^{\mathrm{low}\times\mathrm{high}}\big\rangle}{\sqrt{\big\langle C_\ell^{\mathrm{low}}\big\rangle\,\big\langle C_\ell^{\mathrm{high}}\big\rangle}},
+  r(\ell, s) \;=\; \frac{ C_\ell^{\mathrm{low}\times\mathrm{high}}}{\sqrt{ C_\ell^{\mathrm{low}}\, C_\ell^{\mathrm{high}}}},
   \label{eq:phase_corr}
 \end{equation}
-where \mbox{$\langle\,\cdot\,\rangle$} denotes the average over the training runs at fixed \mbox{$(\ell, s)$} -- an average over the available realisations, not a theoretical ensemble average -- and \mbox{$C_\ell^{\mathrm{low}\times\mathrm{high}}$} is the cross-spectrum of the two maps of the same shell.
-computed across the training runs, measures whether the two maps put their structure in the same place. Over most of the lightcone they do: \mbox{$r$} stays between \mbox{$0.9$} and \mbox{$1.0$} out to high multipole.
+where  \mbox{$C_\ell^{\mathrm{low}\times\mathrm{high}}$} is the cross-spectrum of the two maps of the same shell, measures whether the two maps put their structure in the same place. Over most of the lightcone they do: \mbox{$r$} stays between \mbox{$0.9$} and \mbox{$1.0$} out to high multipole.
 
 \textsc{Disco-DJ} therefore mostly gets the small-scale \emph{amplitude} wrong rather than the \emph{positions} of the structures that carry it, which is why a pure amplitude rescaling (Sec.~\ref{subsec:pipe-transfer}) works at all. How well that works depends on how far \mbox{$r$} has fallen, and it degrades gradually rather than failing at a threshold: while the two maps still agree on where the structure is, multiplying the amplitude back restores that structure, but the further \mbox{$r$} drops the more the same multiplication amplifies \textsc{Disco-DJ}'s own noise instead.
 The distant shells are not better resolved --- the mesh limit applies at every redshift --- their deficit is simply smaller and pushed beyond the band the map represents, so the two regimes differ in the kind of error rather than in whether there is one. Where the phases have decorrelated, the missing structure has to be supplied rather than amplified: a field whose statistics match the reference even where its features cannot coincide with the truth pixel by pixel. That is what the two patch-based corrections deliver --- the flow of Sec.~\ref{subsec:pipe-unet-flow} by transporting each low-fidelity patch onto the high-fidelity distribution, the diffusion model of Sec.~\ref{subsec:pipe-diffusion} by drawing the residual from noise --- and it is why both can repair \mbox{$r$} where the transfer function structurally cannot.
@@ -1124,7 +1176,7 @@ which is algebraically identical to Eq.~\eqref{eq:transfer_def} for every \mbox{
 \label{fig:transfer_flow}
 \end{figure}
 
-\paragraph{Estimating $T$.} The estimator trains a small MLP emulator of $T$ on features $\big(\log_{10}(\ell{+}1),\ z,\ H_0,\ \Omega_{cdm},\ \Omega_b,\ \Omega_m, n_s,\ \sigma_8,\ \log_{10} C_\ell^{\mathrm{low}}\big)$, standardised per feature; this interpolates the transfer function to unseen cosmologies of the grid. The emulator is a plain feed-forward network (hidden layers $256$--$256$--$128$, ReLU, linear output) implemented in PyTorch and trained on GPU (Adam, learning rate $10^{-4}$, batch size $4096$, $L_2$ weight decay $\alpha = 10^{-4}$), with a 15\% held-out validation split, early stopping, and best-validation weights restored (\texttt{transfer\_function.py}). The GPU implementation matters for a reason worth recording: the training set is millions of \mbox{$(\ell, s)$} rows with only 9 features each, a workload where a CPU implementation is bound by per-batch overhead rather than arithmetic. A GPU handles exactly this trivial-per-sample, huge-throughput shape. Both estimators also store the phase correlation $R(\ell, s)$ of Eq.~\eqref{eq:phase_corr}.
+\paragraph{Estimating $T$.} The estimator trains a small MLP emulator of $T$ on features $\big(\log_{10}(\ell{+}1),\ z,\ H_0,\ \Omega_{cdm},\ \Omega_b,\ \\\Omega_m, n_s,\ \sigma_8,\ \log_{10} C_\ell^{\mathrm{low}}\big)$, standardised per feature; this interpolates the transfer function to unseen cosmologies of the grid. The emulator is a plain feed-forward network (hidden layers $256$--$256$--$128$, ReLU, linear output) implemented in PyTorch and trained on GPU (Adam, learning rate $10^{-4}$, batch size $4096$, $L_2$ weight decay $\alpha = 10^{-4}$), with a 15\% held-out validation split, early stopping, and best-validation weights restored (\texttt{transfer\_function.py}). The GPU implementation matters for a reason worth recording: the training set is millions of \mbox{$(\ell, s)$} rows with only 9 features each, a workload where a CPU implementation is bound by per-batch overhead rather than arithmetic. A GPU handles exactly this trivial-per-sample, huge-throughput shape. Both estimators also store the phase correlation $R(\ell, s)$ of Eq.~\eqref{eq:phase_corr}.
 
 \begin{figure}[h!]
     \centering
@@ -1990,7 +2042,7 @@ Second, the higher moments separate the harmonic rescaling from the two patch-ba
 
 Third, the flow is the strongest correction overall. It leads on every one of the three moments in both source bins, and it does so with the whole non-Gaussian signal essentially recovered rather than merely improved -- an excess kurtosis within \mbox{$2\%$} of the reference where the uncorrected lightcone retains barely half of it. The residual across all methods remains one-sided -- every correction undershoots, none overshoots -- so what is left is a small systematic deficit rather than added noise.
 
-The same picture holds in bin~4 with uniformly smaller gaps (flow \mbox{$0.992/0.992/0.983$}, diffusion \mbox{$0.986/0.963/0.906$}, transfer \mbox{$0.979/0.892/0.784$}), as expected: the distant shells are the ones \textsc{Disco-DJ} already gets nearly right, so less has to be repaired. Taken together the results suggest a division of labour rather than an outright winner. Where an analysis consumes two-point statistics, the transfer function delivers them to within a few percent for free, and is the pragmatic choice. Where it consumes the field -- which is the entire premise of map-level inference -- only a model trained to match the distribution supplies what is missing, and on this evidence the deterministic flow supplies almost all of it. It is worth noting that the better of the two is not the generative one: the diffusion model is the only pipeline here that genuinely samples, and it is outperformed on every moment by a flow that draws nothing at all. On this problem the decisive ingredient is the distribution-matching objective together with a starting point that already carries the correct large scales, not stochasticity.
+The same picture holds in bin~4 with uniformly smaller gaps (flow \mbox{$0.992/0.992/0.983$}, diffusion \mbox{$0.986/0.963/\\0.906$}, transfer \mbox{$0.979/0.892/0.784$}), as expected: the distant shells are the ones \textsc{Disco-DJ} already gets nearly right, so less has to be repaired. Taken together the results suggest a division of labour rather than an outright winner. Where an analysis consumes two-point statistics, the transfer function delivers them to within a few percent for free, and is the pragmatic choice. Where it consumes the field -- which is the entire premise of map-level inference -- only a model trained to match the distribution supplies what is missing, and on this evidence the deterministic flow supplies almost all of it. It is worth noting that the better of the two is not the generative one: the diffusion model is the only pipeline here that genuinely samples, and it is outperformed on every moment by a flow that draws nothing at all. On this problem the decisive ingredient is the distribution-matching objective together with a starting point that already carries the correct large scales, not stochasticity.
 
 
 \chapter{Conclusion}
@@ -2207,8 +2259,7 @@ The shell builder is not distributed as a separate package: it is implemented in
 \textsc{Disco-DJ}'s time integration and versioned with the rest of the project, in
 \texttt{shell\_builder/}. The \textsc{Disco-DJ} base it extends
 \cite{hahn_disco-dj_2024, list_disco-dj_2026} is a private, project-internal copy and is not
-published alongside this thesis; \texttt{masterProject} is the only repository made public
-here.
+published alongside this thesis; \texttt{masterProject} is the only repository made public here.
 
 Simulation outputs are not in the repository. The \textsc{CosmoGridV1} reference suite is
 public and documented by \citeauthor{kacprzak_cosmogridv1_2023}
