@@ -25,7 +25,8 @@ Two things the figure has to say honestly at once:
       replicas surviving the reject of Eq. replica_bounds. Integrated, the two are
       comparable: building the lightcone is not a free by-product of the integration.
 
-  (b) These internal timers cover only ~44% of the run. The rest is framework
+  (b) These internal timers cover only ~58% of the run (the figure prints the
+      exact figure as "% accounted"). The rest is framework
       overhead and untimed host work between the timed regions. Panel (b) therefore
       shows the FULL per-cosmology budget, so the timed kernels are never mistaken
       for the whole cost. Reported production cost is the full budget, not the sum
