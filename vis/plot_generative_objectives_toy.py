@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Toy illustration: why per-pixel MSE regression, flow matching, and
 diffusion behave differently on the same one-to-many correction problem.
 
@@ -49,8 +48,11 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-FS_AXIS, FS_LEGEND = 13, 9.5
-NOTE_KW = dict(fontsize=9.5, color="#555555",
+FS_AXIS, FS_LEGEND = 16.5, 13
+FS_TICK = FS_AXIS
+LABEL_PAD = 11
+TITLE_PAD = 14
+NOTE_KW = dict(fontsize=15, color="#555555",
                bbox=dict(fc="white", ec="#C9CEDC", lw=0.8,
                          boxstyle="round,pad=0.34", alpha=0.95))
 C_A, C_B = "#B85F34", "#3F63A6"
@@ -75,26 +77,20 @@ def panel_mse(ax, x1):
     mean_pred = x1.mean()
     ax.axvline(mean_pred, color=C_A, lw=2.0, ls="--", alpha=0.55, zorder=1,
                label=fr"MSE-optimal $f^*(x_0)=\mathbb{{E}}[x_1|x_0]={mean_pred:.2f}$")
-    ax.scatter([mean_pred], [0], color=C_A, s=90, zorder=5, marker="D",
+    ax.scatter([mean_pred], [0], color=C_A, s=70, zorder=5, marker="D",
                label="MSE prediction (wrong)")
-    # no leader line: it sat directly on top of the dashed MSE line and read as
-    # a second, solid orange line
-    ax.text(mean_pred, 0.30, "lands in a valley\nof near-zero true density",
-            ha="center", va="bottom", fontsize=10.5, color=C_A, zorder=6)
-    # the two TRUE possible answers -- either is right, their average is not --
-    # placed clearly BELOW the histogram baseline so the markers don't sit
-    # inside the bars' own footprint at y=0
     for mode_x, col in ((-2.0, C_MODE1), (2.0, C_MODE2)):
-        ax.scatter([mode_x], [-0.028], color=col, s=90, zorder=5, marker="D",
+        ax.scatter([mode_x], [0], color=col, s=90, zorder=5, marker="D",
                    edgecolor="white", lw=0.8, clip_on=False)
-    ax.text(-2.0, -0.075, "a true answer", color=C_MODE1, fontsize=9, ha="center", va="top")
-    ax.text(2.0, -0.075, "another true answer", color=C_MODE2, fontsize=9, ha="center", va="top")
-    ax.set_xlabel(r"small-scale value $x_1$", fontsize=FS_AXIS)
-    ax.set_ylabel("probability density", fontsize=FS_AXIS)
-    ax.set_title("(a)  per-pixel MSE $\\Rightarrow$ one smoothed point,\nzero predicted variance",
-                 fontsize=FS_AXIS, loc="left")
+    ax.text(-2.0, -0.03, "a true answer", color=C_MODE1, fontsize=15, ha="center", va="top")
+    ax.text(2.0, -0.03, "another true answer", color=C_MODE2, fontsize=15, ha="center", va="top")
+    ax.set_xlabel(r"small-scale value $x_1$", fontsize=FS_AXIS, labelpad=LABEL_PAD)
+    ax.set_ylabel("probability density", fontsize=FS_AXIS, labelpad=LABEL_PAD)
+    ax.tick_params(axis="both", labelsize=FS_TICK)
+    ax.set_title("(a)  per-pixel MSE",
+                 fontsize=FS_AXIS, loc="left", pad=TITLE_PAD)
     ax.set_xlim(-4, 4); ax.set_ylim(-0.10, 0.55)
-    ax.legend(fontsize=FS_LEGEND, loc="upper left", framealpha=0.97)
+    #ax.legend(fontsize=FS_AXIS, loc="upper left", framealpha=0.97)
     ax.grid(alpha=0.2, lw=0.5); ax.set_axisbelow(True)
 
 
@@ -135,14 +131,11 @@ def panel_flow(ax, rng, x1, N):
         ax.scatter([1], [xs[-1]], color=col, s=95, zorder=5, marker="D", edgecolor="white", lw=0.8)
 
     ax.axvline(1.0, color="#cccccc", lw=0.8, ls=":", zorder=0)
-    ax.text(0.02, -4.15, r"$t=0$: nearly the" + "\nsame input $x_0$",
-            ha="left", va="bottom", zorder=7, **NOTE_KW)
-    ax.text(0.99, -4.15, r"$t=1$: resolves onto" + "\nthe true modes",
-            ha="right", va="bottom", zorder=7, **NOTE_KW)
-    ax.set_xlabel(r"flow time $t$", fontsize=FS_AXIS)
-    ax.set_ylabel(r"$x_t = (1-t)x_0 + t\,x_1$", fontsize=FS_AXIS)
-    ax.set_title("(b)  flow matching $\\Rightarrow$ transports the\nwhole distribution, mode by mode",
-                 fontsize=FS_AXIS, loc="left")
+    ax.set_xlabel(r"flow time $t$", fontsize=FS_AXIS, labelpad=LABEL_PAD)
+    ax.set_ylabel(r"$x_t = (1-t)x_0 + t\,x_1$", fontsize=FS_AXIS, labelpad=LABEL_PAD)
+    ax.tick_params(axis="both", labelsize=FS_TICK)
+    ax.set_title("(b)  flow-matching ",
+                 fontsize=FS_AXIS, loc="left", pad=TITLE_PAD)
     ax.set_xlim(-0.03, 1.05); ax.set_ylim(-4.35, 3.75)
     ax.grid(alpha=0.2, lw=0.5); ax.set_axisbelow(True)
 
@@ -201,14 +194,11 @@ def panel_diffusion(ax, rng, x1, N):
                    edgecolor="white", lw=0.8)
 
     ax.axvline(1.0, color="#cccccc", lw=0.8, ls=":", zorder=0)
-    ax.text(-0.07, -5.35, "$t=0$: one broad noisy\nhump, no info about $x_0$",
-            ha="left", va="bottom", zorder=7, **NOTE_KW)
-    ax.text(1.07, -5.35, "$t=1$: the DISTRIBUTION\nitself resolves into $p(x_1)$",
-            ha="right", va="bottom", zorder=7, **NOTE_KW)
-    ax.set_xlabel(r"diffusion step (noise level $\sigma$ decreasing)", fontsize=FS_AXIS)
-    ax.set_ylabel(r"$x$", fontsize=FS_AXIS)
-    ax.set_title("(c)  diffusion $\\Rightarrow$ denoise the whole\ndistribution, step by step (no field)",
-                 fontsize=FS_AXIS, loc="left")
+    ax.set_xlabel(r"diffusion step (noise level $\sigma$ decreasing)", fontsize=FS_AXIS, labelpad=LABEL_PAD)
+    ax.set_ylabel(r"$x$", fontsize=FS_AXIS, labelpad=LABEL_PAD)
+    ax.tick_params(axis="both", labelsize=FS_TICK)
+    ax.set_title("(c)  diffusion",
+                 fontsize=FS_AXIS, loc="left", pad=TITLE_PAD)
     ax.set_xlim(-0.09, 1.09); ax.set_ylim(-5.55, 4.9)
     ax.grid(alpha=0.2, lw=0.5); ax.set_axisbelow(True)
 
@@ -231,7 +221,7 @@ def main():
     panel_mse(axA, x1)
     panel_flow(axB, rng, x1, a.n_samples)
     panel_diffusion(axC, rng, x1, a.n_samples)
-    fig.tight_layout()
+    fig.tight_layout(pad=1.4, w_pad=1.8, h_pad=1.6)
 
     out = out_dir / "generative_objectives_toy.png"
     fig.savefig(out, dpi=190, bbox_inches="tight"); plt.close(fig)
